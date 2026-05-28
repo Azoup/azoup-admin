@@ -1,6 +1,6 @@
 import { Image, type ImageStyle, StyleSheet, View, type ViewStyle } from 'react-native';
 
-const logoSource = require('@/favicon-512.png');
+const logoSource = require('../assets/images/azoup-logo.png');
 
 type AzoupLogoProps = {
   size?: number;
@@ -8,7 +8,7 @@ type AzoupLogoProps = {
   imageStyle?: ImageStyle;
 };
 
-/** Logo Azoup (favicon-512) para login, cabeçalhos e telas do painel. */
+/** Logo Azoup para login, cabeçalhos e telas do painel. */
 export function AzoupLogo({ size = 72, style, imageStyle }: AzoupLogoProps) {
   return (
     <View style={[styles.wrap, style]}>

@@ -4,7 +4,7 @@
     "slug": "painel_adm",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./favicon-512.png",
+    "icon": "./assets/images/azoup-logo.png",
     "scheme": "paineladm",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -27,7 +27,7 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./favicon-512.png"
+      "favicon": "./assets/images/azoup-logo.png"
     },
     "plugins": [
       "expo-router"
