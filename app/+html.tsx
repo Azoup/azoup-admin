@@ -11,6 +11,10 @@ export default function Root({ children }: { children: React.ReactNode }) {
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/favicon-512.png" />
+        <link rel="icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" href="/favicon-512.png" />
+        <meta name="theme-color" content="#FF7A1A" />
 
         {/* 
           Disable body scrolling on web. This makes ScrollView components work closer to how they do on native. 

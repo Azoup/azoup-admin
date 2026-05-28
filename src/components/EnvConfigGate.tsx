@@ -1,6 +1,7 @@
 import React from 'react';
 import { Platform, ScrollView, StyleSheet, Text } from 'react-native';
 
+import { AzoupLogo } from '@/components/AzoupLogo';
 import { getEnvSetupMessage, isEnvConfigured } from '@/src/lib/env';
 import { ui } from '@/src/theme/ui';
 
@@ -11,6 +12,7 @@ export function EnvConfigGate({ children }: { children: React.ReactNode }) {
 
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
+      <AzoupLogo size={80} style={styles.logo} />
       <Text style={styles.title}>Configuração incompleta</Text>
       <Text style={styles.body}>{getEnvSetupMessage()}</Text>
       <Text style={styles.body}>
@@ -35,6 +37,7 @@ const styles = StyleSheet.create({
     backgroundColor: ui.bg,
     gap: 12,
   },
+  logo: { marginBottom: 8 },
   title: { fontSize: 22, fontWeight: '800', color: ui.navy },
   body: { fontSize: 15, lineHeight: 22, color: ui.text },
   hint: { fontSize: 14, lineHeight: 20, color: ui.muted, marginTop: 8 },

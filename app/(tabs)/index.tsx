@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { RefreshControl, ScrollView, StyleSheet } from 'react-native';
 
+import { AzoupLogo } from '@/components/AzoupLogo';
 import { Text, View } from '@/components/Themed';
 import { carregarMetricasDashboard } from '@/src/services/repos/metrics-repo';
 import { ui } from '@/src/theme/ui';
@@ -16,7 +17,10 @@ export default function DashboardScreen() {
     <ScrollView
       contentContainerStyle={styles.wrap}
       refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />}>
-      <Text style={styles.title}>Painel Administrativo</Text>
+      <View style={styles.header}>
+        <AzoupLogo size={44} />
+        <Text style={styles.title}>Painel Administrativo</Text>
+      </View>
       <Text style={styles.sub}>Métricas consolidadas de clientes, assinaturas e consumo de IA.</Text>
 
       {isLoading ? <Text>Carregando métricas…</Text> : null}
@@ -57,7 +61,8 @@ function Kpi({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   wrap: { padding: 16, gap: 12, paddingBottom: 40, backgroundColor: ui.bg },
-  title: { fontSize: 26, fontWeight: '900', color: ui.navy },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  title: { flex: 1, fontSize: 26, fontWeight: '900', color: ui.navy },
   sub: { color: ui.muted, lineHeight: 20 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   kpi: {

@@ -3,6 +3,7 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Redirect, Tabs } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
+import { AzoupLogo } from '@/components/AzoupLogo';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
@@ -51,6 +52,7 @@ export default function TabLayout() {
         },
         tabBarLabelStyle: { fontWeight: '700', fontSize: 12 },
         headerShown,
+        headerTitle: () => <AzoupLogo size={32} />,
       }}>
       <Tabs.Screen
         name="index"

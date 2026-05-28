@@ -2,6 +2,7 @@ import { Link, router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput } from 'react-native';
 
+import { AzoupLogo } from '@/components/AzoupLogo';
 import { Text, View } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { ui } from '@/src/theme/ui';
@@ -38,6 +39,7 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.wrap}>
       <View style={styles.card}>
+        <AzoupLogo size={88} style={styles.logo} />
         <Text style={styles.title}>Painel Administrativo Azoup</Text>
         <Text style={styles.sub}>Entre com uma conta ativa cadastrada em `admin_users`.</Text>
 
@@ -75,6 +77,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: ui.bg },
+  logo: { marginBottom: 4 },
   card: {
     gap: 12,
     backgroundColor: ui.card,

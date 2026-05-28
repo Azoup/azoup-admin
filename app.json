@@ -4,7 +4,7 @@
     "slug": "painel_adm",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./favicon-512.png",
     "scheme": "paineladm",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -27,7 +27,7 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./favicon-512.png"
     },
     "plugins": [
       "expo-router"
