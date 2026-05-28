@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
+import { EnvConfigGate } from '@/src/components/EnvConfigGate';
 import { AppProviders } from '@/src/providers/AppProviders';
 import { ui } from '@/src/theme/ui';
 
@@ -39,9 +40,11 @@ export default function RootLayout() {
   }
 
   return (
-    <AppProviders>
-      <RootLayoutNav />
-    </AppProviders>
+    <EnvConfigGate>
+      <AppProviders>
+        <RootLayoutNav />
+      </AppProviders>
+    </EnvConfigGate>
   );
 }
 
