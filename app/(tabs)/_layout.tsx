@@ -18,7 +18,7 @@ function TabBarIcon(props: {
 
 export default function TabLayout() {
   const { theme } = useTheme();
-  const { session, adminProfile, loading, canManageAdmins } = useAdminAuth();
+  const { session, adminProfile, loading, canAccessScreen } = useAdminAuth();
   const headerShown = useClientOnlyValue(false, true);
 
   const screenOptions = useMemo(
@@ -68,6 +68,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Painel',
+          href: canAccessScreen('dashboard') ? undefined : null,
           tabBarIcon: ({ color }) => <TabBarIcon name="dashboard" color={color} />,
         }}
       />
@@ -75,6 +76,7 @@ export default function TabLayout() {
         name="clients"
         options={{
           title: 'Clientes',
+          href: canAccessScreen('clients') ? undefined : null,
           tabBarIcon: ({ color }) => <TabBarIcon name="users" color={color} />,
           headerShown: false,
         }}
@@ -83,6 +85,7 @@ export default function TabLayout() {
         name="billing"
         options={{
           title: 'Cobrança',
+          href: canAccessScreen('billing') ? undefined : null,
           tabBarIcon: ({ color }) => <TabBarIcon name="credit-card" color={color} />,
           headerShown: false,
         }}
@@ -91,6 +94,7 @@ export default function TabLayout() {
         name="audit"
         options={{
           title: 'Auditoria',
+          href: canAccessScreen('audit') ? undefined : null,
           tabBarIcon: ({ color }) => <TabBarIcon name="history" color={color} />,
         }}
       />
@@ -98,7 +102,7 @@ export default function TabLayout() {
         name="admins"
         options={{
           title: 'Acessos',
-          href: canManageAdmins ? undefined : null,
+          href: canAccessScreen('admins') ? undefined : null,
           tabBarIcon: ({ color }) => <TabBarIcon name="shield" color={color} />,
         }}
       />

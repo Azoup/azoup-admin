@@ -7,6 +7,15 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+const ADMIN_SCREEN_KEYS = ['dashboard', 'clients', 'billing', 'audit', 'admins'] as const;
+
+function normalizarTelasAcesso(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((t) => `${t}`.trim())
+    .filter((t) => (ADMIN_SCREEN_KEYS as readonly string[]).includes(t));
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -57,7 +66,7 @@ serve(async (req) => {
 
     const { data: adminRow, error: adminErr } = await supabaseAdmin
       .from('admin_users')
-      .select('id,role,active,email')
+      .select('id,role,active,email,telas_acesso')
       .ilike('email', `${user.email ?? ''}`.trim())
       .eq('active', true)
       .maybeSingle();
@@ -73,6 +82,33 @@ serve(async (req) => {
 
     if (body.op === 'get_admin_profile') {
       return new Response(JSON.stringify({ admin_profile: adminRow }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (body.op === 'register_audit_log') {
+      const p = body.payload ?? {};
+      const action = `${p.acao ?? p.action ?? ''}`.trim();
+      if (!action) throw new Error('acao/action obrigatório');
+
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from('admin_audit_logs')
+        .insert({
+          action,
+          target_type: p.entidade ?? p.target_type ?? null,
+          target_id: p.entidade_id != null ? String(p.entidade_id) : p.target_id != null ? String(p.target_id) : null,
+          admin_email: user.email ?? null,
+          payload: {
+            valores_anteriores: p.valores_anteriores ?? p.old_values ?? null,
+            valores_novos: p.valores_novos ?? p.new_values ?? null,
+          },
+        } as never)
+        .select('id')
+        .single();
+
+      if (insErr) throw insErr;
+
+      return new Response(JSON.stringify({ ok: true, id: inserted?.id ?? null }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -170,7 +206,7 @@ serve(async (req) => {
       }
       const { data: admins, error: listErr } = await supabaseAdmin
         .from('admin_users')
-        .select('id,email,role,active,created_at,updated_at')
+        .select('id,email,role,active,telas_acesso,created_at,updated_at')
         .order('created_at', { ascending: false });
       if (listErr) throw listErr;
       return new Response(JSON.stringify({ admins: admins ?? [] }), {
@@ -196,6 +232,12 @@ serve(async (req) => {
       if (!['owner', 'manager', 'viewer'].includes(role)) throw new Error('role inválido');
       if (password.length < 6) throw new Error('password deve ter ao menos 6 caracteres');
 
+      const telas_acesso = normalizarTelasAcesso(p.telas_acesso);
+      if (telas_acesso.length === 0) throw new Error('Selecione ao menos uma tela');
+      if (telas_acesso.includes('admins') && role !== 'owner') {
+        throw new Error('A tela Acessos só pode ser liberada para perfil owner');
+      }
+
       const { error: authErr } = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
@@ -213,17 +255,68 @@ serve(async (req) => {
             email,
             role,
             active,
+            telas_acesso,
             created_by_admin: user.email ?? null,
             updated_at: new Date().toISOString(),
           } as never,
           { onConflict: 'email' },
         )
-        .select('id,email,role,active,created_at,updated_at')
+        .select('id,email,role,active,telas_acesso,created_at,updated_at')
         .single();
 
       if (adminUpsertErr) throw adminUpsertErr;
 
       return new Response(JSON.stringify({ admin: adminUpsert }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (body.op === 'update_admin_user') {
+      if (`${adminRow.role}` !== 'owner') {
+        return new Response(JSON.stringify({ error: 'Permissão negada' }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const p = body.payload ?? {};
+      const id = `${p.id ?? ''}`.trim();
+      const role = `${p.role ?? ''}`.trim() as 'owner' | 'manager' | 'viewer';
+      const active = Boolean(p.active ?? true);
+
+      if (!id) throw new Error('id obrigatório');
+      if (!['owner', 'manager', 'viewer'].includes(role)) throw new Error('role inválido');
+
+      const telas_acesso = normalizarTelasAcesso(p.telas_acesso);
+      if (telas_acesso.length === 0) throw new Error('Selecione ao menos uma tela');
+      if (telas_acesso.includes('admins') && role !== 'owner') {
+        throw new Error('A tela Acessos só pode ser liberada para perfil owner');
+      }
+
+      const { data: alvo, error: alvoErr } = await supabaseAdmin
+        .from('admin_users')
+        .select('id,email,role')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (alvoErr) throw alvoErr;
+      if (!alvo) throw new Error('Admin não encontrado');
+
+      const { data: atualizado, error: updErr } = await supabaseAdmin
+        .from('admin_users')
+        .update({
+          role,
+          active,
+          telas_acesso,
+          updated_at: new Date().toISOString(),
+        } as never)
+        .eq('id', id)
+        .select('id,email,role,active,telas_acesso,created_at,updated_at')
+        .single();
+
+      if (updErr) throw updErr;
+
+      return new Response(JSON.stringify({ admin: atualizado }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

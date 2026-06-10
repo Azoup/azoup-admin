@@ -1,9 +1,11 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 
+import type { AdminScreenKey } from '@/src/constants/admin-screens';
 import { supabase } from '@/src/lib/supabase';
 import { obterAdminProfileViaFunction } from '@/src/services/stripe-admin-api';
 import type { AdminPapel, AdminUserRow } from '@/src/types/azoup';
+import { podeAcessarTelaAdmin, telasEfetivasAdmin } from '@/src/utils/admin-permissions';
 
 type AdminAuthState = {
   session: Session | null;
@@ -18,6 +20,8 @@ type AdminAuthState = {
   canManageBilling: boolean;
   canManageAdmins: boolean;
   canViewAudit: boolean;
+  telasPermitidas: AdminScreenKey[];
+  canAccessScreen: (tela: AdminScreenKey) => boolean;
 };
 
 const AdminAuthContext = createContext<AdminAuthState | undefined>(undefined);
@@ -25,12 +29,15 @@ const AdminAuthContext = createContext<AdminAuthState | undefined>(undefined);
 /** Eventos do Supabase ao voltar para a aba — não devem refazer validação nem spinner. */
 const AUTH_EVENTS_SEM_RELOAD = new Set(['TOKEN_REFRESHED', 'USER_UPDATED', 'INITIAL_SESSION']);
 
-function derivePermissions(papel: AdminPapel | null) {
+function derivePermissions(papel: AdminPapel | null, profile: AdminUserRow | null) {
+  const canScreen = (tela: AdminScreenKey) => podeAcessarTelaAdmin(tela, profile, papel);
   return {
-    canEditLimits: papel === 'owner' || papel === 'manager',
-    canManageBilling: papel === 'owner' || papel === 'manager',
-    canManageAdmins: papel === 'owner',
-    canViewAudit: papel === 'owner' || papel === 'manager' || papel === 'viewer',
+    canEditLimits: canScreen('clients') && (papel === 'owner' || papel === 'manager'),
+    canManageBilling: canScreen('billing') && (papel === 'owner' || papel === 'manager'),
+    canManageAdmins: canScreen('admins') && papel === 'owner',
+    canViewAudit: canScreen('audit'),
+    telasPermitidas: telasEfetivasAdmin(profile, papel),
+    canAccessScreen: canScreen,
   };
 }
 
@@ -222,7 +229,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const papel = (adminProfile?.role ?? adminProfile?.papel ?? null) as AdminPapel | null;
-  const perms = derivePermissions(papel);
+  const perms = derivePermissions(papel, adminProfile);
 
   const loading =
     sessionLoading || (Boolean(session?.user?.id) && adminLoading && !adminProfile);
@@ -238,7 +245,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       papel,
       ...perms,
     }),
-    [session, adminProfile, loading, adminError, signIn, signOut, papel],
+    [session, adminProfile, loading, adminError, signIn, signOut, papel, perms],
   );
 
   return <AdminAuthContext.Provider value={value}>{children}</AdminAuthContext.Provider>;

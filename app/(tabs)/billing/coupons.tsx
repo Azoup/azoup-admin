@@ -84,7 +84,7 @@ export default function CouponsScreen() {
         criado_por_admin_id: adminProfile?.id,
       });
 
-      await registrarAuditoria(adminProfile?.id, {
+      await registrarAuditoria({ id: adminProfile?.id, email: adminProfile?.email }, {
         acao: 'STRIPE_COUPON_CREATE',
         entidade: 'admin_coupons',
         entidade_id: dbRow.id,

@@ -88,6 +88,10 @@ export default function ClientsListScreen() {
                     <View style={{ flex: 1, gap: 4 }}>
                       <Text style={[styles.rowTitle, { color: theme.headerText }]}>{nome}</Text>
                       <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+                        Matriz: {item.empresa_matriz_nome ?? '—'}
+                        {item.empresa_matriz_cnpj ? ` · ${item.empresa_matriz_cnpj}` : ''}
+                      </Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 13 }}>
                         {item.email ?? '—'} · {item.telefone ?? item.celular ?? '—'}
                       </Text>
                       <Text style={{ color: theme.textMuted, fontSize: 13 }}>

@@ -17,9 +17,9 @@ import { useTheme } from '@/src/contexts/ThemeContext';
 import { registrarAuditoria } from '@/src/services/audit';
 import {
   montarVisaoCliente,
+  parseLimitesFormulario,
   resolverLimitesEfetivos,
   upsertLimitesOverride,
-  type LimitesEffectivos,
 } from '@/src/services/repos/clientes-repo';
 import { obterAssinaturaStripe } from '@/src/services/stripe-admin-api';
 import { rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
@@ -49,40 +49,21 @@ export default function ClientDetailScreen() {
   const [saveHint, setSaveHint] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!data) return;
-    const a = data.assinatura;
-    setLimU(
-      a?.usuarios_adicionais != null
-        ? String(a.usuarios_adicionais)
-        : a?.usuarios_extras != null
-          ? String(a.usuarios_extras)
-          : '',
-    );
-    setLimE(
-      a?.empresas_adicionais != null
-        ? String(a.empresas_adicionais)
-        : a?.empresas_extras != null
-          ? String(a.empresas_extras)
-          : '',
-    );
-    setLimS(efetivos?.armazenamento_gb != null ? String(efetivos.armazenamento_gb) : '');
-  }, [data, efetivos?.armazenamento_gb]);
-
-  useEffect(() => {
+    setLimU('');
+    setLimE('');
+    setLimS('');
     setLimT('');
     setMotivo('');
+    setSaveHint(null);
   }, [id]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       setSaveHint(null);
-      const valores: LimitesEffectivos = {
-        usuarios: limU === '' ? null : Number(limU),
-        empresas: limE === '' ? null : Number(limE),
-        armazenamento_gb: limS === '' ? null : Number(limS),
-        tokens_ia_mes: limT === '' ? null : Number(limT),
-      };
-      const anterior = data?.limites_override ?? null;
+      const valores = parseLimitesFormulario(limU, limE, limS, limT);
+      const anteriorAssinatura = data?.assinatura as unknown as Record<string, unknown> | null;
+      const anteriorOverride = data?.limites_override as unknown as Record<string, unknown> | null;
+
       const { novo, persistidoEmAssinaturaCliente, assinaturaAtualizada } = await upsertLimitesOverride({
         clienteId: id,
         adminUserId: adminProfile?.id,
@@ -90,28 +71,60 @@ export default function ClientDetailScreen() {
         motivo: motivo || undefined,
       });
 
-      const audit = await registrarAuditoria(adminProfile?.id, {
-        acao: 'LIMITES_OVERRIDE_UPSERT',
-        entidade: persistidoEmAssinaturaCliente ? 'assinaturas_clientes' : 'assinatura_limites_override',
-        entidade_id: persistidoEmAssinaturaCliente ? String(assinaturaAtualizada?.id ?? id) : id,
-        valores_anteriores: persistidoEmAssinaturaCliente
-          ? ((data?.assinatura as unknown as Record<string, unknown> | null) ?? {})
-          : ((anterior as Record<string, unknown> | null) ?? {}),
-        valores_novos: persistidoEmAssinaturaCliente
-          ? ((assinaturaAtualizada as unknown as Record<string, unknown> | null) ?? {})
-          : ((novo as Record<string, unknown> | null) ?? {}),
-      });
+      const auditAntes: Record<string, unknown> = {};
+      const auditDepois: Record<string, unknown> = {};
+      if (valores.usuarios !== null) {
+        auditAntes.usuarios_adicionais = anteriorAssinatura?.usuarios_adicionais ?? anteriorAssinatura?.usuarios_extras ?? null;
+        auditDepois.usuarios_adicionais = assinaturaAtualizada?.usuarios_adicionais ?? valores.usuarios;
+      }
+      if (valores.empresas !== null) {
+        auditAntes.empresas_adicionais = anteriorAssinatura?.empresas_adicionais ?? anteriorAssinatura?.empresas_extras ?? null;
+        auditDepois.empresas_adicionais = assinaturaAtualizada?.empresas_adicionais ?? valores.empresas;
+      }
+      if (valores.tokens_ia_mes !== null) {
+        auditAntes.credito_ia_extra = anteriorAssinatura?.credito_ia_extra ?? null;
+        auditDepois.credito_ia_extra = assinaturaAtualizada?.credito_ia_extra ?? null;
+        auditDepois.credito_ia_extra_incremento = valores.tokens_ia_mes;
+      }
+      if (valores.armazenamento_gb !== null) {
+        auditAntes.armazenamento_gb_override =
+          anteriorOverride?.armazenamento_gb_override ?? anteriorOverride?.limite_armazenamento_gb ?? null;
+        auditDepois.armazenamento_gb_override =
+          novo?.armazenamento_gb_override ?? novo?.limite_armazenamento_gb ?? valores.armazenamento_gb;
+      }
+
+      const audit = await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'LIMITES_OVERRIDE_UPSERT',
+          entidade:
+            persistidoEmAssinaturaCliente && valores.armazenamento_gb !== null
+              ? 'assinaturas_clientes+override'
+              : persistidoEmAssinaturaCliente
+                ? 'assinaturas_clientes'
+                : 'assinatura_limites_override',
+          entidade_id: String(assinaturaAtualizada?.id ?? novo?.id ?? id),
+          valores_anteriores: auditAntes,
+          valores_novos: auditDepois,
+        },
+      );
 
       return { novo, persistidoEmAssinaturaCliente, audit };
     },
     onSuccess: async (result) => {
+      setLimU('');
+      setLimE('');
+      setLimS('');
       setLimT('');
+      setMotivo('');
       if (result?.audit && !result.audit.ok && result.audit.reason === 'rls') {
         setSaveHint(
-          'Créditos/limites salvos. O log de auditoria não foi gravado (permissão RLS em admin_audit_logs) — aplique supabase/sql/admin_audit_logs_rls.sql no Supabase.',
+          'Créditos/limites salvos. O log de auditoria não foi gravado (RLS) — execute supabase/sql/admin_audit_logs_rls.sql no Supabase e faça deploy de admin-stripe.',
         );
       } else if (result?.audit && !result.audit.ok) {
-        setSaveHint('Alteração salva. O log de auditoria não foi gravado (schema da tabela).');
+        setSaveHint(
+          `Alteração salva. O log de auditoria não foi gravado (${result.audit.reason}). Execute supabase/sql/admin_audit_logs_rls.sql no Supabase.`,
+        );
       } else {
         setSaveHint('Alteração salva com sucesso.');
       }
@@ -257,21 +270,24 @@ export default function ClientDetailScreen() {
 
       <ScreenCard>
         <SectionTitle>Personalização de limites</SectionTitle>
+        <Text style={{ color: theme.textMuted, fontSize: 13, marginBottom: 8 }}>
+          Campos começam vazios. Preencha só o que deseja alterar — o restante permanece igual no banco.
+        </Text>
         {!canEditLimits ? (
           <Text style={{ color: theme.warning, fontWeight: '600' }}>Seu papel não permite edição.</Text>
         ) : (
           <>
-            <FormField label="Usuários adicionais" helper="Valor absoluto na assinatura; vazio = não alterar">
-              <FormInput keyboardType="number-pad" value={limU} onChangeText={setLimU} />
+            <FormField label="Usuários adicionais" helper="Vazio = não alterar · preenchido = novo total na assinatura">
+              <FormInput keyboardType="number-pad" value={limU} onChangeText={setLimU} placeholder="—" />
             </FormField>
-            <FormField label="Empresas adicionais" helper="Valor absoluto na assinatura; vazio = não alterar">
-              <FormInput keyboardType="number-pad" value={limE} onChangeText={setLimE} />
+            <FormField label="Empresas adicionais" helper="Vazio = não alterar · preenchido = novo total na assinatura">
+              <FormInput keyboardType="number-pad" value={limE} onChangeText={setLimE} placeholder="—" />
             </FormField>
-            <FormField label="Armazenamento (GB)">
-              <FormInput keyboardType="decimal-pad" value={limS} onChangeText={setLimS} />
+            <FormField label="Armazenamento (GB)" helper="Vazio = não alterar · preenchido = novo limite administrativo">
+              <FormInput keyboardType="decimal-pad" value={limS} onChangeText={setLimS} placeholder="—" />
             </FormField>
-            <FormField label="Créditos IA extra" helper="Soma em credito_ia_extra; vazio = não alterar">
-              <FormInput keyboardType="number-pad" value={limT} onChangeText={setLimT} />
+            <FormField label="Créditos IA extra" helper="Vazio = não alterar · preenchido = soma ao saldo extra atual">
+              <FormInput keyboardType="number-pad" value={limT} onChangeText={setLimT} placeholder="—" />
             </FormField>
             <FormField label="Motivo (auditoria)">
               <FormInput value={motivo} onChangeText={setMotivo} />

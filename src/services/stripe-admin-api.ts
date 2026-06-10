@@ -29,6 +29,7 @@ export type AdminAccessPayload = {
   role: 'owner' | 'manager' | 'viewer';
   active: boolean;
   password: string;
+  telas_acesso: string[];
 };
 
 async function authorizedHeaders(): Promise<HeadersInit> {
@@ -89,6 +90,17 @@ export async function criarAdminLoginViaFunction(payload: AdminAccessPayload) {
   return invoke<{ admin: Record<string, unknown> }>('create_admin_login', payload);
 }
 
+export type UpdateAdminPayload = {
+  id: string;
+  role: 'owner' | 'manager' | 'viewer';
+  active: boolean;
+  telas_acesso: string[];
+};
+
+export async function atualizarAdminViaFunction(payload: UpdateAdminPayload) {
+  return invoke<{ admin: Record<string, unknown> }>('update_admin_user', payload);
+}
+
 export type ClienteMetricasPayload = {
   cliente_id: string;
 };
@@ -106,4 +118,16 @@ export type ClienteMetricasResponse = {
 
 export async function obterMetricasClienteViaFunction(payload: ClienteMetricasPayload) {
   return invoke<ClienteMetricasResponse>('get_cliente_metricas', payload);
+}
+
+export type RegisterAuditLogPayload = {
+  acao: string;
+  entidade?: string | null;
+  entidade_id?: string | number | null;
+  valores_anteriores?: Record<string, unknown> | null;
+  valores_novos?: Record<string, unknown> | null;
+};
+
+export async function registrarAuditoriaViaFunction(payload: RegisterAuditLogPayload) {
+  return invoke<{ ok: boolean; id?: string | null }>('register_audit_log', payload);
 }

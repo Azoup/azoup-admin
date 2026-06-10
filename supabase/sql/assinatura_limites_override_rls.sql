@@ -1,0 +1,47 @@
+-- Políticas RLS para o painel administrativo ler e gravar assinatura_limites_override.
+-- Execute no SQL Editor do Supabase (requer painel_admin_ativo — rode admin_audit_logs_rls.sql antes ou o bloco abaixo).
+
+create or replace function public.painel_admin_ativo(roles text[] default null)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.admin_users au
+    where lower(au.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+      and coalesce(au.active, true) = true
+      and (roles is null or au.role = any (roles))
+  );
+$$;
+
+revoke all on function public.painel_admin_ativo(text[]) from public;
+grant execute on function public.painel_admin_ativo(text[]) to authenticated;
+
+alter table public.assinatura_limites_override enable row level security;
+
+drop policy if exists "deny_all_assinatura_limites_override" on public.assinatura_limites_override;
+drop policy if exists painel_admin_override_select on public.assinatura_limites_override;
+drop policy if exists painel_admin_override_insert on public.assinatura_limites_override;
+drop policy if exists painel_admin_override_update on public.assinatura_limites_override;
+
+create policy painel_admin_override_select
+on public.assinatura_limites_override
+for select
+to authenticated
+using (public.painel_admin_ativo());
+
+create policy painel_admin_override_insert
+on public.assinatura_limites_override
+for insert
+to authenticated
+with check (public.painel_admin_ativo(array['owner', 'manager']::text[]));
+
+create policy painel_admin_override_update
+on public.assinatura_limites_override
+for update
+to authenticated
+using (public.painel_admin_ativo(array['owner', 'manager']::text[]))
+with check (public.painel_admin_ativo(array['owner', 'manager']::text[]));

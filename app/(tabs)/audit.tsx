@@ -1,15 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { FlatList, View } from 'react-native';
 
+import { AuditLogCard } from '@/components/ui/AuditLogCard';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { ScreenCard } from '@/components/ui/ScreenCard';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { supabase } from '@/src/lib/supabase';
-import { normalizarAuditLogParaExibicao } from '@/src/services/audit';
 import type { AdminAuditLogRow } from '@/src/types/azoup';
-import { formatDateBR } from '@/src/utils/format';
+import { formatarAuditLogParaCard } from '@/src/utils/audit-display';
 
 async function fetchAudit(): Promise<AdminAuditLogRow[]> {
   const { data, error } = await supabase
@@ -30,7 +29,7 @@ export default function AuditScreen() {
   if (!canViewAudit) {
     return (
       <View style={{ flex: 1, padding: 16, backgroundColor: theme.background }}>
-        <Text style={{ color: theme.warning, fontWeight: '800' }}>Seu papel não pode visualizar auditoria.</Text>
+        <Text style={{ color: theme.warning, fontWeight: '800' }}>Seu perfil não tem acesso à auditoria.</Text>
       </View>
     );
   }
@@ -45,41 +44,20 @@ export default function AuditScreen() {
       onRefresh={() => q.refetch()}
       ListHeaderComponent={
         <PageHeader
-          title="Auditoria Administrativa"
-          subtitle="Registro das ações sensíveis salvas em admin_audit_logs."
+          title="Histórico de alterações"
+          subtitle="Veja quem alterou créditos, limites, cupons e configurações do painel — em linguagem simples."
         />
       }
       ListEmptyComponent={
         q.isLoading ? (
-          <Text style={{ color: theme.textMuted }}>Carregando…</Text>
+          <Text style={{ color: theme.textMuted }}>Carregando histórico…</Text>
         ) : q.error ? (
           <Text style={{ color: theme.error }}>{(q.error as Error).message}</Text>
         ) : (
-          <Text style={{ color: theme.textMuted }}>Nenhum evento encontrado.</Text>
+          <Text style={{ color: theme.textMuted }}>Nenhuma alteração registrada ainda.</Text>
         )
       }
-      renderItem={({ item }) => {
-        const n = normalizarAuditLogParaExibicao(item);
-        return (
-          <ScreenCard style={styles.card}>
-            <Text style={{ fontWeight: '800', color: theme.headerText }}>
-              {n.acao} · {formatDateBR(item.created_at)}
-            </Text>
-            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-              Admin: {item.admin_user_id ?? item.admin_id ?? item.user_id ?? item.created_by ?? '—'} · Entidade:{' '}
-              {n.entidade} ({n.entidade_id})
-            </Text>
-            <Text selectable style={[styles.mono, { color: theme.text }]}>
-              {JSON.stringify({ antes: n.antes, depois: n.depois }, null, 2)}
-            </Text>
-          </ScreenCard>
-        );
-      }}
+      renderItem={({ item }) => <AuditLogCard view={formatarAuditLogParaCard(item)} />}
     />
   );
 }
-
-const styles = StyleSheet.create({
-  card: { marginBottom: 12, gap: 8 },
-  mono: { fontFamily: 'SpaceMono', fontSize: 11, opacity: 0.9 },
-});

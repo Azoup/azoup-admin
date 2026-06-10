@@ -9,9 +9,16 @@ import type {
   ClienteAzoupAdminView,
   ClienteAzoupRow,
   ClienteMetricasUso,
+  EmpresaAzoupRow,
   HistoricoFaturaRow,
   PlanoAssinaturaRow,
 } from '@/src/types/azoup';
+
+function rotuloEmpresaMatriz(empresa: EmpresaAzoupRow): string {
+  const fantasia = `${empresa.nome_fantasia ?? ''}`.trim();
+  if (fantasia) return fantasia;
+  return `${empresa.razao_social ?? ''}`.trim() || '—';
+}
 
 function safeParseIso(d?: string | null) {
   if (!d) return null;
@@ -65,16 +72,37 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
 
   const ids = rows.map((c) => c.id);
 
-  const [{ data: todasAssinaturas, error: eAss }, { data: todosOverrides, error: eOv }, { data: todasFaturas, error: eFat }] =
-    await Promise.all([
-      supabase.from('assinaturas_clientes').select('*').in('cliente_id', ids).limit(10000),
-      supabase.from('assinatura_limites_override').select('*').in('cliente_id', ids).limit(10000),
-      supabase.from('historico_faturas').select('*').in('cliente_id', ids).limit(5000),
-    ]);
+  const [
+    { data: todasAssinaturas, error: eAss },
+    { data: todosOverrides, error: eOv },
+    { data: todasFaturas, error: eFat },
+    { data: empresasMatriz, error: eEmp },
+  ] = await Promise.all([
+    supabase.from('assinaturas_clientes').select('*').in('cliente_id', ids).limit(10000),
+    supabase.from('assinatura_limites_override').select('*').in('cliente_id', ids).limit(10000),
+    supabase.from('historico_faturas').select('*').in('cliente_id', ids).limit(5000),
+    supabase
+      .from('empresas')
+      .select('id,cliente_id,razao_social,nome_fantasia,cnpj,empresa_matriz,ativo,created_at')
+      .in('cliente_id', ids)
+      .eq('empresa_matriz', true),
+  ]);
 
   if (eAss) throw new Error(eAss.message);
-  if (eOv) throw new Error(eOv.message);
   if (eFat) throw new Error(eFat.message);
+  if (eEmp) throw new Error(eEmp.message);
+  if (eOv) {
+    console.warn(
+      '[assinatura_limites_override] Leitura ignorada na listagem:',
+      eOv.message,
+      '— execute supabase/sql/painel_adm_rls_all.sql no Supabase.',
+    );
+  }
+
+  const matrizPorCliente = new Map<string, EmpresaAzoupRow>();
+  for (const e of (empresasMatriz ?? []) as EmpresaAzoupRow[]) {
+    matrizPorCliente.set(e.cliente_id, e);
+  }
 
   const assinPorCliente = new Map<string, AssinaturaClienteRow[]>();
   for (const a of (todasAssinaturas ?? []) as AssinaturaClienteRow[]) {
@@ -131,6 +159,8 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
       }
     }
 
+    const matriz = matrizPorCliente.get(c.id) ?? null;
+
     return {
       ...c,
       assinatura,
@@ -140,6 +170,8 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
       dias_como_assinante,
       meses_em_aberto: [...mesesAbertos].sort(),
       cobrancas_falhas,
+      empresa_matriz_nome: matriz ? rotuloEmpresaMatriz(matriz) : null,
+      empresa_matriz_cnpj: matriz?.cnpj ?? null,
     };
   });
 }
@@ -171,7 +203,10 @@ async function buscarOverride(clienteId: string): Promise<AssinaturaLimitesOverr
     .eq('cliente_id', clienteId)
     .maybeSingle();
 
-  if (error && error.code !== 'PGRST116') throw new Error(error.message);
+  if (error && error.code !== 'PGRST116') {
+    console.warn('[assinatura_limites_override] buscarOverride:', error.message);
+    return null;
+  }
   return (data as AssinaturaLimitesOverrideRow) ?? null;
 }
 
@@ -319,6 +354,7 @@ export type LimitesEffectivos = {
 };
 
 const USERS_COLUMN_CANDIDATES = [
+  'usuarios_limite_override',
   'usuarios_inclusos',
   'limite_usuarios',
   'max_usuarios',
@@ -329,6 +365,7 @@ const USERS_COLUMN_CANDIDATES = [
 ] as const;
 
 const EMPRESAS_COLUMN_CANDIDATES = [
+  'empresas_limite_override',
   'empresas_incluidas',
   'limite_empresas',
   'limite_empresas_enterprise',
@@ -340,6 +377,7 @@ const EMPRESAS_COLUMN_CANDIDATES = [
 ] as const;
 
 const GB_COLUMN_CANDIDATES = [
+  'armazenamento_gb_override',
   'limite_armazenamento_gb',
   'limite_storage_gb',
   'limite_gb',
@@ -350,6 +388,7 @@ const GB_COLUMN_CANDIDATES = [
 ] as const;
 
 const IA_TOKEN_COLUMN_CANDIDATES = [
+  'credito_ia_override',
   'credito_ia_mensal',
   'credito_ia_limite_mensal',
   'limite_tokens_ia_mes',
@@ -359,6 +398,11 @@ const IA_TOKEN_COLUMN_CANDIDATES = [
   'quota_tokens_ia_mes',
   'tokens_limite_mes',
 ] as const;
+
+const OVERRIDE_USERS_COLUMNS = ['usuarios_limite_override', 'limite_usuarios', 'max_usuarios', 'usuarios_limite'] as const;
+const OVERRIDE_EMPRESAS_COLUMNS = ['empresas_limite_override', 'limite_empresas', 'max_empresas', 'empresas_limite'] as const;
+const OVERRIDE_GB_COLUMNS = ['armazenamento_gb_override', ...GB_COLUMN_CANDIDATES] as const;
+const OVERRIDE_IA_COLUMNS = ['credito_ia_override', ...IA_TOKEN_COLUMN_CANDIDATES] as const;
 
 function coerceNum(value: unknown): number | null {
   if (value == null) return null;
@@ -479,24 +523,75 @@ function buildLimitsPayload(
 ): Record<string, unknown> {
   if (!anteriorRow) return {};
 
-  const usersCol = pickColFromRow(anteriorRow, ['limite_usuarios', 'max_usuarios', 'usuarios_limite']);
-  const empsCol = pickColFromRow(anteriorRow, ['limite_empresas', 'max_empresas', 'empresas_limite']);
-  const gbCol = pickColFromRow(anteriorRow, [...GB_COLUMN_CANDIDATES]);
-  const tokCol = pickColFromRow(anteriorRow, [
-    'limite_tokens_ia_mes',
-    'limite_tokens_mes',
-    'limite_ia_tokens_mes',
-    'limite_tokens',
-    'tokens_limite_mes',
-    'quota_tokens_ia_mes',
-  ]);
+  const usersCol = pickColFromRow(anteriorRow, [...OVERRIDE_USERS_COLUMNS]);
+  const empsCol = pickColFromRow(anteriorRow, [...OVERRIDE_EMPRESAS_COLUMNS]);
+  const gbCol = pickColFromRow(anteriorRow, [...OVERRIDE_GB_COLUMNS]);
+  const tokCol = pickColFromRow(anteriorRow, [...OVERRIDE_IA_COLUMNS]);
 
   const out: Record<string, unknown> = {};
-  if (usersCol) out[usersCol] = valores.usuarios;
-  if (empsCol) out[empsCol] = valores.empresas;
-  if (gbCol) out[gbCol] = valores.armazenamento_gb;
-  if (tokCol) out[tokCol] = valores.tokens_ia_mes;
+  if (usersCol && valores.usuarios !== null) out[usersCol] = valores.usuarios;
+  if (empsCol && valores.empresas !== null) out[empsCol] = valores.empresas;
+  if (gbCol && valores.armazenamento_gb !== null) out[gbCol] = valores.armazenamento_gb;
+  if (tokCol && valores.tokens_ia_mes !== null) out[tokCol] = valores.tokens_ia_mes;
   return out;
+}
+
+function temLimiteAssinaturaPreenchido(v: Pick<LimitesEffectivos, 'usuarios' | 'empresas' | 'tokens_ia_mes'>): boolean {
+  return v.usuarios !== null || v.empresas !== null || v.tokens_ia_mes !== null;
+}
+
+function temLimiteOverridePreenchido(v: Pick<LimitesEffectivos, 'armazenamento_gb'>): boolean {
+  return v.armazenamento_gb !== null;
+}
+
+export function parseLimitesFormulario(
+  usuarios: string,
+  empresas: string,
+  armazenamentoGb: string,
+  creditosIa: string,
+): Pick<LimitesEffectivos, 'usuarios' | 'empresas' | 'armazenamento_gb' | 'tokens_ia_mes'> {
+  return {
+    usuarios: usuarios.trim() === '' ? null : Number(usuarios),
+    empresas: empresas.trim() === '' ? null : Number(empresas),
+    armazenamento_gb: armazenamentoGb.trim() === '' ? null : Number(armazenamentoGb),
+    tokens_ia_mes: creditosIa.trim() === '' ? null : Number(creditosIa),
+  };
+}
+
+function assertAoMenosUmLimitePreenchido(v: Pick<LimitesEffectivos, 'usuarios' | 'empresas' | 'armazenamento_gb' | 'tokens_ia_mes'>) {
+  if (!temLimiteAssinaturaPreenchido(v) && !temLimiteOverridePreenchido(v)) {
+    throw new Error('Preencha ao menos um campo para salvar. Campos vazios não alteram o banco.');
+  }
+}
+
+async function persistArmazenamentoOverride(
+  clienteId: string,
+  armazenamentoGb: number,
+  anterior?: AssinaturaLimitesOverrideRow | null,
+): Promise<{ novo: AssinaturaLimitesOverrideRow; anterior: AssinaturaLimitesOverrideRow | null }> {
+  const prev = anterior ?? (await buscarOverride(clienteId));
+  const prevRec = prev ? (prev as unknown as Record<string, unknown>) : null;
+
+  if (prev?.id) {
+    const gbCol = pickColFromRow(prevRec, [...OVERRIDE_GB_COLUMNS]) ?? 'armazenamento_gb_override';
+    const { data, error } = await supabase
+      .from('assinatura_limites_override')
+      .update({ [gbCol]: armazenamentoGb } as never)
+      .eq('id', prev.id)
+      .select('*')
+      .single();
+    if (error) throw new Error(formatSupabaseWriteError(error));
+    return { novo: data as AssinaturaLimitesOverrideRow, anterior: prev };
+  }
+
+  const { data, error } = await supabase
+    .from('assinatura_limites_override')
+    .insert({ cliente_id: clienteId, armazenamento_gb_override: armazenamentoGb } as never)
+    .select('*')
+    .single();
+
+  if (error) throw new Error(formatSupabaseWriteError(error));
+  return { novo: data as AssinaturaLimitesOverrideRow, anterior: prev };
 }
 
 function isUnknownColumnError(msg: string, col: string): boolean {
@@ -522,7 +617,52 @@ function isUnknownGbColumn(msg: string, gbKey: string): boolean {
   return isUnknownColumnError(msg, gbKey);
 }
 
-/** Linha de insert: não envia chaves com valor null (evita 400 em NOT NULL / defaults do Postgres). */
+function isRlsBlock(err: { code?: string; message?: string } | null | undefined): boolean {
+  if (!err) return false;
+  const code = err.code ?? '';
+  const m = (err.message ?? '').toLowerCase();
+  return code === '42501' || code === 'PGRST301' || m.includes('row-level security') || m.includes('permission denied');
+}
+
+function isPainelOverrideSchemaMiss(msg: string): boolean {
+  return (
+    isUnknownColumnError(msg, 'usuarios_limite_override') ||
+    isUnknownColumnError(msg, 'empresas_limite_override') ||
+    isUnknownColumnError(msg, 'armazenamento_gb_override') ||
+    isUnknownColumnError(msg, 'credito_ia_override')
+  );
+}
+
+/** Insert direto no schema do painel ADM — evita dezenas de POST com colunas legadas inexistentes. */
+function buildPainelOverrideInsertRow(clienteId: string, valores: LimitesEffectivos): Record<string, unknown> {
+  const row: Record<string, unknown> = { cliente_id: clienteId };
+  if (valores.usuarios !== null) row.usuarios_limite_override = Math.trunc(valores.usuarios);
+  if (valores.empresas !== null) row.empresas_limite_override = Math.trunc(valores.empresas);
+  if (valores.armazenamento_gb !== null) row.armazenamento_gb_override = valores.armazenamento_gb;
+  if (valores.tokens_ia_mes !== null) row.credito_ia_override = Math.trunc(valores.tokens_ia_mes);
+  return row;
+}
+
+async function insertPainelOverrideSchema(
+  clienteId: string,
+  valores: LimitesEffectivos,
+): Promise<{ data: AssinaturaLimitesOverrideRow; error: null } | { data: null; error: { message: string; code?: string; details?: string; hint?: string } }> {
+  const insertRow = buildPainelOverrideInsertRow(clienteId, valores);
+  if (Object.keys(insertRow).length <= 1) {
+    return { data: null, error: { message: 'Nada para inserir em assinatura_limites_override.' } };
+  }
+
+  const { data, error } = await supabase
+    .from('assinatura_limites_override')
+    .insert(insertRow as never)
+    .select('*')
+    .single();
+
+  if (!error && data) return { data: data as AssinaturaLimitesOverrideRow, error: null };
+  return { data: null, error: error ?? { message: 'Falha ao inserir override (schema painel).' } };
+}
+
+/** Linha de insert legado: não envia chaves com valor null (evita 400 em NOT NULL / defaults do Postgres). */
 function buildInsertRowPartial(
   clienteId: string,
   valores: LimitesEffectivos,
@@ -699,110 +839,43 @@ export type UpsertLimitesOverrideResult = {
 export async function upsertLimitesOverride(params: {
   clienteId: string;
   adminUserId?: string;
-  valores: LimitesEffectivos;
+  valores: Pick<LimitesEffectivos, 'usuarios' | 'empresas' | 'armazenamento_gb' | 'tokens_ia_mes'>;
   motivo?: string;
 }): Promise<UpsertLimitesOverrideResult> {
-  assertLimitesNumericos(params.valores);
+  assertLimitesNumericos(params.valores as LimitesEffectivos);
+  assertAoMenosUmLimitePreenchido(params.valores);
 
-  const anterior = await buscarOverride(params.clienteId);
-  const anteriorRec = anterior ? (anterior as unknown as Record<string, unknown>) : null;
+  const anteriorOverride = await buscarOverride(params.clienteId);
+  let assinaturaAtualizada: AssinaturaClienteRow | null = null;
+  let novoOverride: AssinaturaLimitesOverrideRow | null = null;
+  let persistidoEmAssinaturaCliente = false;
 
-  /** Sem linha em override: tenta primeiro `assinaturas_clientes` (assinatura atual) para evitar POST inútil em override. */
-  const persistirAssinaturaSemOverride =
-    !anterior?.id &&
-    (params.valores.tokens_ia_mes !== null ||
-      params.valores.usuarios !== null ||
-      params.valores.empresas !== null) &&
-    params.valores.armazenamento_gb === null;
-
-  if (persistirAssinaturaSemOverride) {
-    const fbPrimeiro = await persistLimitesEmAssinaturaCliente(params.clienteId, params.valores);
-    if (fbPrimeiro.data) {
-      return {
-        novo: null,
-        anterior: null,
-        persistidoEmAssinaturaCliente: true,
-        assinaturaAtualizada: fbPrimeiro.data,
-      };
-    }
-  }
-
-  if (anterior?.id) {
-    const limitsOnly = buildLimitsPayload(anteriorRec!, params.valores);
-    if (Object.keys(limitsOnly).length === 0) {
-      const fb = await persistLimitesEmAssinaturaCliente(params.clienteId, params.valores);
-      if (fb.data) {
-        return {
-          novo: null,
-          anterior,
-          persistidoEmAssinaturaCliente: true,
-          assinaturaAtualizada: fb.data,
-        };
-      }
+  if (temLimiteAssinaturaPreenchido(params.valores)) {
+    const fb = await persistLimitesEmAssinaturaCliente(params.clienteId, params.valores as LimitesEffectivos);
+    if (!fb.data) {
       throw new Error(
-        `Nenhuma coluna de limite reconhecida em assinatura_limites_override para este registro. Fallback assinaturas_clientes: ${fb.error ? formatSupabaseWriteError(fb.error) : 'indisponível.'}`,
+        fb.error
+          ? formatSupabaseWriteError(fb.error)
+          : 'Não foi possível atualizar assinaturas_clientes para os campos preenchidos.',
       );
     }
-    const { data, error } = await supabase
-      .from('assinatura_limites_override')
-      .update(limitsOnly as never)
-      .eq('id', anterior.id)
-      .select('*')
-      .single();
-    if (error) throw new Error(formatSupabaseWriteError(error));
-    return { novo: data as AssinaturaLimitesOverrideRow, anterior, persistidoEmAssinaturaCliente: false };
+    assinaturaAtualizada = fb.data;
+    persistidoEmAssinaturaCliente = true;
   }
 
-  const inserted = await insertLimitesOverrideWithFallbacks(params.clienteId, params.valores);
-  if (inserted.data) {
-    return { novo: inserted.data, anterior, persistidoEmAssinaturaCliente: false };
+  if (temLimiteOverridePreenchido(params.valores)) {
+    const ov = await persistArmazenamentoOverride(
+      params.clienteId,
+      params.valores.armazenamento_gb as number,
+      anteriorOverride,
+    );
+    novoOverride = ov.novo;
   }
 
-  const msg = formatSupabaseWriteError(inserted.error ?? { message: 'Erro desconhecido' });
-  if (
-    inserted.error?.code === '23505' ||
-    msg.toLowerCase().includes('duplicate') ||
-    msg.toLowerCase().includes('unique')
-  ) {
-    const existing = await buscarOverride(params.clienteId);
-    const rec = existing ? (existing as unknown as Record<string, unknown>) : null;
-    if (!rec) throw new Error(msg);
-    const limUpdate = buildLimitsPayload(rec, params.valores);
-    if (Object.keys(limUpdate).length === 0) {
-      const fb = await persistLimitesEmAssinaturaCliente(params.clienteId, params.valores);
-      if (fb.data) {
-        return {
-          novo: null,
-          anterior: existing,
-          persistidoEmAssinaturaCliente: true,
-          assinaturaAtualizada: fb.data,
-        };
-      }
-      throw new Error(
-        `Nenhuma coluna de limite reconhecida após duplicidade em assinatura_limites_override. Fallback assinaturas_clientes: ${fb.error ? formatSupabaseWriteError(fb.error) : 'indisponível.'}`,
-      );
-    }
-    const { data: row2, error: e2 } = await supabase
-      .from('assinatura_limites_override')
-      .update(limUpdate as never)
-      .eq('cliente_id', params.clienteId)
-      .select('*')
-      .maybeSingle();
-    if (e2) throw new Error(formatSupabaseWriteError(e2));
-    if (!row2) throw new Error(msg);
-    return { novo: row2 as AssinaturaLimitesOverrideRow, anterior, persistidoEmAssinaturaCliente: false };
-  }
-
-  const fb = await persistLimitesEmAssinaturaCliente(params.clienteId, params.valores);
-  if (fb.data) {
-    return {
-      novo: null,
-      anterior,
-      persistidoEmAssinaturaCliente: true,
-      assinaturaAtualizada: fb.data,
-    };
-  }
-
-  const extra = fb.error ? ` — Fallback assinaturas_clientes: ${formatSupabaseWriteError(fb.error)}` : '';
-  throw new Error(`${msg}${extra}`);
+  return {
+    novo: novoOverride,
+    anterior: anteriorOverride,
+    persistidoEmAssinaturaCliente,
+    assinaturaAtualizada,
+  };
 }

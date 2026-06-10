@@ -15,6 +15,8 @@ export interface AdminUserRow {
   role?: AdminPapel;
   ativo?: boolean;
   active?: boolean;
+  /** Telas do painel ADM liberadas para o login (vazio = padrão do role). */
+  telas_acesso?: string[] | null;
   created_at?: string;
 }
 
@@ -142,6 +144,14 @@ export interface HistoricoFaturaRow {
 export interface AssinaturaLimitesOverrideRow {
   id: string;
   cliente_id: string;
+  /** Schema painel ADM (`migration_painel_adm_billing.sql`) */
+  usuarios_limite_override?: number | null;
+  empresas_limite_override?: number | null;
+  armazenamento_gb_override?: number | null;
+  credito_ia_override?: number | null;
+  active?: boolean | null;
+  updated_by_admin?: string | null;
+  /** Legado / variantes */
   limite_usuarios?: number | null;
   limite_empresas?: number | null;
   limite_armazenamento_gb?: number | null;
@@ -180,6 +190,9 @@ export interface AdminCouponRow {
 
 export interface AdminAuditLogRow {
   id: string;
+  admin_email?: string | null;
+  target_type?: string | null;
+  target_id?: string | null;
   admin_user_id?: string | null;
   admin_id?: string | null;
   user_id?: string | null;
@@ -222,6 +235,17 @@ export type ClienteMetricasUso = {
   ultimo_acesso_fonte?: 'auth' | 'atividade' | null;
 };
 
+export interface EmpresaAzoupRow {
+  id: string;
+  cliente_id: string;
+  razao_social: string;
+  nome_fantasia?: string | null;
+  cnpj?: string | null;
+  empresa_matriz?: boolean | null;
+  ativo?: boolean | null;
+  created_at?: string | null;
+}
+
 export interface ClienteAzoupAdminView extends ClienteAzoupRow {
   plano?: PlanoAssinaturaRow | null;
   assinatura?: AssinaturaClienteRow | null;
@@ -231,4 +255,7 @@ export interface ClienteAzoupAdminView extends ClienteAzoupRow {
   meses_em_aberto?: string[];
   cobrancas_falhas?: number;
   metricas_uso?: ClienteMetricasUso | null;
+  /** Razão social / nome fantasia da empresa matriz (`empresas.empresa_matriz = true`). */
+  empresa_matriz_nome?: string | null;
+  empresa_matriz_cnpj?: string | null;
 }

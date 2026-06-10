@@ -32,7 +32,7 @@ export default function TrialSettingsScreen() {
       const n = Number(dias);
       if (!Number.isFinite(n) || n < 0) throw new Error('Informe um número válido de dias');
       await atualizarTrialDias(Math.floor(n));
-      await registrarAuditoria(adminProfile?.id, {
+      await registrarAuditoria({ id: adminProfile?.id, email: adminProfile?.email }, {
         acao: 'BILLING_TRIAL_DIAS_UPDATE',
         entidade: 'admin_billing_settings',
         entidade_id: 'singleton',
