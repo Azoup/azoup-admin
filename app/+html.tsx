@@ -1,12 +1,8 @@
 import { ScrollViewStyleReset } from 'expo-router/html';
 
-// This file is web-only and used to configure the root HTML for every
-// web page during static rendering.
-// The contents of this function only run in Node.js environments and
-// do not have access to the DOM or browser APIs.
 export default function Root({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="pt-BR">
       <head>
         <meta charSet="utf-8" />
         <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
@@ -14,29 +10,31 @@ export default function Root({ children }: { children: React.ReactNode }) {
         <link rel="icon" type="image/png" sizes="512x512" href="/favicon-512.png" />
         <link rel="shortcut icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" sizes="512x512" href="/favicon-512.png" />
-        <meta name="theme-color" content="#FF7A1A" />
-
-        {/* 
-          Disable body scrolling on web. This makes ScrollView components work closer to how they do on native. 
-          However, body scrolling is often nice to have for mobile web. If you want to enable it, remove this line.
-        */}
+        <meta name="theme-color" content="#0B1F3A" />
         <ScrollViewStyleReset />
-
-        {/* Using raw CSS styles as an escape-hatch to ensure the background color never flickers in dark-mode. */}
-        <style dangerouslySetInnerHTML={{ __html: responsiveBackground }} />
-        {/* Add any additional <head> elements that you want globally available on web... */}
+        <style dangerouslySetInnerHTML={{ __html: globalCss }} />
       </head>
       <body>{children}</body>
     </html>
   );
 }
 
-const responsiveBackground = `
+const globalCss = `
+html, body, #root { min-height: 100%; }
 body {
-  background-color: #fff;
+  margin: 0;
+  background-color: #F4F7FB;
+  color: #0F172A;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+html[data-theme='dark'] body {
+  background-color: #0B1F3A;
+  color: #EAF0FF;
 }
 @media (prefers-color-scheme: dark) {
-  body {
-    background-color: #000;
+  html:not([data-theme='light']) body {
+    background-color: #0B1F3A;
+    color: #EAF0FF;
   }
-}`;
+}
+`;

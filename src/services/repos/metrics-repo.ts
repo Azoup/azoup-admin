@@ -1,5 +1,13 @@
 import { supabase } from '@/src/lib/supabase';
 import type { AssinaturaClienteRow, ClienteAzoupRow, HistoricoFaturaRow } from '@/src/types/azoup';
+import {
+  classificarStatusAssinatura,
+  isAssinaturaAtiva,
+  isAssinaturaCancelada,
+  isAssinaturaInadimplente,
+  isAssinaturaTrial,
+  prioridadeAssinatura,
+} from '@/src/utils/assinatura-status';
 
 export type DashboardMetricas = {
   total_clientes: number;
@@ -12,6 +20,29 @@ export type DashboardMetricas = {
   tokens_medio_mes?: number | null;
   armazenamento_medio_gb?: number | null;
 };
+
+function pickAssinaturaPorCliente(assinaturas: AssinaturaClienteRow[]): Map<string, AssinaturaClienteRow> {
+  const porCliente = new Map<string, AssinaturaClienteRow[]>();
+  for (const a of assinaturas) {
+    const arr = porCliente.get(a.cliente_id) ?? [];
+    arr.push(a);
+    porCliente.set(a.cliente_id, arr);
+  }
+
+  const out = new Map<string, AssinaturaClienteRow>();
+  for (const [clienteId, rows] of porCliente) {
+    const best = [...rows].sort((a, b) => {
+      const pa = prioridadeAssinatura(a);
+      const pb = prioridadeAssinatura(b);
+      if (pb !== pa) return pb - pa;
+      const da = b.atualizado_em ?? b.data_inicio ?? b.criado_em ?? '';
+      const db = a.atualizado_em ?? a.data_inicio ?? a.criado_em ?? '';
+      return `${da}`.localeCompare(`${db}`);
+    })[0];
+    if (best) out.set(clienteId, best);
+  }
+  return out;
+}
 
 export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
   const { count: total_clientes, error: errCount } = await supabase
@@ -33,13 +64,7 @@ export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
     planosMap.set(String(p.id), p.nome ?? String(p.id)),
   );
 
-  const porCliente = new Map<string, AssinaturaClienteRow>();
-  for (const a of assinaturas) {
-    const prev = porCliente.get(a.cliente_id);
-    if (!prev || (a.data_inicio ?? '') > (prev.data_inicio ?? '')) {
-      porCliente.set(a.cliente_id, a);
-    }
-  }
+  const porCliente = pickAssinaturaPorCliente(assinaturas);
 
   let clientes_trial = 0;
   let clientes_assinatura_ativa = 0;
@@ -50,11 +75,10 @@ export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
   const ranking = new Map<string, number>();
 
   porCliente.forEach((a) => {
-    const st = `${a.status ?? ''}`.toLowerCase();
-    if (st.includes('trial')) clientes_trial += 1;
-    if (st.includes('ativa') || st === 'active') clientes_assinatura_ativa += 1;
-    if (st.includes('past') || st.includes('inadimpl')) clientes_inadimplentes += 1;
-    if (st.includes('cancel')) clientes_cancelados += 1;
+    if (isAssinaturaTrial(a)) clientes_trial += 1;
+    if (isAssinaturaAtiva(a)) clientes_assinatura_ativa += 1;
+    if (isAssinaturaInadimplente(a)) clientes_inadimplentes += 1;
+    if (isAssinaturaCancelada(a)) clientes_cancelados += 1;
 
     const centavosMrr =
       a.valor_atual_centavos != null
@@ -63,11 +87,11 @@ export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
           ? Math.round(Number(a.valor_mensal_atual) * 100)
           : 0;
 
-    if (centavosMrr > 0 && (st.includes('ativa') || st === 'active')) {
+    if (centavosMrr > 0 && isAssinaturaAtiva(a)) {
       mrr_centavos += centavosMrr;
     }
 
-    if (a.plano_id != null && `${a.plano_id}` !== '') {
+    if (a.plano_id != null && `${a.plano_id}` !== '' && classificarStatusAssinatura(a) !== 'cancelada') {
       const pid = String(a.plano_id);
       ranking.set(pid, (ranking.get(pid) ?? 0) + 1);
     }

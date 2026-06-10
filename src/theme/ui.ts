@@ -1,14 +1,18 @@
+import { darkTheme, lightTheme } from '@/src/theme/colors';
+
+/** Tokens legados — prefira `useTheme().theme` em código novo. */
 export const ui = {
-  navy: '#0B1F3A',
+  navy: lightTheme.primary,
   navySoft: '#122B4D',
-  orange: '#FF7A1A',
+  orange: lightTheme.cadastroAction,
   orangeSoft: '#FFE8D6',
-  bg: '#F4F7FB',
-  card: '#FFFFFF',
-  text: '#0F172A',
-  muted: '#5B6B84',
-  border: '#D7E0EC',
-  danger: '#C62828',
-  success: '#0F9D58',
+  bg: lightTheme.background,
+  card: lightTheme.surface,
+  text: lightTheme.text,
+  muted: lightTheme.textMuted,
+  border: lightTheme.border,
+  danger: lightTheme.error,
+  success: lightTheme.success,
 };
 
+export { darkTheme, lightTheme };

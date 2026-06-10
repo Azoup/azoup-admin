@@ -88,3 +88,22 @@ export async function listarAdminsViaFunction() {
 export async function criarAdminLoginViaFunction(payload: AdminAccessPayload) {
   return invoke<{ admin: Record<string, unknown> }>('create_admin_login', payload);
 }
+
+export type ClienteMetricasPayload = {
+  cliente_id: string;
+};
+
+export type ClienteMetricasResponse = {
+  metricas: {
+    empresas_cadastradas: number;
+    produtos_cadastrados: number;
+    vendas: number;
+    ordens_producao: number;
+    ultimo_acesso: string | null;
+    ultimo_acesso_fonte: 'auth' | 'atividade' | null;
+  };
+};
+
+export async function obterMetricasClienteViaFunction(payload: ClienteMetricasPayload) {
+  return invoke<ClienteMetricasResponse>('get_cliente_metricas', payload);
+}

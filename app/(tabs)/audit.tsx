@@ -1,12 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { FlatList, StyleSheet } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 
-import { Text, View } from '@/components/Themed';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { ScreenCard } from '@/components/ui/ScreenCard';
+import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
+import { useTheme } from '@/src/contexts/ThemeContext';
 import { supabase } from '@/src/lib/supabase';
-import { ui } from '@/src/theme/ui';
-import type { AdminAuditLogRow } from '@/src/types/azoup';
 import { normalizarAuditLogParaExibicao } from '@/src/services/audit';
+import type { AdminAuditLogRow } from '@/src/types/azoup';
 import { formatDateBR } from '@/src/utils/format';
 
 async function fetchAudit(): Promise<AdminAuditLogRow[]> {
@@ -21,50 +23,56 @@ async function fetchAudit(): Promise<AdminAuditLogRow[]> {
 }
 
 export default function AuditScreen() {
+  const { theme } = useTheme();
   const { canViewAudit } = useAdminAuth();
-
   const q = useQuery({ queryKey: ['admin_audit_logs'], queryFn: fetchAudit, enabled: canViewAudit });
 
   if (!canViewAudit) {
     return (
-      <View style={styles.wrap}>
-        <Text style={styles.warn}>Seu papel não pode visualizar auditoria.</Text>
+      <View style={{ flex: 1, padding: 16, backgroundColor: theme.background }}>
+        <Text style={{ color: theme.warning, fontWeight: '800' }}>Seu papel não pode visualizar auditoria.</Text>
       </View>
     );
   }
 
   return (
     <FlatList
+      style={{ flex: 1, backgroundColor: theme.background }}
       contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
       data={q.data ?? []}
       keyExtractor={(item) => item.id}
       refreshing={q.isRefetching}
       onRefresh={() => q.refetch()}
       ListHeaderComponent={
-        <View style={{ marginBottom: 12, gap: 6 }}>
-          <Text style={styles.title}>Auditoria Administrativa</Text>
-          <Text style={styles.sub}>Registro das ações sensíveis salvas em `admin_audit_logs`.</Text>
-        </View>
+        <PageHeader
+          title="Auditoria Administrativa"
+          subtitle="Registro das ações sensíveis salvas em admin_audit_logs."
+        />
       }
       ListEmptyComponent={
-        q.isLoading ? <Text>Carregando…</Text> : q.error ? <Text style={styles.err}>{(q.error as Error).message}</Text> : <Text>Nenhum evento encontrado.</Text>
+        q.isLoading ? (
+          <Text style={{ color: theme.textMuted }}>Carregando…</Text>
+        ) : q.error ? (
+          <Text style={{ color: theme.error }}>{(q.error as Error).message}</Text>
+        ) : (
+          <Text style={{ color: theme.textMuted }}>Nenhum evento encontrado.</Text>
+        )
       }
       renderItem={({ item }) => {
         const n = normalizarAuditLogParaExibicao(item);
         return (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>
+          <ScreenCard style={styles.card}>
+            <Text style={{ fontWeight: '800', color: theme.headerText }}>
               {n.acao} · {formatDateBR(item.created_at)}
             </Text>
-            <Text style={styles.meta}>
-              Admin:{' '}
-              {item.admin_user_id ?? item.admin_id ?? item.user_id ?? item.created_by ?? '—'} · Entidade: {n.entidade} (
-              {n.entidade_id})
+            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+              Admin: {item.admin_user_id ?? item.admin_id ?? item.user_id ?? item.created_by ?? '—'} · Entidade:{' '}
+              {n.entidade} ({n.entidade_id})
             </Text>
-            <Text style={styles.mono} selectable>
+            <Text selectable style={[styles.mono, { color: theme.text }]}>
               {JSON.stringify({ antes: n.antes, depois: n.depois }, null, 2)}
             </Text>
-          </View>
+          </ScreenCard>
         );
       }}
     />
@@ -72,21 +80,6 @@ export default function AuditScreen() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, padding: 16, backgroundColor: ui.bg },
-  title: { fontSize: 22, fontWeight: '900', color: ui.navy },
-  sub: { color: ui.muted },
-  card: {
-    borderWidth: 1,
-    borderColor: ui.border,
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 12,
-    gap: 8,
-    backgroundColor: ui.card,
-  },
-  cardTitle: { fontWeight: '800', color: ui.navySoft },
-  meta: { color: ui.muted },
-  mono: { fontSize: 11, color: ui.text, opacity: 0.9 },
-  err: { color: ui.danger },
-  warn: { color: ui.orange, fontWeight: '800' },
+  card: { marginBottom: 12, gap: 8 },
+  mono: { fontFamily: 'SpaceMono', fontSize: 11, opacity: 0.9 },
 });

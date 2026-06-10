@@ -1,51 +1,53 @@
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Link } from 'expo-router';
-import { Pressable, StyleSheet } from 'react-native';
+import { Pressable } from 'react-native';
 
-import { Text, View } from '@/components/Themed';
-import { ui } from '@/src/theme/ui';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { Screen } from '@/components/ui/Screen';
+import { ScreenCard } from '@/components/ui/ScreenCard';
+import { Text } from '@/components/Themed';
+import { useTheme } from '@/src/contexts/ThemeContext';
+
+const LINKS = [
+  {
+    href: '/billing/trial' as const,
+    title: 'Período de teste padrão',
+    body: 'Define admin_billing_settings.trial_dias_padrao sem precisar de deploy.',
+    icon: 'clock-o' as const,
+  },
+  {
+    href: '/billing/coupons' as const,
+    title: 'Cupons do Stripe',
+    body: 'Cria cupom e promotion code no Stripe e registra em admin_coupons.',
+    icon: 'ticket' as const,
+  },
+  {
+    href: '/billing/plans' as const,
+    title: 'Planos de assinatura',
+    body: 'Visualização dos planos sincronizados com o núcleo do Azoup.',
+    icon: 'list-alt' as const,
+  },
+];
 
 export default function BillingHubScreen() {
+  const { theme } = useTheme();
+
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.title}>Cobrança</Text>
-      <Text style={styles.sub}>Gerencie período de teste, cupons no Stripe e planos disponíveis.</Text>
+    <Screen scroll>
+      <PageHeader title="Cobrança" subtitle="Gerencie período de teste, cupons no Stripe e planos disponíveis." />
 
-      <Link href="/billing/trial" asChild>
-        <Pressable style={styles.card}>
-          <Text style={styles.cardTitle}>Período de teste padrão</Text>
-          <Text style={styles.cardBody}>Define `admin_billing_settings.trial_dias_padrao` sem precisar de deploy.</Text>
-        </Pressable>
-      </Link>
-
-      <Link href="/billing/coupons" asChild>
-        <Pressable style={styles.card}>
-          <Text style={styles.cardTitle}>Cupons do Stripe</Text>
-          <Text style={styles.cardBody}>Cria cupom e promotion code no Stripe e registra em `admin_coupons`.</Text>
-        </Pressable>
-      </Link>
-
-      <Link href="/billing/plans" asChild>
-        <Pressable style={styles.card}>
-          <Text style={styles.cardTitle}>Planos de assinatura</Text>
-          <Text style={styles.cardBody}>Visualização dos planos sincronizados com o núcleo do Azoup.</Text>
-        </Pressable>
-      </Link>
-    </View>
+      {LINKS.map((item) => (
+        <Link key={item.href} href={item.href} asChild>
+          <Pressable>
+            <ScreenCard style={{ gap: 8 }}>
+              <Text style={{ fontSize: 17, fontWeight: '800', color: theme.headerText }}>
+                <FontAwesome name={item.icon} size={16} color={theme.cadastroAction} /> {item.title}
+              </Text>
+              <Text style={{ color: theme.textMuted, lineHeight: 20 }}>{item.body}</Text>
+            </ScreenCard>
+          </Pressable>
+        </Link>
+      ))}
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  wrap: { flex: 1, padding: 16, gap: 12, backgroundColor: ui.bg },
-  title: { fontSize: 24, fontWeight: '800', color: ui.navy },
-  sub: { color: ui.muted, marginBottom: 8 },
-  card: {
-    borderWidth: 1,
-    borderColor: ui.border,
-    borderRadius: 16,
-    padding: 14,
-    gap: 6,
-    backgroundColor: ui.card,
-  },
-  cardTitle: { fontSize: 17, fontWeight: '800', color: ui.navySoft },
-  cardBody: { color: ui.muted, lineHeight: 20 },
-});

@@ -1,15 +1,14 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DarkTheme, DefaultTheme, ThemeProvider as NavThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import 'react-native-reanimated';
 
-import { useColorScheme } from '@/components/useColorScheme';
 import { EnvConfigGate } from '@/src/components/EnvConfigGate';
+import { useTheme } from '@/src/contexts/ThemeContext';
 import { AppProviders } from '@/src/providers/AppProviders';
-import { ui } from '@/src/theme/ui';
 
 export { ErrorBoundary } from 'expo-router';
 
@@ -49,40 +48,46 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-  const colorScheme = useColorScheme();
-  const navTheme =
-    colorScheme === 'dark'
-      ? {
-          ...DarkTheme,
-          colors: {
-            ...DarkTheme.colors,
-            primary: ui.orange,
-            background: ui.navy,
-            card: ui.navySoft,
-            text: '#EAF0FF',
-            border: '#1A355D',
+  const { theme, isDark } = useTheme();
+
+  const navTheme = useMemo(
+    () =>
+      isDark
+        ? {
+            ...DarkTheme,
+            colors: {
+              ...DarkTheme.colors,
+              primary: theme.cadastroAction,
+              background: theme.background,
+              card: theme.surface,
+              text: theme.text,
+              border: theme.border,
+              notification: theme.cadastroAction,
+            },
+          }
+        : {
+            ...DefaultTheme,
+            colors: {
+              ...DefaultTheme.colors,
+              primary: theme.cadastroAction,
+              background: theme.background,
+              card: theme.surface,
+              text: theme.text,
+              border: theme.border,
+              notification: theme.cadastroAction,
+            },
           },
-        }
-      : {
-          ...DefaultTheme,
-          colors: {
-            ...DefaultTheme.colors,
-            primary: ui.orange,
-            background: ui.bg,
-            card: ui.card,
-            text: ui.text,
-            border: ui.border,
-          },
-        };
+    [isDark, theme],
+  );
 
   return (
-    <ThemeProvider value={navTheme}>
+    <NavThemeProvider value={navTheme}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="login" options={{ presentation: 'modal' }} />
         <Stack.Screen name="unauthorized" />
         <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
       </Stack>
-    </ThemeProvider>
+    </NavThemeProvider>
   );
 }

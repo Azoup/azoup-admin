@@ -59,6 +59,11 @@ export interface PlanoAssinaturaRow {
   stripe_price_id?: string | null;
   stripe_product_id?: string | null;
   valor_mensal_centavos?: number | null;
+  /** Schema Azoup (`setup_plans.sql`). */
+  usuarios_inclusos?: number | null;
+  empresas_incluidas?: number | null;
+  armazenamento_gb?: number | null;
+  credito_ia_mensal?: number | null;
   limite_usuarios?: number | null;
   limite_empresas?: number | null;
   limite_armazenamento_gb?: number | null;
@@ -207,6 +212,16 @@ export interface CreditoIaGastoAgg {
 }
 
 /** Visão agregada para telas administrativas. */
+export type ClienteMetricasUso = {
+  empresas_cadastradas: number | null;
+  produtos_cadastrados: number | null;
+  vendas: number | null;
+  ordens_producao: number | null;
+  /** Último login em auth.users dos usuários do tenant; senão última atividade em venda/produto/OP. */
+  ultimo_acesso: string | null;
+  ultimo_acesso_fonte?: 'auth' | 'atividade' | null;
+};
+
 export interface ClienteAzoupAdminView extends ClienteAzoupRow {
   plano?: PlanoAssinaturaRow | null;
   assinatura?: AssinaturaClienteRow | null;
@@ -215,4 +230,5 @@ export interface ClienteAzoupAdminView extends ClienteAzoupRow {
   dias_como_assinante?: number;
   meses_em_aberto?: string[];
   cobrancas_falhas?: number;
+  metricas_uso?: ClienteMetricasUso | null;
 }

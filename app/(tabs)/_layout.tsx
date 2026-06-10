@@ -1,31 +1,55 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Redirect, Tabs } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
 import { AzoupLogo } from '@/components/AzoupLogo';
-import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
+import { ThemeToggleButton } from '@/components/ui/ThemeToggleButton';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
-import { ui } from '@/src/theme/ui';
+import { useTheme } from '@/src/contexts/ThemeContext';
 
 function TabBarIcon(props: {
   name: React.ComponentProps<typeof FontAwesome>['name'];
   color: string;
 }) {
-  return <FontAwesome size={26} style={{ marginBottom: -3 }} {...props} />;
+  return <FontAwesome size={22} style={{ marginBottom: -2 }} {...props} />;
 }
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const { theme } = useTheme();
   const { session, adminProfile, loading, canManageAdmins } = useAdminAuth();
   const headerShown = useClientOnlyValue(false, true);
 
+  const screenOptions = useMemo(
+    () => ({
+      tabBarActiveTintColor: theme.tabIconSelected,
+      tabBarInactiveTintColor: theme.tabIconDefault,
+      tabBarStyle: {
+        backgroundColor: theme.tabBarBg,
+        borderTopColor: theme.border,
+        height: 64,
+        paddingBottom: 8,
+        paddingTop: 6,
+      },
+      tabBarLabelStyle: { fontWeight: '700' as const, fontSize: 11 },
+      headerShown,
+      headerStyle: { backgroundColor: theme.surface },
+      headerTintColor: theme.headerText,
+      headerTitle: () => <AzoupLogo size={32} />,
+      headerRight: () => (
+        <View style={{ marginRight: 12 }}>
+          <ThemeToggleButton />
+        </View>
+      ),
+    }),
+    [theme, headerShown],
+  );
+
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator />
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background }}>
+        <ActivityIndicator color={theme.cadastroAction} />
       </View>
     );
   }
@@ -39,21 +63,7 @@ export default function TabLayout() {
   }
 
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
-        tabBarStyle: {
-          backgroundColor: colorScheme === 'dark' ? ui.navySoft : ui.card,
-          borderTopColor: colorScheme === 'dark' ? '#1A355D' : ui.border,
-          height: 64,
-          paddingBottom: 8,
-          paddingTop: 6,
-        },
-        tabBarLabelStyle: { fontWeight: '700', fontSize: 12 },
-        headerShown,
-        headerTitle: () => <AzoupLogo size={32} />,
-      }}>
+    <Tabs screenOptions={screenOptions}>
       <Tabs.Screen
         name="index"
         options={{

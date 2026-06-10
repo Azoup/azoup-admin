@@ -77,6 +77,90 @@ serve(async (req) => {
       });
     }
 
+    if (body.op === 'get_cliente_metricas') {
+      const clienteId = `${body.payload?.cliente_id ?? ''}`.trim();
+      if (!clienteId) throw new Error('cliente_id obrigatório');
+
+      const [empresasRes, produtosRes, vendasRes, opsRes, usuariosRes, vendaAt, prodAt, opAt] = await Promise.all([
+        supabaseAdmin.from('empresas').select('id', { count: 'exact', head: true }).eq('cliente_id', clienteId),
+        supabaseAdmin.from('produtos').select('id', { count: 'exact', head: true }).eq('cliente_id', clienteId),
+        supabaseAdmin.from('venda').select('id', { count: 'exact', head: true }).eq('cliente_id_tenant', clienteId),
+        supabaseAdmin.from('producao_op').select('id', { count: 'exact', head: true }).eq('cliente_id_tenant', clienteId),
+        supabaseAdmin.from('usuarios').select('auth_id').eq('cliente_id', clienteId).not('auth_id', 'is', null),
+        supabaseAdmin
+          .from('venda')
+          .select('updated_at,created_at')
+          .eq('cliente_id_tenant', clienteId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabaseAdmin
+          .from('produtos')
+          .select('updated_at,created_at')
+          .eq('cliente_id', clienteId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabaseAdmin
+          .from('producao_op')
+          .select('updated_at,created_at')
+          .eq('cliente_id_tenant', clienteId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (empresasRes.error) throw empresasRes.error;
+      if (produtosRes.error) throw produtosRes.error;
+      if (vendasRes.error) throw vendasRes.error;
+      if (opsRes.error) throw opsRes.error;
+      if (usuariosRes.error) throw usuariosRes.error;
+
+      const authIds = [...new Set((usuariosRes.data ?? []).map((u) => u.auth_id).filter(Boolean))] as string[];
+
+      let ultimoLoginAuth: string | null = null;
+      for (const authId of authIds) {
+        const { data: authData, error: authUserErr } = await supabaseAdmin.auth.admin.getUserById(authId);
+        if (authUserErr) continue;
+        const at = authData?.user?.last_sign_in_at ?? null;
+        if (at && (!ultimoLoginAuth || at > ultimoLoginAuth)) ultimoLoginAuth = at;
+      }
+
+      let ultimaAtividade: string | null = null;
+      for (const row of [vendaAt.data, prodAt.data, opAt.data]) {
+        const rec = row as { updated_at?: string | null; created_at?: string | null } | null;
+        const at = rec?.updated_at ?? rec?.created_at ?? null;
+        if (at && (!ultimaAtividade || at > ultimaAtividade)) ultimaAtividade = at;
+      }
+
+      const ultimoAcesso =
+        ultimoLoginAuth && ultimaAtividade
+          ? ultimoLoginAuth >= ultimaAtividade
+            ? ultimoLoginAuth
+            : ultimaAtividade
+          : ultimoLoginAuth ?? ultimaAtividade;
+
+      const ultimoAcessoFonte: 'auth' | 'atividade' | null = !ultimoAcesso
+        ? null
+        : ultimoLoginAuth && (!ultimaAtividade || ultimoLoginAuth >= ultimaAtividade)
+          ? 'auth'
+          : 'atividade';
+
+      return new Response(
+        JSON.stringify({
+          metricas: {
+            empresas_cadastradas: empresasRes.count ?? 0,
+            produtos_cadastrados: produtosRes.count ?? 0,
+            vendas: vendasRes.count ?? 0,
+            ordens_producao: opsRes.count ?? 0,
+            ultimo_acesso: ultimoAcesso,
+            ultimo_acesso_fonte: ultimoAcessoFonte,
+          },
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+
     if (body.op === 'list_admin_users') {
       if (`${adminRow.role}` !== 'owner') {
         return new Response(JSON.stringify({ error: 'Permissão negada' }), {

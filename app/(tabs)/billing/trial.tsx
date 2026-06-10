@@ -1,13 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, TextInput } from 'react-native';
 
-import { Text, View } from '@/components/Themed';
+import { FormField } from '@/components/ui/FormField';
+import { FormInput } from '@/components/ui/FormInput';
+import { PageHeader } from '@/components/ui/PageHeader';
+import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import { Screen } from '@/components/ui/Screen';
+import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
+import { useTheme } from '@/src/contexts/ThemeContext';
 import { registrarAuditoria } from '@/src/services/audit';
 import { atualizarTrialDias, obterBillingSettings } from '@/src/services/repos/billing-repo';
 
 export default function TrialSettingsScreen() {
+  const { theme } = useTheme();
   const qc = useQueryClient();
   const { adminProfile, canManageBilling } = useAdminAuth();
   const [dias, setDias] = useState('');
@@ -41,43 +47,32 @@ export default function TrialSettingsScreen() {
 
   if (!canManageBilling) {
     return (
-      <View style={styles.wrap}>
-        <Text style={styles.warn}>Seu papel não pode alterar billing.</Text>
-      </View>
+      <Screen>
+        <Text style={{ color: theme.warning, fontWeight: '700' }}>Seu papel não pode alterar billing.</Text>
+      </Screen>
     );
   }
 
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.title}>Dias de trial padrão</Text>
-      <Text style={styles.sub}>Persistido em `admin_billing_settings`. O app principal deve ler esse valor ao criar assinaturas.</Text>
+    <Screen scroll>
+      <PageHeader
+        title="Dias de trial padrão"
+        subtitle="Persistido em admin_billing_settings. O app principal deve ler esse valor ao criar assinaturas."
+      />
 
-      {isLoading ? <Text>Carregando…</Text> : null}
+      {isLoading ? <Text style={{ color: theme.textMuted }}>Carregando…</Text> : null}
 
-      <TextInput keyboardType="number-pad" placeholder="Ex.: 14" value={dias} onChangeText={setDias} style={styles.input} />
+      <FormField label="Dias de teste" helper="Ex.: 14">
+        <FormInput keyboardType="number-pad" placeholder="14" value={dias} onChangeText={setDias} />
+      </FormField>
 
-      <Pressable style={styles.btn} disabled={mutation.isPending} onPress={() => mutation.mutate()}>
-        <Text style={styles.btnLabel}>{mutation.isPending ? 'Salvando…' : 'Salvar'}</Text>
-      </Pressable>
+      <PrimaryButton
+        label={mutation.isPending ? 'Salvando…' : 'Salvar'}
+        loading={mutation.isPending}
+        onPress={() => mutation.mutate()}
+      />
 
-      {mutation.error ? <Text style={styles.err}>{(mutation.error as Error).message}</Text> : null}
-    </View>
+      {mutation.error ? <Text style={{ color: theme.error }}>{(mutation.error as Error).message}</Text> : null}
+    </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  wrap: { flex: 1, padding: 16, gap: 12 },
-  title: { fontSize: 20, fontWeight: '700' },
-  sub: { opacity: 0.78, lineHeight: 20 },
-  input: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#ccc',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  btn: { backgroundColor: '#2563eb', paddingVertical: 12, borderRadius: 12, alignItems: 'center' },
-  btnLabel: { color: '#fff', fontWeight: '800' },
-  err: { color: '#b91c1c' },
-  warn: { color: '#b45309', fontWeight: '700' },
-});

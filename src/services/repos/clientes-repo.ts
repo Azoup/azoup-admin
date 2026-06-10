@@ -1,11 +1,14 @@
 import { differenceInCalendarDays, parseISO } from 'date-fns';
 
 import { supabase } from '@/src/lib/supabase';
+import { obterMetricasClienteViaFunction } from '@/src/services/stripe-admin-api';
+import { prioridadeAssinatura } from '@/src/utils/assinatura-status';
 import type {
   AssinaturaClienteRow,
   AssinaturaLimitesOverrideRow,
   ClienteAzoupAdminView,
   ClienteAzoupRow,
+  ClienteMetricasUso,
   HistoricoFaturaRow,
   PlanoAssinaturaRow,
 } from '@/src/types/azoup';
@@ -30,7 +33,16 @@ function mesReferencia(row: HistoricoFaturaRow): string | null {
 
 function pickLatestAssinatura(rows: AssinaturaClienteRow[]): AssinaturaClienteRow | null {
   if (!rows.length) return null;
-  return [...rows].sort((a, b) => `${b.data_inicio ?? ''}`.localeCompare(`${a.data_inicio ?? ''}`))[0] ?? null;
+  return (
+    [...rows].sort((a, b) => {
+      const pa = prioridadeAssinatura(a);
+      const pb = prioridadeAssinatura(b);
+      if (pb !== pa) return pb - pa;
+      const da = b.atualizado_em ?? b.data_inicio ?? b.criado_em ?? '';
+      const db = a.atualizado_em ?? a.data_inicio ?? a.criado_em ?? '';
+      return `${da}`.localeCompare(`${db}`);
+    })[0] ?? null
+  );
 }
 
 function sortHistorico(rows: HistoricoFaturaRow[]): HistoricoFaturaRow[] {
@@ -174,6 +186,79 @@ async function buscarHistoricoFaturas(clienteId: string): Promise<HistoricoFatur
   return sortHistorico((data ?? []) as HistoricoFaturaRow[]);
 }
 
+async function contarTabela(
+  tabela: string,
+  coluna: string,
+  valor: string,
+): Promise<number | null> {
+  const { count, error } = await supabase
+    .from(tabela)
+    .select('id', { count: 'exact', head: true })
+    .eq(coluna, valor);
+
+  if (error) return null;
+  return count ?? 0;
+}
+
+async function buscarUltimaAtividadeLocal(clienteId: string): Promise<string | null> {
+  const consultas = await Promise.all([
+    supabase
+      .from('venda')
+      .select('updated_at,created_at')
+      .eq('cliente_id_tenant', clienteId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('produtos')
+      .select('updated_at,created_at')
+      .eq('cliente_id', clienteId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('producao_op')
+      .select('updated_at,created_at')
+      .eq('cliente_id_tenant', clienteId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  let melhor: string | null = null;
+  for (const { data } of consultas) {
+    const row = data as { updated_at?: string | null; created_at?: string | null } | null;
+    const cand = row?.updated_at ?? row?.created_at ?? null;
+    if (cand && (!melhor || cand > melhor)) melhor = cand;
+  }
+  return melhor;
+}
+
+/** Métricas de uso do tenant — Edge Function (service role) com fallback local. */
+export async function buscarMetricasUsoCliente(clienteId: string): Promise<ClienteMetricasUso> {
+  try {
+    const res = await obterMetricasClienteViaFunction({ cliente_id: clienteId });
+    return res.metricas;
+  } catch {
+    const [empresas, produtos, vendas, ops, ultimo] = await Promise.all([
+      contarTabela('empresas', 'cliente_id', clienteId),
+      contarTabela('produtos', 'cliente_id', clienteId),
+      contarTabela('venda', 'cliente_id_tenant', clienteId),
+      contarTabela('producao_op', 'cliente_id_tenant', clienteId),
+      buscarUltimaAtividadeLocal(clienteId),
+    ]);
+
+    return {
+      empresas_cadastradas: empresas,
+      produtos_cadastrados: produtos,
+      vendas,
+      ordens_producao: ops,
+      ultimo_acesso: ultimo,
+      ultimo_acesso_fonte: ultimo ? 'atividade' : null,
+    };
+  }
+}
+
 export async function montarVisaoCliente(clienteId: string, base?: ClienteAzoupRow): Promise<ClienteAzoupAdminView> {
   let cliente = base ?? null;
   if (!cliente) {
@@ -182,10 +267,13 @@ export async function montarVisaoCliente(clienteId: string, base?: ClienteAzoupR
     cliente = data as ClienteAzoupRow;
   }
 
-  const assinatura = await buscarAssinaturaRecente(clienteId);
+  const [assinatura, limites_override, historico_faturas, metricas_uso] = await Promise.all([
+    buscarAssinaturaRecente(clienteId),
+    buscarOverride(clienteId),
+    buscarHistoricoFaturas(clienteId),
+    buscarMetricasUsoCliente(clienteId),
+  ]);
   const plano = await buscarPlano(assinatura?.plano_id);
-  const limites_override = await buscarOverride(clienteId);
-  const historico_faturas = await buscarHistoricoFaturas(clienteId);
 
   const inicioAssinatura = safeParseIso(assinatura?.data_inicio ?? undefined);
   const dias_como_assinante = inicioAssinatura ? differenceInCalendarDays(new Date(), inicioAssinatura) : 0;
@@ -209,15 +297,47 @@ export async function montarVisaoCliente(clienteId: string, base?: ClienteAzoupR
     dias_como_assinante,
     meses_em_aberto: [...mesesAbertos].sort(),
     cobrancas_falhas,
+    metricas_uso,
   };
 }
 
 export type LimitesEffectivos = {
+  /** Total efetivo (override absoluto ou plano + adicionais na assinatura). */
   usuarios: number | null;
   empresas: number | null;
   armazenamento_gb: number | null;
+  /** Limite mensal IA — prioriza assinatura (`credito_ia_limite_mensal`). */
   tokens_ia_mes: number | null;
+  plano_usuarios: number | null;
+  plano_empresas: number | null;
+  /** Teto do plano Enterprise (`limite_empresas_enterprise`). */
+  limite_empresas_enterprise: number | null;
+  usuarios_adicionais: number;
+  empresas_adicionais: number;
+  override_usuarios: number | null;
+  override_empresas: number | null;
 };
+
+const USERS_COLUMN_CANDIDATES = [
+  'usuarios_inclusos',
+  'limite_usuarios',
+  'max_usuarios',
+  'usuarios_limite',
+  'qtde_usuarios',
+  'qtd_usuarios',
+  'limite_usuario',
+] as const;
+
+const EMPRESAS_COLUMN_CANDIDATES = [
+  'empresas_incluidas',
+  'limite_empresas',
+  'limite_empresas_enterprise',
+  'max_empresas',
+  'empresas_limite',
+  'qtde_empresas',
+  'qtd_empresas',
+  'limite_empresa',
+] as const;
 
 const GB_COLUMN_CANDIDATES = [
   'limite_armazenamento_gb',
@@ -226,15 +346,55 @@ const GB_COLUMN_CANDIDATES = [
   'armazenamento_gb_limite',
   'limite_armazenamento',
   'quota_storage_gb',
+  'armazenamento_gb',
 ] as const;
+
+const IA_TOKEN_COLUMN_CANDIDATES = [
+  'credito_ia_mensal',
+  'credito_ia_limite_mensal',
+  'limite_tokens_ia_mes',
+  'limite_tokens_mes',
+  'limite_ia_tokens_mes',
+  'limite_tokens',
+  'quota_tokens_ia_mes',
+  'tokens_limite_mes',
+] as const;
+
+function coerceNum(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === 'number' && !Number.isNaN(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    return Number.isNaN(n) ? null : n;
+  }
+  return null;
+}
 
 function firstNumericFromKeys(r: Record<string, unknown> | null, keys: readonly string[]): number | null {
   if (!r) return null;
   for (const k of keys) {
-    const v = r[k];
-    if (v != null && typeof v === 'number' && !Number.isNaN(v)) return v as number;
+    const n = coerceNum(r[k]);
+    if (n != null) return n;
   }
   return null;
+}
+
+function totalComAdicionais(base: number | null, adicionais: number): number | null {
+  if (base == null) return adicionais > 0 ? adicionais : null;
+  return base + adicionais;
+}
+
+/** `empresas_incluidas` do plano — 0 é válido (Enterprise); ausente no row → default 1 (schema Azoup). */
+function empresasIncluidasDoPlano(planoRec: Record<string, unknown> | null): number | null {
+  if (!planoRec) return null;
+  if (Object.prototype.hasOwnProperty.call(planoRec, 'empresas_incluidas')) {
+    return coerceNum(planoRec.empresas_incluidas) ?? 0;
+  }
+  const alt = firstNumericFromKeys(
+    planoRec,
+    EMPRESAS_COLUMN_CANDIDATES.filter((c) => c !== 'empresas_incluidas' && c !== 'limite_empresas_enterprise'),
+  );
+  return alt ?? 1;
 }
 
 export function resolverLimitesEfetivos(view: ClienteAzoupAdminView): LimitesEffectivos {
@@ -243,45 +403,58 @@ export function resolverLimitesEfetivos(view: ClienteAzoupAdminView): LimitesEff
   const a = view.assinatura;
   const ovRec = (ov ?? null) as unknown as Record<string, unknown> | null;
   const planoRec = (plano ?? null) as unknown as Record<string, unknown> | null;
+  const assinRec = (a ?? null) as unknown as Record<string, unknown> | null;
+  const clienteRec = view as unknown as Record<string, unknown>;
 
-  const usuAdic =
-    typeof a?.usuarios_adicionais === 'number' && !Number.isNaN(a.usuarios_adicionais)
-      ? a.usuarios_adicionais
-      : typeof a?.usuarios_extras === 'number' && !Number.isNaN(a.usuarios_extras)
-        ? a.usuarios_extras
-        : null;
-  const empAdic =
-    typeof a?.empresas_adicionais === 'number' && !Number.isNaN(a.empresas_adicionais)
-      ? a.empresas_adicionais
-      : typeof a?.empresas_extras === 'number' && !Number.isNaN(a.empresas_extras)
-        ? a.empresas_extras
-        : null;
+  const usuariosAdicionais =
+    coerceNum(a?.usuarios_adicionais) ?? coerceNum(a?.usuarios_extras) ?? 0;
+  const empresasAdicionais =
+    coerceNum(a?.empresas_adicionais) ?? coerceNum(a?.empresas_extras) ?? 0;
 
-  const tokenFrom = (r: Record<string, unknown> | null) =>
-    (r?.limite_tokens_ia_mes as number | null | undefined) ??
-    (r?.limite_tokens_mes as number | null | undefined) ??
-    (r?.limite_ia_tokens_mes as number | null | undefined) ??
-    (r?.limite_tokens as number | null | undefined) ??
-    (r?.quota_tokens_ia_mes as number | null | undefined) ??
-    null;
+  const overrideUsuarios =
+    coerceNum(ov?.limite_usuarios) ?? firstNumericFromKeys(ovRec, USERS_COLUMN_CANDIDATES);
+  const overrideEmpresas =
+    coerceNum(ov?.limite_empresas) ?? firstNumericFromKeys(ovRec, EMPRESAS_COLUMN_CANDIDATES);
+
+  const planoUsuarios =
+    firstNumericFromKeys(planoRec, USERS_COLUMN_CANDIDATES) ??
+    coerceNum(view.qtde_user) ??
+    coerceNum(view.usuarios_extra) ??
+    coerceNum(clienteRec.qtde_user) ??
+    coerceNum(clienteRec.usuarios_extra);
+
+  const planoEmpresas = empresasIncluidasDoPlano(planoRec);
+  const limiteEmpresasEnterprise = coerceNum(planoRec?.limite_empresas_enterprise);
+
+  const tokensAssinatura = coerceNum(a?.credito_ia_limite_mensal);
+
+  const empresasLimiteContratado =
+    overrideEmpresas ?? totalComAdicionais(planoEmpresas, empresasAdicionais);
 
   return {
-    usuarios: ov?.limite_usuarios ?? plano?.limite_usuarios ?? usuAdic,
-    empresas: ov?.limite_empresas ?? plano?.limite_empresas ?? empAdic,
+    usuarios: overrideUsuarios ?? totalComAdicionais(planoUsuarios, usuariosAdicionais),
+    empresas: empresasLimiteContratado,
     armazenamento_gb:
       firstNumericFromKeys(ovRec, GB_COLUMN_CANDIDATES) ??
       firstNumericFromKeys(planoRec, GB_COLUMN_CANDIDATES) ??
-      ov?.limite_armazenamento_gb ??
-      plano?.limite_armazenamento_gb ??
+      firstNumericFromKeys(assinRec, GB_COLUMN_CANDIDATES) ??
+      coerceNum(ov?.limite_armazenamento_gb) ??
+      coerceNum(plano?.limite_armazenamento_gb) ??
       null,
-    /** Limite mensal IA em assinatura (`credito_ia_limite_mensal`) ou override/plano. O campo de formulário “somar” usa `credito_ia_extra`. */
     tokens_ia_mes:
-      tokenFrom(ovRec) ??
-      tokenFrom(planoRec) ??
-      ov?.limite_tokens_ia_mes ??
-      plano?.limite_tokens_ia_mes ??
-      (typeof a?.credito_ia_limite_mensal === 'number' && !Number.isNaN(a.credito_ia_limite_mensal) ? a.credito_ia_limite_mensal : null) ??
+      firstNumericFromKeys(ovRec, IA_TOKEN_COLUMN_CANDIDATES) ??
+      firstNumericFromKeys(planoRec, IA_TOKEN_COLUMN_CANDIDATES) ??
+      tokensAssinatura ??
+      coerceNum(ov?.limite_tokens_ia_mes) ??
+      coerceNum(plano?.limite_tokens_ia_mes) ??
       null,
+    plano_usuarios: planoUsuarios,
+    plano_empresas: planoEmpresas,
+    limite_empresas_enterprise: limiteEmpresasEnterprise,
+    usuarios_adicionais: usuariosAdicionais,
+    empresas_adicionais: empresasAdicionais,
+    override_usuarios: overrideUsuarios,
+    override_empresas: overrideEmpresas,
   };
 }
 

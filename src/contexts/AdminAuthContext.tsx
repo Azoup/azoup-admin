@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 
 import { supabase } from '@/src/lib/supabase';
@@ -8,6 +8,7 @@ import type { AdminPapel, AdminUserRow } from '@/src/types/azoup';
 type AdminAuthState = {
   session: Session | null;
   adminProfile: AdminUserRow | null;
+  /** Bloqueia UI só no boot ou quando ainda não há perfil para o usuário logado. */
   loading: boolean;
   adminError: string | null;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
@@ -20,6 +21,9 @@ type AdminAuthState = {
 };
 
 const AdminAuthContext = createContext<AdminAuthState | undefined>(undefined);
+
+/** Eventos do Supabase ao voltar para a aba — não devem refazer validação nem spinner. */
+const AUTH_EVENTS_SEM_RELOAD = new Set(['TOKEN_REFRESHED', 'USER_UPDATED', 'INITIAL_SESSION']);
 
 function derivePermissions(papel: AdminPapel | null) {
   return {
@@ -67,15 +71,28 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   const [adminProfile, setAdminProfile] = useState<AdminUserRow | null>(null);
   const [adminError, setAdminError] = useState<string | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
-  const [adminLoading, setAdminLoading] = useState(true);
+  const [adminLoading, setAdminLoading] = useState(false);
+
+  const loadedUserIdRef = useRef<string | null>(null);
+  const adminProfileRef = useRef<AdminUserRow | null>(null);
+
+  useEffect(() => {
+    adminProfileRef.current = adminProfile;
+  }, [adminProfile]);
 
   useEffect(() => {
     let mounted = true;
 
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      setSession(data.session ?? null);
-      setAdminLoading(Boolean(data.session?.user?.id));
+      const s = data.session ?? null;
+      setSession(s);
+      if (s?.user?.id) {
+        setAdminLoading(true);
+      } else {
+        setAdminLoading(false);
+        loadedUserIdRef.current = null;
+      }
       setSessionLoading(false);
     });
 
@@ -83,18 +100,33 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next);
+
       if (!next?.user?.id) {
+        loadedUserIdRef.current = null;
+        adminProfileRef.current = null;
         setAdminProfile(null);
         setAdminError(null);
         setAdminLoading(false);
         return;
       }
-      // Ao voltar para a aba o Supabase costuma emitir TOKEN_REFRESHED com o mesmo user.id.
-      // Não reativar "loading" aqui — o useEffect não roda de novo e o app ficava preso no spinner.
-      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+
+      const uid = next.user.id;
+
+      if (AUTH_EVENTS_SEM_RELOAD.has(event)) {
         setAdminLoading(false);
         return;
       }
+
+      if (loadedUserIdRef.current === uid && adminProfileRef.current) {
+        setAdminLoading(false);
+        return;
+      }
+
+      if (event === 'SIGNED_IN' && loadedUserIdRef.current === uid) {
+        setAdminLoading(false);
+        return;
+      }
+
       setAdminLoading(true);
     });
 
@@ -123,18 +155,27 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       });
 
     async function loadAdmin() {
-      if (!session?.user?.id) {
+      const userId = session?.user?.id;
+      if (!userId) {
         setAdminProfile(null);
         setAdminError(null);
+        setAdminLoading(false);
+        loadedUserIdRef.current = null;
+        return;
+      }
+
+      if (loadedUserIdRef.current === userId && adminProfileRef.current) {
         setAdminLoading(false);
         return;
       }
 
       setAdminLoading(true);
       try {
-        const result = await withTimeout(fetchAdminProfileResilient(session.user.id, session.user.email), 25_000);
+        const result = await withTimeout(fetchAdminProfileResilient(userId, session.user.email), 25_000);
         if (!cancelled) {
           setAdminProfile(result.profile);
+          adminProfileRef.current = result.profile;
+          loadedUserIdRef.current = result.profile ? userId : null;
           const finalError = result.profile ? null : result.error ?? 'Sem diagnóstico retornado';
           setAdminError(finalError);
           if (!result.profile) {
@@ -148,6 +189,8 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : 'Falha ao validar acesso administrativo';
           setAdminProfile(null);
+          adminProfileRef.current = null;
+          loadedUserIdRef.current = null;
           setAdminError(msg);
           console.warn('[admin-auth]', msg);
         }
@@ -160,22 +203,29 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [session?.user?.id]);
+  }, [session?.user?.id, session?.user?.email]);
 
   const signIn = useCallback(async (email: string, password: string) => {
+    loadedUserIdRef.current = null;
+    adminProfileRef.current = null;
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     return { error: error ? new Error(error.message) : null };
   }, []);
 
   const signOut = useCallback(async () => {
+    loadedUserIdRef.current = null;
+    adminProfileRef.current = null;
     await supabase.auth.signOut();
     setAdminProfile(null);
     setAdminError(null);
+    setAdminLoading(false);
   }, []);
 
   const papel = (adminProfile?.role ?? adminProfile?.papel ?? null) as AdminPapel | null;
   const perms = derivePermissions(papel);
-  const loading = sessionLoading || adminLoading;
+
+  const loading =
+    sessionLoading || (Boolean(session?.user?.id) && adminLoading && !adminProfile);
 
   const value = useMemo(
     () => ({
