@@ -5,6 +5,7 @@ create table if not exists public.admin_cliente_conversas (
   id uuid primary key default gen_random_uuid(),
   cliente_id uuid not null references public.clientes_azoup(id) on delete cascade,
   data_conversa date not null,
+  hora_conversa time,
   descricao text not null,
   admin_email text,
   created_at timestamptz not null default now()

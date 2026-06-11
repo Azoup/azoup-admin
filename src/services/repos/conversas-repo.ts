@@ -1,6 +1,7 @@
 import { supabase } from '@/src/lib/supabase';
 import type { AdminClienteConversaRow, ClienteAzoupRow } from '@/src/types/azoup';
 import { rotuloCliente } from '@/src/utils/cliente-label';
+import { normalizarHorarioInput } from '@/src/utils/conversa-datetime';
 
 export type ClienteConversaComCliente = AdminClienteConversaRow & {
   cliente?: Pick<ClienteAzoupRow, 'id' | 'nome' | 'email' | 'telefone'> | null;
@@ -54,8 +55,9 @@ export async function listarConversasClientes(params?: {
 }): Promise<ClienteConversaComCliente[]> {
   let query = supabase
     .from('admin_cliente_conversas')
-    .select('id,cliente_id,data_conversa,descricao,admin_email,created_at')
+    .select('id,cliente_id,data_conversa,hora_conversa,descricao,admin_email,created_at')
     .order('data_conversa', { ascending: false })
+    .order('hora_conversa', { ascending: false, nullsFirst: false })
     .limit(params?.limit ?? 200);
 
   if (params?.clienteId) {
@@ -78,6 +80,7 @@ export async function listarConversasClientes(params?: {
 export async function criarConversaCliente(params: {
   clienteId: string;
   dataConversa: string;
+  horaConversa?: string | null;
   descricao: string;
   adminEmail?: string | null;
 }): Promise<AdminClienteConversaRow> {
@@ -86,11 +89,17 @@ export async function criarConversaCliente(params: {
   if (!params.clienteId) throw new Error('Selecione um cliente.');
   if (!params.dataConversa) throw new Error('Informe a data da conversa.');
 
+  const hora = params.horaConversa != null ? normalizarHorarioInput(params.horaConversa) : null;
+  if (params.horaConversa?.trim() && !hora) {
+    throw new Error('Horário inválido. Use o formato HH:MM (ex.: 14:30).');
+  }
+
   const { data, error } = await supabase
     .from('admin_cliente_conversas')
     .insert({
       cliente_id: params.clienteId,
       data_conversa: params.dataConversa,
+      hora_conversa: hora,
       descricao,
       admin_email: params.adminEmail ?? null,
     } as never)

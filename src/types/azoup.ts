@@ -192,6 +192,8 @@ export interface AdminClienteConversaRow {
   id: string;
   cliente_id: string;
   data_conversa: string;
+  /** Horário em que a conversa ocorreu (HH:MM ou HH:MM:SS). */
+  hora_conversa?: string | null;
   descricao: string;
   admin_email?: string | null;
   created_at?: string | null;

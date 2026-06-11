@@ -6,7 +6,7 @@ import { ScreenCard } from '@/components/ui/ScreenCard';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import type { ClienteConversaComCliente } from '@/src/services/repos/conversas-repo';
 import { rotuloClienteConversa } from '@/src/services/repos/conversas-repo';
-import { formatDateBR } from '@/src/utils/format';
+import { formatConversaQuando, formatDateBR } from '@/src/utils/format';
 
 type Props = {
   conversa: ClienteConversaComCliente;
@@ -29,7 +29,7 @@ export function ConversaClienteCard({ conversa, modo = 'lista' }: Props) {
           <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 15, flex: 1 }}>Conversa</Text>
         )}
         <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 13 }}>
-          {formatDateBR(conversa.data_conversa)}
+          {formatConversaQuando(conversa.data_conversa, conversa.hora_conversa)}
         </Text>
       </View>
       <Text style={{ color: theme.text, fontSize: 14, lineHeight: 21 }}>{conversa.descricao}</Text>

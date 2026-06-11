@@ -19,6 +19,21 @@ export function formatDateBR(iso?: string | null) {
   }
 }
 
+export function formatHoraBR(raw?: string | null) {
+  if (!raw) return '';
+  const m = `${raw}`.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return `${raw}`;
+  return `${m[1].padStart(2, '0')}:${m[2]}`;
+}
+
+/** Data da conversa + horário opcional (ex.: 20/05/2026 às 14:30). */
+export function formatConversaQuando(data?: string | null, hora?: string | null) {
+  const d = formatDateBR(data);
+  const h = formatHoraBR(hora);
+  if (d === '—') return '—';
+  return h ? `${d} às ${h}` : d;
+}
+
 export function formatDateTimeBR(iso?: string | null) {
   if (!iso) return '—';
   try {

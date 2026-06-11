@@ -5,6 +5,7 @@ import { FlatList, StyleSheet, View } from 'react-native';
 import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
 import { ConversaClienteCard } from '@/components/ui/ConversaClienteCard';
 import { FormDateInput } from '@/components/ui/FormDateInput';
+import { FormTimeInput } from '@/components/ui/FormTimeInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -23,14 +24,7 @@ import {
 } from '@/src/services/repos/conversas-repo';
 import type { ClienteAzoupRow } from '@/src/types/azoup';
 import { rotuloCliente } from '@/src/utils/cliente-label';
-
-function hojeIsoLocal(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = `${d.getMonth() + 1}`.padStart(2, '0');
-  const day = `${d.getDate()}`.padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
+import { agoraHorarioLocal, hojeIsoLocal } from '@/src/utils/conversa-datetime';
 
 export default function ConversasScreen() {
   const { theme } = useTheme();
@@ -39,6 +33,7 @@ export default function ConversasScreen() {
 
   const [cliente, setCliente] = useState<ClienteAzoupRow | null>(null);
   const [dataConversa, setDataConversa] = useState(hojeIsoLocal);
+  const [horaConversa, setHoraConversa] = useState(agoraHorarioLocal);
   const [descricao, setDescricao] = useState('');
   const [filtroCliente, setFiltroCliente] = useState<ClienteAzoupRow | null>(null);
 
@@ -69,6 +64,7 @@ export default function ConversasScreen() {
       return criarConversaCliente({
         clienteId: cliente.id,
         dataConversa,
+        horaConversa,
         descricao,
         adminEmail: adminProfile?.email,
       });
@@ -76,6 +72,7 @@ export default function ConversasScreen() {
     onSuccess: async () => {
       setDescricao('');
       setDataConversa(hojeIsoLocal());
+      setHoraConversa(agoraHorarioLocal());
       await qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
       await qc.invalidateQueries({ queryKey: ['clientes_com_conversas'] });
     },
@@ -123,6 +120,9 @@ export default function ConversasScreen() {
             </FormField>
             <FormField label="Data da conversa" required>
               <FormDateInput value={dataConversa} onChange={setDataConversa} />
+            </FormField>
+            <FormField label="Horário da conversa" required>
+              <FormTimeInput value={horaConversa} onChange={setHoraConversa} />
             </FormField>
             <FormField label="O que foi conversado" required>
               <FormInput
