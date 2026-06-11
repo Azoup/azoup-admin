@@ -1,7 +1,7 @@
 import type { AdminPapel } from '@/src/types/azoup';
 
 /** Chaves das abas do painel administrativo. */
-export type AdminScreenKey = 'dashboard' | 'clients' | 'billing' | 'audit' | 'admins';
+export type AdminScreenKey = 'dashboard' | 'clients' | 'conversas' | 'billing' | 'audit' | 'admins';
 
 export type AdminScreenDef = {
   key: AdminScreenKey;
@@ -13,6 +13,7 @@ export type AdminScreenDef = {
 export const ADMIN_SCREENS: readonly AdminScreenDef[] = [
   { key: 'dashboard', label: 'Painel' },
   { key: 'clients', label: 'Clientes' },
+  { key: 'conversas', label: 'Conversas' },
   { key: 'billing', label: 'Cobrança' },
   { key: 'audit', label: 'Auditoria' },
   { key: 'admins', label: 'Acessos', ownerOnly: true },
@@ -25,9 +26,9 @@ export function telasPadraoPorPapel(papel: AdminPapel): AdminScreenKey[] {
     case 'owner':
       return [...ADMIN_SCREEN_KEYS];
     case 'manager':
-      return ['dashboard', 'clients', 'billing', 'audit'];
+      return ['dashboard', 'clients', 'conversas', 'billing', 'audit'];
     case 'viewer':
-      return ['dashboard', 'clients', 'audit'];
+      return ['dashboard', 'clients', 'conversas', 'audit'];
     default:
       return ['dashboard'];
   }

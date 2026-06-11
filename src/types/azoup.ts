@@ -188,6 +188,15 @@ export interface AdminCouponRow {
   [key: string]: unknown;
 }
 
+export interface AdminClienteConversaRow {
+  id: string;
+  cliente_id: string;
+  data_conversa: string;
+  descricao: string;
+  admin_email?: string | null;
+  created_at?: string | null;
+}
+
 export interface AdminAuditLogRow {
   id: string;
   admin_email?: string | null;

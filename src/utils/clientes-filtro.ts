@@ -1,12 +1,12 @@
 import {
-  endOfDay,
-  endOfMonth,
-  isWithinInterval,
-  parseISO,
-  startOfDay,
-  startOfMonth,
-  subDays,
-  subMonths,
+    endOfDay,
+    endOfMonth,
+    isWithinInterval,
+    parseISO,
+    startOfDay,
+    startOfMonth,
+    subDays,
+    subMonths,
 } from 'date-fns';
 
 import type { ClienteAzoupAdminView } from '@/src/types/azoup';

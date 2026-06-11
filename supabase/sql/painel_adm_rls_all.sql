@@ -73,3 +73,38 @@ for update
 to authenticated
 using (public.painel_admin_ativo(array['owner', 'manager']::text[]))
 with check (public.painel_admin_ativo(array['owner', 'manager']::text[]));
+
+-- ---------------------------------------------------------------------------
+-- admin_cliente_conversas (histórico de conversas com clientes)
+-- ---------------------------------------------------------------------------
+create table if not exists public.admin_cliente_conversas (
+  id uuid primary key default gen_random_uuid(),
+  cliente_id uuid not null references public.clientes_azoup(id) on delete cascade,
+  data_conversa date not null,
+  descricao text not null,
+  admin_email text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_admin_cliente_conversas_cliente
+  on public.admin_cliente_conversas (cliente_id);
+
+create index if not exists idx_admin_cliente_conversas_data
+  on public.admin_cliente_conversas (data_conversa desc, created_at desc);
+
+alter table public.admin_cliente_conversas enable row level security;
+
+drop policy if exists painel_admin_conversas_select on public.admin_cliente_conversas;
+drop policy if exists painel_admin_conversas_insert on public.admin_cliente_conversas;
+
+create policy painel_admin_conversas_select
+on public.admin_cliente_conversas
+for select
+to authenticated
+using (public.painel_admin_ativo());
+
+create policy painel_admin_conversas_insert
+on public.admin_cliente_conversas
+for insert
+to authenticated
+with check (public.painel_admin_ativo());

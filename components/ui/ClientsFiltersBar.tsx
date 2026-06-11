@@ -2,17 +2,17 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { Text } from '@/components/Themed';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { DateRangeFilter } from '@/components/ui/DateRangeFilter';
 import { FormInput } from '@/components/ui/FormInput';
 import { ScreenCard } from '@/components/ui/ScreenCard';
-import { Text } from '@/components/Themed';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import {
-  CLIENTES_FILTRO_INICIAL,
-  type ClienteStatusFiltro,
-  type ClientesFiltroState,
-  temFiltroAtivo,
+    CLIENTES_FILTRO_INICIAL,
+    type ClienteStatusFiltro,
+    type ClientesFiltroState,
+    temFiltroAtivo,
 } from '@/src/utils/clientes-filtro';
 
 type Props = {

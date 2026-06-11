@@ -82,6 +82,14 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="conversas"
+        options={{
+          title: 'Conversas',
+          href: canAccessScreen('conversas') ? undefined : null,
+          tabBarIcon: ({ color }) => <TabBarIcon name="comments" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="billing"
         options={{
           title: 'Cobrança',
