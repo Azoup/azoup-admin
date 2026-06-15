@@ -16,6 +16,55 @@ function normalizarTelasAcesso(raw: unknown): string[] {
     .filter((t) => (ADMIN_SCREEN_KEYS as readonly string[]).includes(t));
 }
 
+const NF_CHUNK = 80;
+
+async function contarNotasFiscaisGeradasDoCliente(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+): Promise<number> {
+  const ids = new Set<string>();
+
+  const { data: direto, error: errDireto } = await supabaseAdmin
+    .from('nota_fiscal')
+    .select('id')
+    .eq('cliente_id_tenant', clienteId)
+    .not('numero', 'is', null)
+    .is('cancelado_em', null);
+  if (errDireto) throw errDireto;
+  for (const row of direto ?? []) ids.add(String(row.id));
+
+  const [vendasRes, fatRes, empRes] = await Promise.all([
+    supabaseAdmin.from('venda').select('id').eq('cliente_id_tenant', clienteId),
+    supabaseAdmin.from('venda_faturamento').select('id').eq('cliente_id_tenant', clienteId),
+    supabaseAdmin.from('empresas').select('id').eq('cliente_id', clienteId),
+  ]);
+  if (vendasRes.error) throw vendasRes.error;
+  if (fatRes.error) throw fatRes.error;
+  if (empRes.error) throw empRes.error;
+
+  const relacoes: Array<{ campo: 'venda_id' | 'venda_faturamento_id' | 'empresa_id'; ids: (string | number)[] }> = [
+    { campo: 'venda_id', ids: (vendasRes.data ?? []).map((v) => v.id as number) },
+    { campo: 'venda_faturamento_id', ids: (fatRes.data ?? []).map((f) => f.id as string) },
+    { campo: 'empresa_id', ids: (empRes.data ?? []).map((e) => e.id as string) },
+  ];
+
+  for (const { campo, ids: foreignIds } of relacoes) {
+    for (let i = 0; i < foreignIds.length; i += NF_CHUNK) {
+      const chunk = foreignIds.slice(i, i + NF_CHUNK);
+      const { data, error } = await supabaseAdmin
+        .from('nota_fiscal')
+        .select('id')
+        .in(campo, chunk)
+        .not('numero', 'is', null)
+        .is('cancelado_em', null);
+      if (error) throw error;
+      for (const row of data ?? []) ids.add(String(row.id));
+    }
+  }
+
+  return ids.size;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -152,6 +201,8 @@ serve(async (req) => {
       if (opsRes.error) throw opsRes.error;
       if (usuariosRes.error) throw usuariosRes.error;
 
+      const notasFiscaisEmitidas = await contarNotasFiscaisGeradasDoCliente(supabaseAdmin, clienteId);
+
       const authIds = [...new Set((usuariosRes.data ?? []).map((u) => u.auth_id).filter(Boolean))] as string[];
 
       let ultimoLoginAuth: string | null = null;
@@ -189,6 +240,7 @@ serve(async (req) => {
             produtos_cadastrados: produtosRes.count ?? 0,
             vendas: vendasRes.count ?? 0,
             ordens_producao: opsRes.count ?? 0,
+            notas_fiscais_emitidas: notasFiscaisEmitidas,
             ultimo_acesso: ultimoAcesso,
             ultimo_acesso_fonte: ultimoAcessoFonte,
           },

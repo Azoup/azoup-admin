@@ -194,6 +194,10 @@ export default function ClientDetailScreen() {
           label="Ordens de produção (OPs)"
           value={metricas?.ordens_producao != null ? String(metricas.ordens_producao) : '—'}
         />
+        <Meta
+          label="Notas fiscais geradas"
+          value={metricas?.notas_fiscais_emitidas != null ? String(metricas.notas_fiscais_emitidas) : '—'}
+        />
       </ScreenCard>
 
       <ScreenCard>

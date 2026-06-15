@@ -3,6 +3,7 @@ import { differenceInCalendarDays, parseISO } from 'date-fns';
 import { supabase } from '@/src/lib/supabase';
 import { obterMetricasClienteViaFunction } from '@/src/services/stripe-admin-api';
 import { prioridadeAssinatura } from '@/src/utils/assinatura-status';
+import { contarNotasFiscaisGeradasDoCliente } from '@/src/utils/nota-fiscal-metricas';
 import type {
   AssinaturaClienteRow,
   AssinaturaLimitesOverrideRow,
@@ -269,17 +270,26 @@ async function buscarUltimaAtividadeLocal(clienteId: string): Promise<string | n
   return melhor;
 }
 
+async function contarNotasFiscaisEmitidas(clienteId: string): Promise<number | null> {
+  try {
+    return await contarNotasFiscaisGeradasDoCliente(supabase, clienteId);
+  } catch {
+    return null;
+  }
+}
+
 /** Métricas de uso do tenant — Edge Function (service role) com fallback local. */
 export async function buscarMetricasUsoCliente(clienteId: string): Promise<ClienteMetricasUso> {
   try {
     const res = await obterMetricasClienteViaFunction({ cliente_id: clienteId });
     return res.metricas;
   } catch {
-    const [empresas, produtos, vendas, ops, ultimo] = await Promise.all([
+    const [empresas, produtos, vendas, ops, notasFiscais, ultimo] = await Promise.all([
       contarTabela('empresas', 'cliente_id', clienteId),
       contarTabela('produtos', 'cliente_id', clienteId),
       contarTabela('venda', 'cliente_id_tenant', clienteId),
       contarTabela('producao_op', 'cliente_id_tenant', clienteId),
+      contarNotasFiscaisEmitidas(clienteId),
       buscarUltimaAtividadeLocal(clienteId),
     ]);
 
@@ -288,6 +298,7 @@ export async function buscarMetricasUsoCliente(clienteId: string): Promise<Clien
       produtos_cadastrados: produtos,
       vendas,
       ordens_producao: ops,
+      notas_fiscais_emitidas: notasFiscais,
       ultimo_acesso: ultimo,
       ultimo_acesso_fonte: ultimo ? 'atividade' : null,
     };

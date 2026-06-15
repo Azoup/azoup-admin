@@ -241,6 +241,8 @@ export type ClienteMetricasUso = {
   produtos_cadastrados: number | null;
   vendas: number | null;
   ordens_producao: number | null;
+  /** NF-e geradas (número atribuído, não canceladas). */
+  notas_fiscais_emitidas: number | null;
   /** Último login em auth.users dos usuários do tenant; senão última atividade em venda/produto/OP. */
   ultimo_acesso: string | null;
   ultimo_acesso_fonte?: 'auth' | 'atividade' | null;

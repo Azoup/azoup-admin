@@ -111,6 +111,7 @@ export type ClienteMetricasResponse = {
     produtos_cadastrados: number;
     vendas: number;
     ordens_producao: number;
+    notas_fiscais_emitidas: number;
     ultimo_acesso: string | null;
     ultimo_acesso_fonte: 'auth' | 'atividade' | null;
   };
