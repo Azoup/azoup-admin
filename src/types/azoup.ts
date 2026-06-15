@@ -58,8 +58,11 @@ export interface PlanoAssinaturaRow {
   nome?: string | null;
   slug?: string | null;
   descricao?: string | null;
-  stripe_price_id?: string | null;
   stripe_product_id?: string | null;
+  /** Preço mensal base no Stripe (schema Azoup). */
+  stripe_price_id_base?: string | null;
+  /** Alias legado em alguns ambientes. */
+  stripe_price_id?: string | null;
   valor_mensal_centavos?: number | null;
   /** Schema Azoup (`setup_plans.sql`). */
   usuarios_inclusos?: number | null;
@@ -173,20 +176,37 @@ export interface AdminBillingSettingsRow {
 
 export interface AdminCouponRow {
   id: string;
-  codigo_promocional?: string | null;
-  stripe_coupon_id?: string | null;
-  stripe_promotion_code_id?: string | null;
+  code: string;
+  plan_id: number;
+  /** Todos os planos vinculados; plan_id = primeiro item. */
+  aplicavel_planos_ids?: number[] | null;
+  discount_type: 'percent' | 'amount';
+  discount_value: number;
+  duration: 'once' | 'repeating' | 'forever' | string;
+  duration_in_months?: number | null;
+  redeem_by?: string | null;
+  max_redemptions?: number | null;
+  stripe_coupon_id: string;
+  stripe_promotion_code_id: string;
+  active: boolean;
+  created_by_admin?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export type InserirCupomAdminInput = {
+  codigo: string;
   percent_off?: number | null;
   amount_off_centavos?: number | null;
-  duracao?: string | null;
+  duration: 'once' | 'repeating' | 'forever';
+  duration_in_months?: number;
   max_redemptions?: number | null;
   redeem_by?: string | null;
-  aplicavel_planos_ids?: string[] | null;
-  apenas_novas_assinaturas?: boolean | null;
-  criado_por_admin_id?: string | null;
-  created_at?: string | null;
-  [key: string]: unknown;
-}
+  aplicavel_planos_ids: number[];
+  stripe_coupon_id: string;
+  stripe_promotion_code_id: string;
+  created_by_admin?: string | null;
+};
 
 export interface AdminClienteConversaRow {
   id: string;

@@ -109,3 +109,24 @@ on public.admin_cliente_conversas
 for insert
 to authenticated
 with check (public.painel_admin_ativo());
+
+-- ---------------------------------------------------------------------------
+-- admin_coupons (cupons criados pelo painel)
+-- ---------------------------------------------------------------------------
+alter table public.admin_coupons enable row level security;
+
+drop policy if exists "deny_all_admin_coupons" on public.admin_coupons;
+drop policy if exists painel_admin_coupons_select on public.admin_coupons;
+drop policy if exists painel_admin_coupons_insert on public.admin_coupons;
+
+create policy painel_admin_coupons_select
+on public.admin_coupons
+for select
+to authenticated
+using (public.painel_admin_ativo());
+
+create policy painel_admin_coupons_insert
+on public.admin_coupons
+for insert
+to authenticated
+with check (public.painel_admin_ativo(array['owner', 'manager']::text[]));

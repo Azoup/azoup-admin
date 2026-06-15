@@ -16,6 +16,9 @@ export type CreateCouponPayload = {
   duration_in_months?: number;
   max_redemptions?: number;
   redeem_by?: string | null;
+  /** IDs prod_xxx — restrito em applies_to.products no Stripe. */
+  aplicavel_product_ids?: string[];
+  /** Opcional: resolve produto via API Stripe quando product_id não veio do banco. */
   aplicavel_price_ids?: string[];
   apenas_novas_assinaturas?: boolean;
 };

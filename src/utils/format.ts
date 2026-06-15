@@ -48,3 +48,21 @@ export function formatDateTimeBR(iso?: string | null) {
     return iso;
   }
 }
+
+export function rotuloValidadeCupom(redeemBy?: string | null) {
+  if (!redeemBy) return 'Sem data limite para resgate';
+  return `Válido para resgate até ${formatDateBR(redeemBy)}`;
+}
+
+export function rotuloDuracaoCupom(duration?: string | null, durationInMonths?: number | null) {
+  if (duration === 'once') return 'Aplicabilidade: uma vez (primeira cobrança)';
+  if (duration === 'forever') return 'Aplicabilidade: repete em todas as cobranças';
+  if (duration === 'repeating') {
+    const meses = Number(durationInMonths);
+    if (Number.isFinite(meses) && meses > 0) {
+      return `Aplicabilidade: repete por ${meses} ${meses === 1 ? 'mês' : 'meses'}`;
+    }
+    return 'Aplicabilidade: repete por período limitado';
+  }
+  return duration ? `Aplicabilidade: ${duration}` : 'Aplicabilidade: —';
+}

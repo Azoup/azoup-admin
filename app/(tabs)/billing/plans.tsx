@@ -7,6 +7,7 @@ import { Text } from '@/components/Themed';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { listarPlanos } from '@/src/services/repos/billing-repo';
 import { formatBRLFromCentavos } from '@/src/utils/format';
+import { stripePriceIdDoPlano } from '@/src/utils/plano-stripe';
 
 export default function PlansScreen() {
   const { theme } = useTheme();
@@ -39,7 +40,7 @@ export default function PlansScreen() {
             {item.nome ?? item.slug ?? item.id}
           </Text>
           <Text style={{ color: theme.textMuted }}>Preço mensal: {formatBRLFromCentavos(item.valor_mensal_centavos)}</Text>
-          <Text style={{ color: theme.textMuted }}>Stripe price: {item.stripe_price_id ?? '—'}</Text>
+          <Text style={{ color: theme.textMuted }}>Stripe price: {stripePriceIdDoPlano(item) ?? '—'}</Text>
           <Text style={{ color: theme.textMuted }}>
             Limites · usuários {item.limite_usuarios ?? '—'} · empresas {item.limite_empresas ?? '—'} · GB{' '}
             {item.limite_armazenamento_gb ?? '—'} · tokens {item.limite_tokens_ia_mes ?? '—'}

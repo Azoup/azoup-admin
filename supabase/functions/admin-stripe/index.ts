@@ -419,9 +419,20 @@ serve(async (req) => {
       if (p.max_redemptions != null) couponParams.max_redemptions = Number(p.max_redemptions);
       if (p.redeem_by) couponParams.redeem_by = Math.floor(new Date(`${p.redeem_by}`).getTime() / 1000);
 
-      const priceIds = (p.aplicavel_price_ids as string[] | undefined)?.filter(Boolean);
-      if (priceIds?.length) {
-        couponParams.applies_to = { prices: priceIds };
+      const productIds = new Set<string>(
+        ((p.aplicavel_product_ids as string[] | undefined) ?? []).filter(Boolean),
+      );
+
+      const priceIds = ((p.aplicavel_price_ids as string[] | undefined) ?? []).filter(Boolean);
+      for (const priceId of priceIds) {
+        const price = await stripe.prices.retrieve(priceId);
+        const prod = price.product;
+        const prodId = typeof prod === 'string' ? prod : prod?.id;
+        if (prodId) productIds.add(prodId);
+      }
+
+      if (productIds.size) {
+        couponParams.applies_to = { products: [...productIds] };
       }
 
       const coupon = await stripe.coupons.create(couponParams);
