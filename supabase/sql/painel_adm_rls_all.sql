@@ -130,3 +130,48 @@ on public.admin_coupons
 for insert
 to authenticated
 with check (public.painel_admin_ativo(array['owner', 'manager']::text[]));
+
+-- ---------------------------------------------------------------------------
+-- admin_cliente_mensagem_diaria (marcação diária de mensagem enviada)
+-- ---------------------------------------------------------------------------
+create table if not exists public.admin_cliente_mensagem_diaria (
+  cliente_id uuid primary key references public.clientes_azoup(id) on delete cascade,
+  data_marcacao date not null,
+  admin_email text,
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_admin_cliente_mensagem_diaria_data
+  on public.admin_cliente_mensagem_diaria (data_marcacao desc);
+
+alter table public.admin_cliente_mensagem_diaria enable row level security;
+
+drop policy if exists painel_admin_mensagem_diaria_select on public.admin_cliente_mensagem_diaria;
+drop policy if exists painel_admin_mensagem_diaria_insert on public.admin_cliente_mensagem_diaria;
+drop policy if exists painel_admin_mensagem_diaria_update on public.admin_cliente_mensagem_diaria;
+drop policy if exists painel_admin_mensagem_diaria_delete on public.admin_cliente_mensagem_diaria;
+
+create policy painel_admin_mensagem_diaria_select
+on public.admin_cliente_mensagem_diaria
+for select
+to authenticated
+using (public.painel_admin_ativo());
+
+create policy painel_admin_mensagem_diaria_insert
+on public.admin_cliente_mensagem_diaria
+for insert
+to authenticated
+with check (public.painel_admin_ativo());
+
+create policy painel_admin_mensagem_diaria_update
+on public.admin_cliente_mensagem_diaria
+for update
+to authenticated
+using (public.painel_admin_ativo())
+with check (public.painel_admin_ativo());
+
+create policy painel_admin_mensagem_diaria_delete
+on public.admin_cliente_mensagem_diaria
+for delete
+to authenticated
+using (public.painel_admin_ativo());

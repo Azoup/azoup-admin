@@ -1,6 +1,7 @@
 import { differenceInCalendarDays, parseISO } from 'date-fns';
 
 import { supabase } from '@/src/lib/supabase';
+import { listarClientesComMensagemHoje } from '@/src/services/repos/mensagem-contato-repo';
 import { obterMetricasClienteViaFunction } from '@/src/services/stripe-admin-api';
 import { prioridadeAssinatura } from '@/src/utils/assinatura-status';
 import { contarNotasFiscaisGeradasDoCliente } from '@/src/utils/nota-fiscal-metricas';
@@ -141,6 +142,17 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
     planoPorId = new Map((planos as PlanoAssinaturaRow[]).map((p) => [String(p.id), p]));
   }
 
+  let mensagemHoje = new Set<string>();
+  try {
+    mensagemHoje = await listarClientesComMensagemHoje(ids);
+  } catch (e) {
+    console.warn(
+      '[admin_cliente_mensagem_diaria] Leitura ignorada na listagem:',
+      e instanceof Error ? e.message : e,
+      '— execute supabase/sql/admin_cliente_mensagem_diaria.sql no Supabase.',
+    );
+  }
+
   return rows.map((c) => {
     const assinatura = pickLatestAssinatura(assinPorCliente.get(c.id) ?? []);
     const plano = assinatura?.plano_id != null ? planoPorId.get(String(assinatura.plano_id)) ?? null : null;
@@ -173,6 +185,7 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
       cobrancas_falhas,
       empresa_matriz_nome: matriz ? rotuloEmpresaMatriz(matriz) : null,
       empresa_matriz_cnpj: matriz?.cnpj ?? null,
+      mensagem_enviada_hoje: mensagemHoje.has(c.id),
     };
   });
 }

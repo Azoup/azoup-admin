@@ -219,6 +219,13 @@ export interface AdminClienteConversaRow {
   created_at?: string | null;
 }
 
+export interface AdminClienteMensagemDiariaRow {
+  cliente_id: string;
+  data_marcacao: string;
+  admin_email?: string | null;
+  updated_at?: string | null;
+}
+
 export interface AdminAuditLogRow {
   id: string;
   admin_email?: string | null;
@@ -291,4 +298,6 @@ export interface ClienteAzoupAdminView extends ClienteAzoupRow {
   /** Razão social / nome fantasia da empresa matriz (`empresas.empresa_matriz = true`). */
   empresa_matriz_nome?: string | null;
   empresa_matriz_cnpj?: string | null;
+  /** Mensagem/contato marcado como enviado hoje (reset automático a cada dia). */
+  mensagem_enviada_hoje?: boolean;
 }

@@ -1,15 +1,21 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { FlatList, Linking, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, FlatList, Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { ClientsFiltersBar } from '@/components/ui/ClientsFiltersBar';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { ScreenCard } from '@/components/ui/ScreenCard';
 import { Text } from '@/components/Themed';
+import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { listarClientesAzoup } from '@/src/services/repos/clientes-repo';
+import {
+  desmarcarMensagemEnviadaHoje,
+  marcarMensagemEnviadaHoje,
+} from '@/src/services/repos/mensagem-contato-repo';
+import type { ClienteAzoupAdminView } from '@/src/types/azoup';
 import {
   CLIENTES_FILTRO_INICIAL,
   filtrarClientes,
@@ -20,10 +26,14 @@ import { formatBRLFromCentavos, formatBRLFromReais, formatDateBR } from '@/src/u
 import { resolveClienteWhatsAppUrl } from '@/src/utils/whatsapp';
 
 const WHATSAPP_GREEN = '#25D366';
+const MENSAGEM_OK = '#16a34a';
 
 export default function ClientsListScreen() {
   const { theme } = useTheme();
+  const { session } = useAdminAuth();
+  const qc = useQueryClient();
   const [filtro, setFiltro] = useState<ClientesFiltroState>(CLIENTES_FILTRO_INICIAL);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch, isRefetching } = useQuery({
     queryKey: ['clientes_azoup_admin'],
@@ -33,6 +43,34 @@ export default function ClientsListScreen() {
   const clientes = data ?? [];
   const clientesFiltrados = useMemo(() => filtrarClientes(clientes, filtro), [clientes, filtro]);
   const filtroAtivo = temFiltroAtivo(filtro);
+
+  async function alternarMensagemEnviada(cliente: ClienteAzoupAdminView) {
+    if (togglingId) return;
+    setTogglingId(cliente.id);
+    const marcar = !cliente.mensagem_enviada_hoje;
+    const adminEmail = session?.user?.email ?? null;
+
+    qc.setQueryData<ClienteAzoupAdminView[]>(['clientes_azoup_admin'], (prev) =>
+      (prev ?? []).map((c) => (c.id === cliente.id ? { ...c, mensagem_enviada_hoje: marcar } : c)),
+    );
+
+    try {
+      if (marcar) {
+        await marcarMensagemEnviadaHoje({ clienteId: cliente.id, adminEmail });
+      } else {
+        await desmarcarMensagemEnviadaHoje(cliente.id);
+      }
+    } catch (e) {
+      qc.setQueryData<ClienteAzoupAdminView[]>(['clientes_azoup_admin'], (prev) =>
+        (prev ?? []).map((c) =>
+          c.id === cliente.id ? { ...c, mensagem_enviada_hoje: !marcar } : c,
+        ),
+      );
+      throw e;
+    } finally {
+      setTogglingId(null);
+    }
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
@@ -79,6 +117,8 @@ export default function ClientsListScreen() {
             `Cliente ${item.id.slice(0, 8)}`;
           const whatsappUrl = resolveClienteWhatsAppUrl(item.celular, item.telefone);
           const inicioSistema = item.created_at ?? item.assinatura?.data_inicio ?? item.assinatura?.criado_em ?? null;
+          const mensagemOk = Boolean(item.mensagem_enviada_hoje);
+          const alternando = togglingId === item.id;
 
           return (
             <View style={{ marginHorizontal: 12, marginVertical: 6 }}>
@@ -118,22 +158,53 @@ export default function ClientsListScreen() {
                   </Pressable>
                 </Link>
 
-                <Pressable
-                  accessibilityLabel={whatsappUrl ? 'Abrir WhatsApp do cliente' : 'Cliente sem telefone para WhatsApp'}
-                  disabled={!whatsappUrl}
-                  onPress={() => {
-                    if (whatsappUrl) void Linking.openURL(whatsappUrl);
-                  }}
-                  style={({ pressed }) => [
-                    styles.waBtn,
-                    {
-                      backgroundColor: theme.surfaceMuted,
-                      borderColor: theme.border,
-                      opacity: !whatsappUrl ? 0.35 : pressed ? 0.85 : 1,
-                    },
-                  ]}>
-                  <FontAwesome name="whatsapp" size={22} color={WHATSAPP_GREEN} />
-                </Pressable>
+                <View style={styles.actions}>
+                  <Pressable
+                    accessibilityLabel={
+                      mensagemOk ? 'Mensagem enviada hoje — toque para desmarcar' : 'Marcar mensagem enviada hoje'
+                    }
+                    disabled={alternando}
+                    onPress={() => {
+                      void alternarMensagemEnviada(item).catch((e) => {
+                        console.warn('[mensagem_diaria]', e);
+                      });
+                    }}
+                    style={({ pressed }) => [
+                      styles.actionBtn,
+                      {
+                        backgroundColor: mensagemOk ? `${MENSAGEM_OK}18` : theme.surfaceMuted,
+                        borderColor: mensagemOk ? MENSAGEM_OK : theme.border,
+                        opacity: alternando ? 0.6 : pressed ? 0.85 : 1,
+                      },
+                    ]}>
+                    {alternando ? (
+                      <ActivityIndicator size="small" color={mensagemOk ? MENSAGEM_OK : theme.textMuted} />
+                    ) : (
+                      <FontAwesome
+                        name={mensagemOk ? 'check-circle' : 'circle-o'}
+                        size={22}
+                        color={mensagemOk ? MENSAGEM_OK : theme.textMuted}
+                      />
+                    )}
+                  </Pressable>
+
+                  <Pressable
+                    accessibilityLabel={whatsappUrl ? 'Abrir WhatsApp do cliente' : 'Cliente sem telefone para WhatsApp'}
+                    disabled={!whatsappUrl}
+                    onPress={() => {
+                      if (whatsappUrl) void Linking.openURL(whatsappUrl);
+                    }}
+                    style={({ pressed }) => [
+                      styles.actionBtn,
+                      {
+                        backgroundColor: theme.surfaceMuted,
+                        borderColor: theme.border,
+                        opacity: !whatsappUrl ? 0.35 : pressed ? 0.85 : 1,
+                      },
+                    ]}>
+                    <FontAwesome name="whatsapp" size={22} color={WHATSAPP_GREEN} />
+                  </Pressable>
+                </View>
               </ScreenCard>
             </View>
           );
@@ -147,7 +218,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowTitle: { fontSize: 17, fontWeight: '800' },
-  waBtn: {
+  actions: { gap: 8 },
+  actionBtn: {
     width: 40,
     height: 40,
     borderRadius: 10,

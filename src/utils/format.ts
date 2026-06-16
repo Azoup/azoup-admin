@@ -19,6 +19,11 @@ export function formatDateBR(iso?: string | null) {
   }
 }
 
+/** Data de calendário no fuso America/Sao_Paulo (YYYY-MM-DD). */
+export function dataHojeBrasil(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+}
+
 export function formatHoraBR(raw?: string | null) {
   if (!raw) return '';
   const m = `${raw}`.match(/^(\d{1,2}):(\d{2})/);
