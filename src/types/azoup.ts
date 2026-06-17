@@ -73,9 +73,40 @@ export interface PlanoAssinaturaRow {
   limite_empresas?: number | null;
   limite_armazenamento_gb?: number | null;
   limite_tokens_ia_mes?: number | null;
+  /** Schema Azoup (`setup_plans.sql`). */
+  preco_base?: number | string | null;
+  preco_usuario_adicional?: number | string | null;
+  preco_cnpj_adicional?: number | string | null;
+  limite_nfe_mensal?: number | null;
+  limite_empresas_enterprise?: number | null;
+  tem_upgrades?: boolean | null;
+  is_enterprise?: boolean | null;
+  ativo?: boolean | null;
+  exibir_para_clientes?: boolean | null;
+  stripe_price_id_usuario_adicional?: string | null;
+  stripe_price_id_empresa_adicional?: string | null;
+  criado_em?: string | null;
+  atualizado_em?: string | null;
   metadata?: Record<string, unknown> | null;
   [key: string]: unknown;
 }
+
+export type CriarPlanoAdminInput = {
+  nome: string;
+  descricao?: string | null;
+  preco_base_reais: number;
+  usuarios_inclusos: number;
+  empresas_incluidas?: number;
+  armazenamento_gb: number;
+  limite_nfe_mensal?: number | null;
+  limite_empresas_enterprise?: number | null;
+  credito_ia_mensal?: number;
+  preco_usuario_adicional?: number;
+  preco_cnpj_adicional?: number;
+  tem_upgrades?: boolean;
+  is_enterprise?: boolean;
+  exibir_para_clientes?: boolean;
+};
 
 export type AssinaturaStatus =
   | 'ativa'

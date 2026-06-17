@@ -65,6 +65,36 @@ async function contarNotasFiscaisGeradasDoCliente(
   return ids.size;
 }
 
+function reaisParaCentavos(reais: number): number {
+  return Math.round(Number(reais) * 100);
+}
+
+function parseNumeroPositivo(raw: unknown, campo: string, obrigatorio = true): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    if (!obrigatorio && (raw == null || `${raw}`.trim() === '')) return 0;
+    throw new Error(`${campo} inválido`);
+  }
+  if (n < 0) throw new Error(`${campo} não pode ser negativo`);
+  return n;
+}
+
+async function criarPrecoMensalStripe(
+  stripe: Stripe,
+  productId: string,
+  valorReais: number,
+  metadata: Record<string, string>,
+) {
+  if (valorReais <= 0) return null;
+  return stripe.prices.create({
+    product: productId,
+    unit_amount: reaisParaCentavos(valorReais),
+    currency: 'brl',
+    recurring: { interval: 'month' },
+    metadata,
+  });
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -445,6 +475,148 @@ serve(async (req) => {
       });
 
       return new Response(JSON.stringify({ coupon, promotion_code }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (body.op === 'create_plano') {
+      const p = body.payload ?? {};
+      const nome = `${p.nome ?? ''}`.trim();
+      if (!nome) throw new Error('Nome do plano é obrigatório');
+
+      const isEnterprise = Boolean(p.is_enterprise);
+      const temUpgrades = Boolean(p.tem_upgrades);
+      const exibirParaClientes = Boolean(p.exibir_para_clientes);
+      const precoBase = parseNumeroPositivo(p.preco_base_reais, 'Preço mensal', !isEnterprise);
+      const usuariosInclusos = parseNumeroPositivo(p.usuarios_inclusos, 'Usuários inclusos');
+      const empresasIncluidas = parseNumeroPositivo(p.empresas_incluidas ?? 1, 'Empresas inclusas');
+      const armazenamentoGb = parseNumeroPositivo(p.armazenamento_gb, 'Armazenamento (GB)');
+      const creditoIa = parseNumeroPositivo(p.credito_ia_mensal ?? 0, 'Crédito IA mensal', false);
+      const precoUsuarioAdicional = parseNumeroPositivo(p.preco_usuario_adicional ?? 0, 'Preço usuário adicional', false);
+      const precoEmpresaAdicional = parseNumeroPositivo(p.preco_cnpj_adicional ?? 0, 'Preço empresa adicional', false);
+
+      let limiteNfe: number | null = null;
+      if (p.limite_nfe_mensal != null && `${p.limite_nfe_mensal}`.trim() !== '') {
+        limiteNfe = parseNumeroPositivo(p.limite_nfe_mensal, 'Limite NF-e mensal');
+      }
+
+      const limiteEmpresasEnterprise =
+        p.limite_empresas_enterprise != null && `${p.limite_empresas_enterprise}`.trim() !== ''
+          ? parseNumeroPositivo(p.limite_empresas_enterprise, 'Limite empresas enterprise')
+          : 10;
+
+      if (!isEnterprise && precoBase <= 0) {
+        throw new Error('Informe um preço mensal maior que zero (ou marque como Enterprise).');
+      }
+
+      const descricao = `${p.descricao ?? ''}`.trim() || null;
+
+      let stripeProductId: string | null = null;
+      let stripePriceBaseId: string | null = null;
+      let stripePriceUsuarioId: string | null = null;
+      let stripePriceEmpresaId: string | null = null;
+
+      if (!isEnterprise) {
+        const product = await stripe.products.create({
+          name: nome,
+          description: descricao ?? undefined,
+          metadata: { origem: 'painel_adm_azoup' },
+        });
+        stripeProductId = product.id;
+
+        try {
+          const priceBase = await criarPrecoMensalStripe(stripe, product.id, precoBase, {
+            tipo: 'base',
+          });
+          stripePriceBaseId = priceBase?.id ?? null;
+          if (!stripePriceBaseId) throw new Error('Falha ao criar preço base no Stripe.');
+
+          if (precoUsuarioAdicional > 0) {
+            const priceUsuario = await criarPrecoMensalStripe(stripe, product.id, precoUsuarioAdicional, {
+              tipo: 'usuario_adicional',
+            });
+            stripePriceUsuarioId = priceUsuario?.id ?? null;
+          }
+
+          if (temUpgrades && precoEmpresaAdicional > 0) {
+            const priceEmpresa = await criarPrecoMensalStripe(stripe, product.id, precoEmpresaAdicional, {
+              tipo: 'empresa_adicional',
+            });
+            stripePriceEmpresaId = priceEmpresa?.id ?? null;
+          }
+        } catch (stripeErr) {
+          await stripe.products.update(product.id, { active: false }).catch(() => undefined);
+          throw stripeErr;
+        }
+      }
+
+      const agora = new Date().toISOString();
+      const { data: plano, error: insertErr } = await supabaseAdmin
+        .from('planos_assinatura')
+        .insert({
+          nome,
+          descricao,
+          preco_base: precoBase,
+          usuarios_inclusos: usuariosInclusos,
+          empresas_incluidas: empresasIncluidas,
+          limite_nfe_mensal: limiteNfe,
+          limite_empresas_enterprise: limiteEmpresasEnterprise,
+          armazenamento_gb: armazenamentoGb,
+          preco_usuario_adicional: precoUsuarioAdicional,
+          preco_cnpj_adicional: precoEmpresaAdicional,
+          credito_ia_mensal: creditoIa,
+          tem_upgrades: temUpgrades,
+          is_enterprise: isEnterprise,
+          ativo: true,
+          exibir_para_clientes: exibirParaClientes,
+          stripe_product_id: stripeProductId,
+          stripe_price_id_base: stripePriceBaseId,
+          stripe_price_id_usuario_adicional: stripePriceUsuarioId,
+          stripe_price_id_empresa_adicional: stripePriceEmpresaId,
+          criado_em: agora,
+          atualizado_em: agora,
+        } as never)
+        .select('*')
+        .single();
+
+      if (insertErr) {
+        if (stripeProductId) {
+          await stripe.products.update(stripeProductId, { active: false }).catch(() => undefined);
+        }
+        throw insertErr;
+      }
+
+      if (stripeProductId && plano?.id != null) {
+        await stripe.products
+          .update(stripeProductId, {
+            metadata: { origem: 'painel_adm_azoup', plano_id: String(plano.id) },
+          })
+          .catch(() => undefined);
+      }
+
+      return new Response(JSON.stringify({ plano }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (body.op === 'update_plano_exibicao') {
+      const planoId = Number(body.payload?.plano_id);
+      if (!Number.isFinite(planoId) || planoId <= 0) throw new Error('plano_id inválido');
+
+      const exibir = Boolean(body.payload?.exibir_para_clientes);
+      const { data: plano, error: updErr } = await supabaseAdmin
+        .from('planos_assinatura')
+        .update({
+          exibir_para_clientes: exibir,
+          atualizado_em: new Date().toISOString(),
+        } as never)
+        .eq('id', planoId)
+        .select('*')
+        .single();
+
+      if (updErr) throw updErr;
+
+      return new Response(JSON.stringify({ plano }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

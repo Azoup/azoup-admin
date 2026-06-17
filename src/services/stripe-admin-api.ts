@@ -135,3 +135,31 @@ export type RegisterAuditLogPayload = {
 export async function registrarAuditoriaViaFunction(payload: RegisterAuditLogPayload) {
   return invoke<{ ok: boolean; id?: string | null }>('register_audit_log', payload);
 }
+
+export type CreatePlanoPayload = {
+  nome: string;
+  descricao?: string | null;
+  preco_base_reais: number;
+  usuarios_inclusos: number;
+  empresas_incluidas?: number;
+  armazenamento_gb: number;
+  limite_nfe_mensal?: number | null;
+  limite_empresas_enterprise?: number | null;
+  credito_ia_mensal?: number;
+  preco_usuario_adicional?: number;
+  preco_cnpj_adicional?: number;
+  tem_upgrades?: boolean;
+  is_enterprise?: boolean;
+  exibir_para_clientes?: boolean;
+};
+
+export async function criarPlanoStripe(payload: CreatePlanoPayload) {
+  return invoke<{ plano: Record<string, unknown> }>('create_plano', payload);
+}
+
+export async function atualizarExibicaoPlanoStripe(planoId: number, exibirParaClientes: boolean) {
+  return invoke<{ plano: Record<string, unknown> }>('update_plano_exibicao', {
+    plano_id: planoId,
+    exibir_para_clientes: exibirParaClientes,
+  });
+}

@@ -1,4 +1,5 @@
 import { supabase } from '@/src/lib/supabase';
+import { atualizarExibicaoPlanoStripe } from '@/src/services/stripe-admin-api';
 import type {
   AdminBillingSettingsRow,
   AdminCouponRow,
@@ -67,6 +68,11 @@ export async function listarPlanos(): Promise<PlanoAssinaturaRow[]> {
   const { data, error } = await supabase.from('planos_assinatura').select('*').order('nome');
   if (error) throw new Error(error.message);
   return (data ?? []) as PlanoAssinaturaRow[];
+}
+
+export async function atualizarExibicaoPlano(planoId: number, exibir: boolean): Promise<PlanoAssinaturaRow> {
+  const res = await atualizarExibicaoPlanoStripe(planoId, exibir);
+  return res.plano as PlanoAssinaturaRow;
 }
 
 export async function listarCuponsAdmin(): Promise<AdminCouponRow[]> {

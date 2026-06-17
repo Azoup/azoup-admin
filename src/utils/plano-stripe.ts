@@ -14,3 +14,20 @@ export function stripeProductIdDoPlano(plano: PlanoAssinaturaRow): string | null
   const product = `${plano.stripe_product_id ?? ''}`.trim();
   return product || null;
 }
+
+/** Valor mensal em centavos (`preco_base` em reais ou `valor_mensal_centavos` legado). */
+export function precoMensalCentavosDoPlano(plano: PlanoAssinaturaRow): number | null {
+  if (plano.valor_mensal_centavos != null && !Number.isNaN(Number(plano.valor_mensal_centavos))) {
+    return Number(plano.valor_mensal_centavos);
+  }
+  const precoBase = plano.preco_base;
+  if (precoBase != null && !Number.isNaN(Number(precoBase))) {
+    return Math.round(Number(precoBase) * 100);
+  }
+  return null;
+}
+
+export function planoExibirParaClientes(plano: PlanoAssinaturaRow): boolean {
+  if (typeof plano.exibir_para_clientes === 'boolean') return plano.exibir_para_clientes;
+  return true;
+}
