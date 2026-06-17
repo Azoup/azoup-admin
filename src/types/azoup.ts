@@ -289,6 +289,19 @@ export interface AdminAuditLogRow {
   dados?: Record<string, unknown> | null;
 }
 
+export interface ClienteMarketingUtmRow {
+  id: string;
+  cliente_id: string;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_content?: string | null;
+  utm_term?: string | null;
+  capturado_em?: string | null;
+  atualizado_em?: string | null;
+  clientes_azoup?: Pick<ClienteAzoupRow, 'nome' | 'email'> | null;
+}
+
 export interface CreditoIaGastoAgg {
   cliente_id: string;
   total_tokens?: number | null;

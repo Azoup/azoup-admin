@@ -107,6 +107,14 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="marketing"
+        options={{
+          title: 'Marketing',
+          href: canAccessScreen('marketing') ? undefined : null,
+          tabBarIcon: ({ color }) => <TabBarIcon name="bullhorn" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="admins"
         options={{
           title: 'Acessos',
