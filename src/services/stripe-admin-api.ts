@@ -136,6 +136,16 @@ export async function registrarAuditoriaViaFunction(payload: RegisterAuditLogPay
   return invoke<{ ok: boolean; id?: string | null }>('register_audit_log', payload);
 }
 
+export type PlanoOpcoesFlag =
+  | 'exibir_para_clientes'
+  | 'tem_upgrades'
+  | 'is_enterprise'
+  | 'requer_cliente_logado';
+
+export type UpdatePlanoOpcoesPayload = {
+  plano_id: number;
+} & Partial<Record<PlanoOpcoesFlag, boolean>>;
+
 export type CreatePlanoPayload = {
   nome: string;
   descricao?: string | null;
@@ -151,6 +161,7 @@ export type CreatePlanoPayload = {
   tem_upgrades?: boolean;
   is_enterprise?: boolean;
   exibir_para_clientes?: boolean;
+  requer_cliente_logado?: boolean;
 };
 
 export async function criarPlanoStripe(payload: CreatePlanoPayload) {
@@ -158,8 +169,9 @@ export async function criarPlanoStripe(payload: CreatePlanoPayload) {
 }
 
 export async function atualizarExibicaoPlanoStripe(planoId: number, exibirParaClientes: boolean) {
-  return invoke<{ plano: Record<string, unknown> }>('update_plano_exibicao', {
-    plano_id: planoId,
-    exibir_para_clientes: exibirParaClientes,
-  });
+  return atualizarOpcoesPlanoStripe({ plano_id: planoId, exibir_para_clientes: exibirParaClientes });
+}
+
+export async function atualizarOpcoesPlanoStripe(payload: UpdatePlanoOpcoesPayload) {
+  return invoke<{ plano: Record<string, unknown> }>('update_plano_opcoes', payload);
 }

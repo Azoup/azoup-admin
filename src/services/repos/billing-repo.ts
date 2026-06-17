@@ -1,5 +1,5 @@
 import { supabase } from '@/src/lib/supabase';
-import { atualizarExibicaoPlanoStripe } from '@/src/services/stripe-admin-api';
+import { atualizarExibicaoPlanoStripe, atualizarOpcoesPlanoStripe, type UpdatePlanoOpcoesPayload } from '@/src/services/stripe-admin-api';
 import type {
   AdminBillingSettingsRow,
   AdminCouponRow,
@@ -72,6 +72,11 @@ export async function listarPlanos(): Promise<PlanoAssinaturaRow[]> {
 
 export async function atualizarExibicaoPlano(planoId: number, exibir: boolean): Promise<PlanoAssinaturaRow> {
   const res = await atualizarExibicaoPlanoStripe(planoId, exibir);
+  return res.plano as PlanoAssinaturaRow;
+}
+
+export async function atualizarOpcoesPlano(payload: UpdatePlanoOpcoesPayload): Promise<PlanoAssinaturaRow> {
+  const res = await atualizarOpcoesPlanoStripe(payload);
   return res.plano as PlanoAssinaturaRow;
 }
 

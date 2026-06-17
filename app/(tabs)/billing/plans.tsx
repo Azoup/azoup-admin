@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { FlatList, StyleSheet, Switch, View } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 
 import { FormCheckbox } from '@/components/ui/FormCheckbox';
 import { FormField } from '@/components/ui/FormField';
@@ -13,14 +13,46 @@ import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { registrarAuditoria } from '@/src/services/audit';
-import { atualizarExibicaoPlano, listarPlanos } from '@/src/services/repos/billing-repo';
-import { criarPlanoStripe } from '@/src/services/stripe-admin-api';
+import { atualizarOpcoesPlano, listarPlanos } from '@/src/services/repos/billing-repo';
+import { criarPlanoStripe, type PlanoOpcoesFlag } from '@/src/services/stripe-admin-api';
 import { formatBRLFromCentavos } from '@/src/utils/format';
 import {
   planoExibirParaClientes,
+  planoIsEnterprise,
+  planoRequerClienteLogado,
+  planoTemUpgrades,
   precoMensalCentavosDoPlano,
   stripePriceIdDoPlano,
 } from '@/src/utils/plano-stripe';
+import type { PlanoAssinaturaRow } from '@/src/types/azoup';
+
+const PLANO_OPCOES_CADASTRO: Array<{ flag: PlanoOpcoesFlag; label: string; helper?: string }> = [
+  { flag: 'tem_upgrades', label: 'Permite upgrades (add-ons)' },
+  {
+    flag: 'is_enterprise',
+    label: 'Plano Enterprise (sem Stripe)',
+    helper: 'Enterprise não cria produto/preço no Stripe.',
+  },
+  { flag: 'exibir_para_clientes', label: 'Exibir para clientes no app' },
+  {
+    flag: 'requer_cliente_logado',
+    label: 'Requer cliente logado',
+    helper: 'Só pode ser contratado por quem já tem conta (não no signup anônimo).',
+  },
+];
+
+function planoFlagValue(plano: PlanoAssinaturaRow, flag: PlanoOpcoesFlag): boolean {
+  switch (flag) {
+    case 'exibir_para_clientes':
+      return planoExibirParaClientes(plano);
+    case 'requer_cliente_logado':
+      return planoRequerClienteLogado(plano);
+    case 'tem_upgrades':
+      return planoTemUpgrades(plano);
+    case 'is_enterprise':
+      return planoIsEnterprise(plano);
+  }
+}
 
 function parseReaisInput(raw: string): number {
   const normalizado = raw.trim().replace(/\./g, '').replace(',', '.');
@@ -61,6 +93,7 @@ export default function PlansScreen() {
   const [temUpgrades, setTemUpgrades] = useState(false);
   const [isEnterprise, setIsEnterprise] = useState(false);
   const [exibirParaClientes, setExibirParaClientes] = useState(false);
+  const [requerClienteLogado, setRequerClienteLogado] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
 
   const criarMutation = useMutation({
@@ -84,6 +117,7 @@ export default function PlansScreen() {
         tem_upgrades: temUpgrades,
         is_enterprise: isEnterprise,
         exibir_para_clientes: exibirParaClientes,
+        requer_cliente_logado: requerClienteLogado,
       };
 
       if (!payload.nome) throw new Error('Nome do plano é obrigatório.');
@@ -117,15 +151,24 @@ export default function PlansScreen() {
       setTemUpgrades(false);
       setIsEnterprise(false);
       setExibirParaClientes(false);
+      setRequerClienteLogado(false);
       void qc.invalidateQueries({ queryKey: ['planos_assinatura'] });
     },
     onError: (e) => setFormErro(e instanceof Error ? e.message : 'Erro ao criar plano'),
   });
 
-  const exibicaoMutation = useMutation({
-    mutationFn: async ({ planoId, exibir }: { planoId: number; exibir: boolean }) => {
+  const opcoesMutation = useMutation({
+    mutationFn: async ({
+      planoId,
+      flag,
+      value,
+    }: {
+      planoId: number;
+      flag: PlanoOpcoesFlag;
+      value: boolean;
+    }) => {
       if (!canManageBilling) throw new Error('Sem permissão para alterar planos.');
-      return atualizarExibicaoPlano(planoId, exibir);
+      return atualizarOpcoesPlano({ plano_id: planoId, [flag]: value });
     },
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['planos_assinatura'] }),
   });
@@ -238,21 +281,37 @@ export default function PlansScreen() {
                 </View>
               </View>
 
-              <View style={styles.switchRow}>
-                <Text style={{ flex: 1, color: theme.text }}>Permite upgrades (add-ons)</Text>
-                <Switch value={temUpgrades} onValueChange={setTemUpgrades} trackColor={{ true: theme.cadastroAction }} />
-              </View>
+              <View style={{ gap: 4 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 4 }}>Opções do plano</Text>
+                {PLANO_OPCOES_CADASTRO.map((opcao) => {
+                  const checked =
+                    opcao.flag === 'tem_upgrades'
+                      ? temUpgrades
+                      : opcao.flag === 'is_enterprise'
+                        ? isEnterprise
+                        : opcao.flag === 'exibir_para_clientes'
+                          ? exibirParaClientes
+                          : requerClienteLogado;
 
-              <View style={styles.switchRow}>
-                <Text style={{ flex: 1, color: theme.text }}>Plano Enterprise (sem Stripe)</Text>
-                <Switch value={isEnterprise} onValueChange={setIsEnterprise} trackColor={{ true: theme.cadastroAction }} />
-              </View>
+                  const onCheckedChange = (v: boolean) => {
+                    if (opcao.flag === 'tem_upgrades') setTemUpgrades(v);
+                    else if (opcao.flag === 'is_enterprise') setIsEnterprise(v);
+                    else if (opcao.flag === 'exibir_para_clientes') setExibirParaClientes(v);
+                    else setRequerClienteLogado(v);
+                  };
 
-              <FormCheckbox
-                label="Exibir para clientes no app"
-                checked={exibirParaClientes}
-                onCheckedChange={setExibirParaClientes}
-              />
+                  return (
+                    <View key={opcao.flag}>
+                      <FormCheckbox label={opcao.label} checked={checked} onCheckedChange={onCheckedChange} />
+                      {opcao.helper ? (
+                        <Text style={{ color: theme.textMuted, fontSize: 12, marginLeft: 34, marginTop: -2 }}>
+                          {opcao.helper}
+                        </Text>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
 
               {formErro ? <Text style={{ color: theme.error }}>{formErro}</Text> : null}
               {criarMutation.isError ? (
@@ -288,8 +347,8 @@ export default function PlansScreen() {
         const centavos = precoMensalCentavosDoPlano(item);
         const exibir = planoExibirParaClientes(item);
         const planoId = Number(item.id);
-        const alternando =
-          exibicaoMutation.isPending && exibicaoMutation.variables?.planoId === planoId;
+        const alternandoFlag = opcoesMutation.isPending ? opcoesMutation.variables?.flag : null;
+        const alternandoPlanoId = opcoesMutation.isPending ? opcoesMutation.variables?.planoId : null;
 
         return (
           <ScreenCard style={{ marginBottom: 12, gap: 6 }}>
@@ -312,7 +371,7 @@ export default function PlansScreen() {
 
             <Text style={{ color: theme.textMuted }}>
               Preço mensal: {centavos != null ? formatBRLFromCentavos(centavos) : '—'}
-              {item.is_enterprise ? ' · Enterprise' : ''}
+              {planoIsEnterprise(item) ? ' · Enterprise' : ''}
             </Text>
             <Text style={{ color: theme.textMuted }}>Stripe price: {stripePriceIdDoPlano(item) ?? '—'}</Text>
             <Text style={{ color: theme.textMuted }}>
@@ -321,16 +380,31 @@ export default function PlansScreen() {
             </Text>
 
             {canManageBilling ? (
-              <FormCheckbox
-                label="Exibir para clientes"
-                checked={exibir}
-                loading={alternando}
-                onCheckedChange={(v) => {
-                  if (!Number.isFinite(planoId)) return;
-                  exibicaoMutation.mutate({ planoId, exibir: v });
-                }}
-                style={{ marginTop: 4 }}
-              />
+              <View style={{ gap: 2, marginTop: 6 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 2 }}>Opções do plano</Text>
+                {PLANO_OPCOES_CADASTRO.map((opcao) => {
+                  const checked = planoFlagValue(item, opcao.flag);
+                  const alternando = alternandoPlanoId === planoId && alternandoFlag === opcao.flag;
+
+                  return (
+                    <FormCheckbox
+                      key={opcao.flag}
+                      label={opcao.label}
+                      checked={checked}
+                      loading={alternando}
+                      onCheckedChange={(v) => {
+                        if (!Number.isFinite(planoId)) return;
+                        opcoesMutation.mutate({ planoId, flag: opcao.flag, value: v });
+                      }}
+                    />
+                  );
+                })}
+                {opcoesMutation.isError && alternandoPlanoId === planoId ? (
+                  <Text style={{ color: theme.error, fontSize: 12 }}>
+                    {(opcoesMutation.error as Error).message}
+                  </Text>
+                ) : null}
+              </View>
             ) : null}
           </ScreenCard>
         );
@@ -342,7 +416,6 @@ export default function PlansScreen() {
 const styles = StyleSheet.create({
   row2: { flexDirection: 'row', gap: 10 },
   col: { flex: 1 },
-  switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 36 },
   planoHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
 });

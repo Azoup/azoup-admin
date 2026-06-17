@@ -83,6 +83,7 @@ export interface PlanoAssinaturaRow {
   is_enterprise?: boolean | null;
   ativo?: boolean | null;
   exibir_para_clientes?: boolean | null;
+  requer_cliente_logado?: boolean | null;
   stripe_price_id_usuario_adicional?: string | null;
   stripe_price_id_empresa_adicional?: string | null;
   criado_em?: string | null;
@@ -106,6 +107,7 @@ export type CriarPlanoAdminInput = {
   tem_upgrades?: boolean;
   is_enterprise?: boolean;
   exibir_para_clientes?: boolean;
+  requer_cliente_logado?: boolean;
 };
 
 export type AssinaturaStatus =

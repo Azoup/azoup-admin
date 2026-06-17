@@ -563,6 +563,7 @@ serve(async (req) => {
       const isEnterprise = Boolean(p.is_enterprise);
       const temUpgrades = Boolean(p.tem_upgrades);
       const exibirParaClientes = Boolean(p.exibir_para_clientes);
+      const requerClienteLogado = Boolean(p.requer_cliente_logado);
       const precoBase = parseNumeroPositivo(p.preco_base_reais, 'Preço mensal', !isEnterprise);
       const usuariosInclusos = parseNumeroPositivo(p.usuarios_inclusos, 'Usuários inclusos');
       const empresasIncluidas = parseNumeroPositivo(p.empresas_incluidas ?? 1, 'Empresas inclusas');
@@ -645,6 +646,7 @@ serve(async (req) => {
           is_enterprise: isEnterprise,
           ativo: true,
           exibir_para_clientes: exibirParaClientes,
+          requer_cliente_logado: requerClienteLogado,
           stripe_product_id: stripeProductId,
           stripe_price_id_base: stripePriceBaseId,
           stripe_price_id_usuario_adicional: stripePriceUsuarioId,
@@ -675,15 +677,31 @@ serve(async (req) => {
       });
     }
 
-    if (body.op === 'update_plano_exibicao') {
+    if (body.op === 'update_plano_exibicao' || body.op === 'update_plano_opcoes') {
       const planoId = Number(body.payload?.plano_id);
       if (!Number.isFinite(planoId) || planoId <= 0) throw new Error('plano_id inválido');
 
-      const exibir = Boolean(body.payload?.exibir_para_clientes);
+      const p = body.payload ?? {};
+      const patch: Record<string, boolean> = {};
+      const flagKeys = [
+        'exibir_para_clientes',
+        'tem_upgrades',
+        'is_enterprise',
+        'requer_cliente_logado',
+      ] as const;
+
+      for (const key of flagKeys) {
+        if (p[key] !== undefined) patch[key] = Boolean(p[key]);
+      }
+
+      if (!Object.keys(patch).length) {
+        throw new Error('Informe ao menos uma opção do plano para atualizar.');
+      }
+
       const { data: plano, error: updErr } = await supabaseAdmin
         .from('planos_assinatura')
         .update({
-          exibir_para_clientes: exibir,
+          ...patch,
           atualizado_em: new Date().toISOString(),
         } as never)
         .eq('id', planoId)

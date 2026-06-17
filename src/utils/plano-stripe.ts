@@ -31,3 +31,15 @@ export function planoExibirParaClientes(plano: PlanoAssinaturaRow): boolean {
   if (typeof plano.exibir_para_clientes === 'boolean') return plano.exibir_para_clientes;
   return true;
 }
+
+export function planoRequerClienteLogado(plano: PlanoAssinaturaRow): boolean {
+  return Boolean(plano.requer_cliente_logado);
+}
+
+export function planoTemUpgrades(plano: PlanoAssinaturaRow): boolean {
+  return Boolean(plano.tem_upgrades);
+}
+
+export function planoIsEnterprise(plano: PlanoAssinaturaRow): boolean {
+  return Boolean(plano.is_enterprise);
+}
