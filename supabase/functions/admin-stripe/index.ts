@@ -16,6 +16,82 @@ function normalizarTelasAcesso(raw: unknown): string[] {
     .filter((t) => (ADMIN_SCREEN_KEYS as readonly string[]).includes(t));
 }
 
+type AuthApiErrorLike = { message?: string; status?: number; code?: string };
+
+function isAuthEmailAlreadyExists(err: AuthApiErrorLike | null | undefined): boolean {
+  if (!err) return false;
+  const msg = `${err.message ?? ''}`.toLowerCase();
+  if (
+    msg.includes('already') ||
+    msg.includes('registered') ||
+    msg.includes('exists') ||
+    msg.includes('cadastrad') ||
+    msg.includes('existe')
+  ) {
+    return true;
+  }
+  if (err.status === 422) return true;
+  if (`${err.code ?? ''}`.toLowerCase() === 'email_exists') return true;
+  return false;
+}
+
+async function findAuthUserByEmail(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  email: string,
+): Promise<{ id: string; email?: string | null } | null> {
+  const normalized = email.trim().toLowerCase();
+  let page = 1;
+  const perPage = 200;
+
+  while (page <= 50) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
+    if (error) throw error;
+
+    const hit = data.users.find((u) => (u.email ?? '').trim().toLowerCase() === normalized);
+    if (hit) return { id: hit.id, email: hit.email };
+
+    if (data.users.length < perPage) break;
+    page += 1;
+  }
+
+  return null;
+}
+
+async function ensureAuthUserForAdminLogin(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  email: string,
+  password: string,
+): Promise<{ authUserId: string; linkedExisting: boolean }> {
+  const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  });
+
+  if (!createErr && created?.user?.id) {
+    return { authUserId: created.user.id, linkedExisting: false };
+  }
+
+  if (!isAuthEmailAlreadyExists(createErr)) {
+    throw createErr ?? new Error('Falha ao criar usuário no Auth');
+  }
+
+  const existing = await findAuthUserByEmail(supabaseAdmin, email);
+  if (!existing) {
+    throw new Error(
+      'E-mail já existe no Auth, mas não foi possível localizar o usuário para vincular o acesso administrativo.',
+    );
+  }
+
+  const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(existing.id, {
+    password,
+    email_confirm: true,
+  });
+  if (updateErr) throw updateErr;
+
+  return { authUserId: existing.id, linkedExisting: true };
+}
+
 const NF_CHUNK = 80;
 
 async function contarNotasFiscaisGeradasDoCliente(
@@ -320,15 +396,11 @@ serve(async (req) => {
         throw new Error('A tela Acessos só pode ser liberada para perfil owner');
       }
 
-      const { error: authErr } = await supabaseAdmin.auth.admin.createUser({
+      const { authUserId, linkedExisting } = await ensureAuthUserForAdminLogin(
+        supabaseAdmin,
         email,
         password,
-        email_confirm: true,
-      });
-
-      if (authErr && !authErr.message.toLowerCase().includes('already')) {
-        throw authErr;
-      }
+      );
 
       const { data: adminUpsert, error: adminUpsertErr } = await supabaseAdmin
         .from('admin_users')
@@ -348,7 +420,11 @@ serve(async (req) => {
 
       if (adminUpsertErr) throw adminUpsertErr;
 
-      return new Response(JSON.stringify({ admin: adminUpsert }), {
+      return new Response(JSON.stringify({
+        admin: adminUpsert,
+        auth_user_id: authUserId,
+        linked_existing_auth: linkedExisting,
+      }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
