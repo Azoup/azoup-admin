@@ -25,10 +25,10 @@ export const ADMIN_NAV_GROUPS: AdminNavGroupDef[] = [
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.map((screen) => {
   const href =
     screen.key === 'dashboard'
-      ? '/'
+      ? '/(tabs)'
       : screen.key === 'config_suporte'
-        ? '/config-suporte'
-        : `/${screen.key}`;
+        ? '/(tabs)/config-suporte'
+        : `/(tabs)/${screen.key}`;
 
   const icon: ComponentProps<typeof FontAwesome>['name'] =
     screen.key === 'dashboard'
@@ -58,9 +58,14 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.map((screen) => {
 });
 
 export function rotaAdminAtiva(pathname: string, href: string): boolean {
-  const path = pathname.replace(/^\/\(tabs\)/, '').replace(/\/$/, '') || '/';
-  const alvo = href.replace(/\/$/, '') || '/';
+  const norm = (raw: string) => {
+    const p = raw.replace(/^\/\(tabs\)/, '').replace(/\/$/, '');
+    return p || '/';
+  };
 
-  if (alvo === '/') return path === '/' || path === '/index' || path === '';
+  const path = norm(pathname);
+  const alvo = norm(href);
+
+  if (alvo === '/') return path === '/' || path === '/index';
   return path === alvo || path.startsWith(`${alvo}/`);
 }

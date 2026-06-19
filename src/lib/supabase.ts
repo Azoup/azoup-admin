@@ -1,18 +1,8 @@
 import 'react-native-url-polyfill/auto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
 
 import { env, isEnvConfigured } from '@/src/lib/env';
-
-const isBrowser = typeof window !== 'undefined';
-const persistSession = Platform.OS !== 'web';
-
-const noopStorage = {
-  getItem: async () => null,
-  setItem: async () => {},
-  removeItem: async () => {},
-};
 
 let client: SupabaseClient | null = null;
 
@@ -27,9 +17,9 @@ export function getSupabaseClient(): SupabaseClient {
 
   client = createClient(env.supabaseUrl, env.supabaseAnonKey, {
     auth: {
-      storage: isBrowser ? AsyncStorage : noopStorage,
-      autoRefreshToken: isBrowser,
-      persistSession,
+      storage: AsyncStorage,
+      autoRefreshToken: true,
+      persistSession: true,
       detectSessionInUrl: false,
     },
   });

@@ -9,7 +9,7 @@ export default function AppLayout() {
   const { theme } = useTheme();
   const { session, adminProfile, loading } = useAdminAuth();
 
-  if (loading) {
+  if (sessionLoading) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background }}>
         <ActivityIndicator color={theme.cadastroAction} />
@@ -19,6 +19,14 @@ export default function AppLayout() {
 
   if (!session) {
     return <Redirect href="/login" />;
+  }
+
+  if (!adminProfile && loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background }}>
+        <ActivityIndicator color={theme.cadastroAction} />
+      </View>
+    );
   }
 
   if (!adminProfile) {

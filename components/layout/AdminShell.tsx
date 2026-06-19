@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { Link, usePathname } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal,
@@ -63,23 +63,44 @@ function NavItemLink({
   recolhido: boolean;
   onNavigate?: () => void;
 }) {
+  const router = useRouter();
+
+  const handlePress = useCallback(() => {
+    if (!active) {
+      router.push(item.href as never);
+    }
+    onNavigate?.();
+  }, [active, item.href, onNavigate, router]);
+
   return (
-    <Link href={item.href as never} asChild onPress={onNavigate}>
-      <Pressable
-        accessibilityRole="tab"
-        accessibilityState={{ selected: active }}
-        accessibilityLabel={item.label}
-        title={Platform.OS === 'web' && recolhido ? item.label : undefined}
-        style={({ pressed, hovered }) => [
-          styles.navItem,
-          recolhido && styles.navItemCollapsed,
-          active && styles.navItemActive,
-          active && { backgroundColor: `${accent}20`, borderColor: `${accent}55` },
-          !active && { backgroundColor: pressed || hovered ? SIDEBAR_PALETTE.itemHover : SIDEBAR_PALETTE.itemIdle },
-          pressed && { transform: [{ scale: 0.99 }] },
-        ]}>
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={item.label}
+      title={Platform.OS === 'web' && recolhido ? item.label : undefined}
+      onPress={handlePress}
+      style={({ pressed, hovered }) => [
+        styles.navItem,
+        recolhido && styles.navItemCollapsed,
+        active && styles.navItemActive,
+        active && { backgroundColor: `${accent}20`, borderColor: `${accent}55` },
+        !active && { backgroundColor: pressed || hovered ? SIDEBAR_PALETTE.itemHover : SIDEBAR_PALETTE.itemIdle },
+        pressed && { transform: [{ scale: 0.99 }] },
+      ]}>
         {active && !recolhido ? <View style={[styles.activeBar, { backgroundColor: accent }]} /> : null}
         {active && recolhido ? <View style={[styles.activeDot, { backgroundColor: accent }]} /> : null}
+
+        {!recolhido ? (
+          <Text
+            style={[
+              styles.navLabel,
+              { color: active ? '#FFFFFF' : SIDEBAR_PALETTE.text },
+              active && styles.navLabelActive,
+            ]}
+            numberOfLines={1}>
+            {item.label}
+          </Text>
+        ) : null}
 
         <View
           style={[
@@ -90,24 +111,10 @@ function NavItemLink({
           <FontAwesome name={item.icon} size={16} color={active ? '#FFFFFF' : SIDEBAR_PALETTE.textMuted} />
         </View>
 
-        {!recolhido ? (
-          <>
-            <Text
-              style={[
-                styles.navLabel,
-                { color: active ? '#FFFFFF' : SIDEBAR_PALETTE.text },
-                active && styles.navLabelActive,
-              ]}
-              numberOfLines={1}>
-              {item.label}
-            </Text>
-            {active ? (
-              <FontAwesome name="chevron-right" size={11} color={`${accent}CC`} style={{ marginLeft: 'auto' }} />
-            ) : null}
-          </>
+        {active && !recolhido ? (
+          <FontAwesome name="chevron-right" size={11} color={`${accent}CC`} style={styles.navChevron} />
         ) : null}
-      </Pressable>
-    </Link>
+    </Pressable>
   );
 }
 
@@ -245,7 +252,8 @@ function SidebarPanel({
       <ScrollView
         style={styles.navScroll}
         contentContainerStyle={styles.navScrollContent}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled">
         <NavLinks recolhido={compacto} onNavigate={onNavigate} />
       </ScrollView>
 
@@ -279,7 +287,10 @@ function SidebarPanel({
 
         <Pressable
           accessibilityLabel="Sair"
-          onPress={() => void signOut()}
+          onPress={(e) => {
+            e?.stopPropagation?.();
+            void signOut();
+          }}
           style={({ pressed }) => [
             styles.logoutBtn,
             compacto && styles.logoutBtnCollapsed,
@@ -509,8 +520,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   collapseLabel: { fontSize: 12, fontWeight: '700' },
-  navScroll: { flex: 1 },
-  navScrollContent: { paddingBottom: 16 },
+  navScroll: { flex: 1, minHeight: 0 },
+  navScrollContent: { paddingBottom: 16, flexGrow: 1 },
   navSections: { gap: 0 },
   navSection: { gap: 10 },
   navSectionSpaced: { marginTop: 24 },
@@ -572,13 +583,22 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 1,
+    flexShrink: 0,
   },
   iconWrapCollapsed: {
     width: 38,
     height: 38,
   },
-  navLabel: { flex: 1, fontSize: 14, fontWeight: '600', letterSpacing: -0.1 },
+  navLabel: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: -0.1,
+    zIndex: 2,
+  },
   navLabelActive: { fontWeight: '800' },
+  navChevron: { marginLeft: 4, zIndex: 2 },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -586,6 +606,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingTop: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
+    flexShrink: 0,
   },
   footerCollapsed: {
     flexDirection: 'column',
