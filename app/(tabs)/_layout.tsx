@@ -9,7 +9,7 @@ export default function AppLayout() {
   const { theme } = useTheme();
   const { session, adminProfile, loading } = useAdminAuth();
 
-  if (sessionLoading) {
+  if (loading && !session) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.background }}>
         <ActivityIndicator color={theme.cadastroAction} />
