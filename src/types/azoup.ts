@@ -302,6 +302,25 @@ export interface ClienteMarketingUtmRow {
   clientes_azoup?: Pick<ClienteAzoupRow, 'nome' | 'email'> | null;
 }
 
+export interface SuporteVideoRow {
+  id: string;
+  titulo: string;
+  youtube_url: string;
+  categoria: string;
+  ordem?: number | null;
+  ativo?: boolean | null;
+  created_by_admin?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export type CriarSuporteVideoInput = {
+  titulo: string;
+  youtube_url: string;
+  categoria: string;
+  created_by_admin?: string | null;
+};
+
 export interface CreditoIaGastoAgg {
   cliente_id: string;
   total_tokens?: number | null;

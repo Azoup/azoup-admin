@@ -5,6 +5,7 @@ import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
+import { BackLink } from '@/components/ui/BackLink';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ScreenCard } from '@/components/ui/ScreenCard';
@@ -140,6 +141,7 @@ export default function CouponsScreen() {
       keyExtractor={(item) => item.id}
       ListHeaderComponent={
         <View style={{ gap: 12 }}>
+          <BackLink href="/billing" />
           <PageHeader
             title="Cupons (Stripe + admin_coupons)"
             subtitle="Cupons são criados no Stripe para novas compras/checkout — não alteram assinaturas existentes."

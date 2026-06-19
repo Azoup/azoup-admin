@@ -5,6 +5,7 @@ import { FlatList, StyleSheet, View } from 'react-native';
 import { FormCheckbox } from '@/components/ui/FormCheckbox';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
+import { BackLink } from '@/components/ui/BackLink';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ScreenCard } from '@/components/ui/ScreenCard';
@@ -183,6 +184,7 @@ export default function PlansScreen() {
       keyExtractor={(item) => String(item.id)}
       ListHeaderComponent={
         <View style={{ gap: 12, marginBottom: 4 }}>
+          <BackLink href="/billing" />
           <PageHeader
             title="Planos Azoup"
             subtitle="Crie planos no banco e no Stripe. Marque quais aparecem para os clientes no app."

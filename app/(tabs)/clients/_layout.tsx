@@ -1,7 +1,5 @@
 import { Stack } from 'expo-router';
-import { View } from 'react-native';
 
-import { ThemeToggleButton } from '@/components/ui/ThemeToggleButton';
 import { useTheme } from '@/src/contexts/ThemeContext';
 
 export default function ClientsStackLayout() {
@@ -10,18 +8,11 @@ export default function ClientsStackLayout() {
   return (
     <Stack
       screenOptions={{
-        headerStyle: { backgroundColor: theme.surface },
-        headerTintColor: theme.headerText,
-        headerShadowVisible: false,
+        headerShown: false,
         contentStyle: { backgroundColor: theme.background },
-        headerRight: () => (
-          <View style={{ marginRight: 12 }}>
-            <ThemeToggleButton />
-          </View>
-        ),
       }}>
-      <Stack.Screen name="index" options={{ title: 'Clientes' }} />
-      <Stack.Screen name="[id]" options={{ title: 'Cliente' }} />
+      <Stack.Screen name="index" />
+      <Stack.Screen name="[id]" />
     </Stack>
   );
 }

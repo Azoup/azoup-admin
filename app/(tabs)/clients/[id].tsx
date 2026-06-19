@@ -6,6 +6,7 @@ import { StyleSheet } from 'react-native';
 import { ConversaClienteCard } from '@/components/ui/ConversaClienteCard';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
+import { BackLink } from '@/components/ui/BackLink';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Screen } from '@/components/ui/Screen';
@@ -173,6 +174,7 @@ export default function ClientDetailScreen() {
 
   return (
     <Screen scroll>
+      <BackLink href="/clients" label="Voltar para clientes" />
       <PageHeader title={nome} subtitle={`E-mail: ${data.email ?? '—'} · ${data.telefone ?? data.celular ?? '—'}`} />
 
       <ScreenCard>

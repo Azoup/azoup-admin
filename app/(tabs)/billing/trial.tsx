@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
+import { BackLink } from '@/components/ui/BackLink';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Screen } from '@/components/ui/Screen';
@@ -55,6 +56,7 @@ export default function TrialSettingsScreen() {
 
   return (
     <Screen scroll>
+      <BackLink href="/billing" />
       <PageHeader
         title="Dias de trial padrão"
         subtitle="Persistido em admin_billing_settings. O app principal deve ler esse valor ao criar assinaturas."
