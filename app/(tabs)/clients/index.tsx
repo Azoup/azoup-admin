@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Linking, Pressable, StyleSheet, View } from 'react-native';
 
@@ -31,6 +31,7 @@ const MENSAGEM_OK = '#16a34a';
 export default function ClientsListScreen() {
   const { theme } = useTheme();
   const { session } = useAdminAuth();
+  const router = useRouter();
   const qc = useQueryClient();
   const [filtro, setFiltro] = useState<ClientesFiltroState>(CLIENTES_FILTRO_INICIAL);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -57,6 +58,10 @@ export default function ClientsListScreen() {
     try {
       if (marcar) {
         await marcarMensagemEnviadaHoje({ clienteId: cliente.id, adminEmail });
+        router.push({
+          pathname: '/(tabs)/conversas',
+          params: { cliente_id: cliente.id },
+        });
       } else {
         await desmarcarMensagemEnviadaHoje(cliente.id);
       }
@@ -161,7 +166,9 @@ export default function ClientsListScreen() {
                 <View style={styles.actions}>
                   <Pressable
                     accessibilityLabel={
-                      mensagemOk ? 'Mensagem enviada hoje — toque para desmarcar' : 'Marcar mensagem enviada hoje'
+                      mensagemOk
+                        ? 'Mensagem enviada hoje — toque para desmarcar'
+                        : 'Marcar mensagem enviada hoje e registrar conversa'
                     }
                     disabled={alternando}
                     onPress={() => {

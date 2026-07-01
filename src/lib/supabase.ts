@@ -27,6 +27,30 @@ export function getSupabaseClient(): SupabaseClient {
   return client;
 }
 
+/** Garante JWT válido antes de chamar Edge Functions (evita 401 com token expirado no cache). */
+export async function getValidAccessToken(): Promise<string> {
+  const sb = getSupabaseClient();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await sb.auth.getUser();
+
+  if (!userError && user) {
+    const {
+      data: { session },
+    } = await sb.auth.getSession();
+    if (session?.access_token) return session.access_token;
+  }
+
+  const { data: refreshed, error: refreshError } = await sb.auth.refreshSession();
+  const token = refreshed.session?.access_token;
+  if (refreshError || !token) {
+    throw new Error('Sessão expirada. Faça login novamente.');
+  }
+  return token;
+}
+
 /** Cliente lazy — evita crash na importação quando env ainda não foi injetado no build. */
 export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
   get(_target, prop) {

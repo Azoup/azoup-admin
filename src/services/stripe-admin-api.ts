@@ -1,5 +1,5 @@
 import { env } from '@/src/lib/env';
-import { supabase } from '@/src/lib/supabase';
+import { getValidAccessToken } from '@/src/lib/supabase';
 
 const fnUrl = () => {
   const u = env.supabaseUrl.replace(/\/$/, '');
@@ -36,9 +36,7 @@ export type AdminAccessPayload = {
 };
 
 async function authorizedHeaders(): Promise<HeadersInit> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new Error('Sessão administrativa ausente');
+  const token = await getValidAccessToken();
   if (!env.supabaseAnonKey) throw new Error('EXPO_PUBLIC_SUPABASE_ANON_KEY ausente');
   return {
     Authorization: `Bearer ${token}`,

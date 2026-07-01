@@ -201,16 +201,26 @@ serve(async (req) => {
       });
     }
 
-    const jwt = authHeader.replace('Bearer ', '');
-    const supabaseAuth = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
+    const jwt = authHeader.replace('Bearer ', '').trim();
     const supabaseAdmin = createClient(supabaseUrl, serviceRole);
 
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabaseAuth.auth.getUser(jwt);
+    let user = null;
+    let userErr: { message?: string } | null = null;
+
+    if (anonKey) {
+      const supabaseAuth = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const authResult = await supabaseAuth.auth.getUser(jwt);
+      user = authResult.data.user;
+      userErr = authResult.error;
+    }
+
+    if (!user) {
+      const adminAuthResult = await supabaseAdmin.auth.getUser(jwt);
+      user = adminAuthResult.data.user;
+      userErr = adminAuthResult.error ?? userErr;
+    }
 
     if (userErr || !user) {
       return new Response(JSON.stringify({ error: 'Token inválido' }), {

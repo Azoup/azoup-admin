@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
 
 import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
@@ -30,6 +31,9 @@ export default function ConversasScreen() {
   const { theme } = useTheme();
   const { adminProfile, canAccessScreen } = useAdminAuth();
   const qc = useQueryClient();
+  const { cliente_id: clienteIdParam } = useLocalSearchParams<{ cliente_id?: string }>();
+  const clienteIdInicial = `${clienteIdParam ?? ''}`.trim();
+  const clientePreSelecionadoRef = useRef<string | null>(null);
 
   const [cliente, setCliente] = useState<ClienteAzoupRow | null>(null);
   const [dataConversa, setDataConversa] = useState(hojeIsoLocal);
@@ -57,6 +61,21 @@ export default function ConversasScreen() {
 
   const todosClientes = clientesQ.data ?? [];
   const clientesComHistorico = clientesComHistoricoQ.data ?? [];
+
+  useEffect(() => {
+    if (!clienteIdInicial || !todosClientes.length) return;
+    if (clientePreSelecionadoRef.current === clienteIdInicial) return;
+
+    const encontrado = todosClientes.find((c) => c.id === clienteIdInicial);
+    if (!encontrado) return;
+
+    clientePreSelecionadoRef.current = clienteIdInicial;
+    setCliente(encontrado);
+    setFiltroCliente(encontrado);
+    setDataConversa(hojeIsoLocal());
+    setHoraConversa(agoraHorarioLocal());
+    setDescricao('');
+  }, [clienteIdInicial, todosClientes]);
 
   const createMutation = useMutation({
     mutationFn: async () => {
