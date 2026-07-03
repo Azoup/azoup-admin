@@ -28,7 +28,9 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.map((screen) => {
       ? '/(tabs)'
       : screen.key === 'config_suporte'
         ? '/(tabs)/config-suporte'
-        : `/(tabs)/${screen.key}`;
+        : screen.key === 'metodo360'
+          ? '/(tabs)/metodo360'
+          : `/(tabs)/${screen.key}`;
 
   const icon: ComponentProps<typeof FontAwesome>['name'] =
     screen.key === 'dashboard'
@@ -45,7 +47,9 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.map((screen) => {
                 ? 'bullhorn'
                 : screen.key === 'config_suporte'
                   ? 'youtube-play'
-                  : 'shield';
+                  : screen.key === 'metodo360'
+                    ? 'graduation-cap'
+                    : 'shield';
 
   const group: AdminNavItem['group'] =
     screen.key === 'dashboard' || screen.key === 'clients' || screen.key === 'conversas'

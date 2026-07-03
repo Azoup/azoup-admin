@@ -321,6 +321,36 @@ export type CriarSuporteVideoInput = {
   created_by_admin?: string | null;
 };
 
+export interface Metodo360ChecklistItemRow {
+  id: string;
+  missao_numero: number;
+  nome: string;
+  tela_referencia?: string | null;
+  suporte_video_id?: string | null;
+  criterio_verificacao?: string | null;
+  ordem: number;
+  ativo?: boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  suporte_videos?: Pick<SuporteVideoRow, 'id' | 'titulo' | 'youtube_url' | 'categoria' | 'ativo'> | null;
+}
+
+export type CriarMetodo360ChecklistItemInput = {
+  missao_numero: number;
+  nome: string;
+  tela_referencia?: string | null;
+  suporte_video_id?: string | null;
+  criterio_verificacao?: string | null;
+  ordem?: number;
+  ativo?: boolean;
+};
+
+export type AtualizarMetodo360ChecklistItemInput = Partial<
+  Omit<CriarMetodo360ChecklistItemInput, 'missao_numero'>
+> & {
+  missao_numero?: number;
+};
+
 export interface CreditoIaGastoAgg {
   cliente_id: string;
   total_tokens?: number | null;

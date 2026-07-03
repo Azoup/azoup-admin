@@ -47,6 +47,7 @@ export default function AppLayout() {
         <Stack.Screen name="audit" />
         <Stack.Screen name="marketing" />
         <Stack.Screen name="config-suporte" />
+        <Stack.Screen name="metodo360" />
         <Stack.Screen name="admins" />
       </Stack>
     </AdminShell>

@@ -1,7 +1,7 @@
 import 'react-native-url-polyfill/auto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { isInvalidRefreshError, supabaseAuthStorage } from '@/src/lib/auth-storage';
 import { env, isEnvConfigured } from '@/src/lib/env';
 
 let client: SupabaseClient | null = null;
@@ -17,7 +17,7 @@ export function getSupabaseClient(): SupabaseClient {
 
   client = createClient(env.supabaseUrl, env.supabaseAnonKey, {
     auth: {
-      storage: AsyncStorage,
+      storage: supabaseAuthStorage,
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
@@ -25,6 +25,15 @@ export function getSupabaseClient(): SupabaseClient {
   });
 
   return client;
+}
+
+/** Remove sessão local quando o refresh token expirou ou foi revogado. */
+export async function clearAuthSession(): Promise<void> {
+  try {
+    await getSupabaseClient().auth.signOut({ scope: 'local' });
+  } catch {
+    /* ignore — storage já pode estar limpo */
+  }
 }
 
 /** Garante JWT válido antes de chamar Edge Functions (evita 401 com token expirado no cache). */
@@ -36,16 +45,29 @@ export async function getValidAccessToken(): Promise<string> {
     error: userError,
   } = await sb.auth.getUser();
 
-  if (!userError && user) {
-    const {
-      data: { session },
-    } = await sb.auth.getSession();
-    if (session?.access_token) return session.access_token;
+  if (userError || !user) {
+    if (userError && isInvalidRefreshError(userError.message)) {
+      await clearAuthSession();
+    }
+    throw new Error('Sessão expirada. Faça login novamente.');
+  }
+
+  const {
+    data: { session },
+  } = await sb.auth.getSession();
+
+  const expiresAt = session?.expires_at;
+  const now = Math.floor(Date.now() / 1000);
+  if (session?.access_token && expiresAt && expiresAt > now + 30) {
+    return session.access_token;
   }
 
   const { data: refreshed, error: refreshError } = await sb.auth.refreshSession();
   const token = refreshed.session?.access_token;
   if (refreshError || !token) {
+    if (refreshError && isInvalidRefreshError(refreshError.message)) {
+      await clearAuthSession();
+    }
     throw new Error('Sessão expirada. Faça login novamente.');
   }
   return token;

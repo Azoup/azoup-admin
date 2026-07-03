@@ -1,0 +1,20 @@
+/** Chaves de menu do ERP (`setActiveMenu`) para o botão "Ir para…". */
+export const METODO360_TELAS_ERP = [
+  { value: '', label: 'Nenhuma' },
+  { value: 'Clients', label: 'Clientes' },
+  { value: 'Products', label: 'Produtos' },
+  { value: 'Vendas', label: 'Vendas (Kanban)' },
+  { value: 'Users', label: 'Usuários' },
+  { value: 'Companies', label: 'Empresas' },
+  { value: 'WhatsAppIaConfig', label: 'WhatsApp — Assistente IA' },
+  { value: 'ProductionRouting', label: 'Roteiro de Produção' },
+  { value: 'ProductionKanban', label: 'Kanban Produção' },
+  { value: 'ProductionDashboard', label: 'Dashboard Produção' },
+  { value: 'VendasDashboard', label: 'Dashboard Vendas' },
+  { value: 'EstoqueDashboard', label: 'Dashboard Estoque' },
+  { value: 'EstoqueRelatorioPonta', label: 'Relatório Estoque' },
+  { value: 'ContasPagar', label: 'Contas a Pagar' },
+  { value: 'ContasReceber', label: 'Contas a Receber' },
+  { value: 'FluxoCaixa', label: 'Fluxo de Caixa' },
+  { value: 'PriceTable', label: 'Tabela de preços' },
+] as const;

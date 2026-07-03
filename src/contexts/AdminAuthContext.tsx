@@ -2,7 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { Session } from '@supabase/supabase-js';
 
 import type { AdminScreenKey } from '@/src/constants/admin-screens';
-import { supabase } from '@/src/lib/supabase';
+import { isInvalidRefreshError } from '@/src/lib/auth-storage';
+import { clearAuthSession, supabase } from '@/src/lib/supabase';
 import { obterAdminProfileViaFunction } from '@/src/services/stripe-admin-api';
 import type { AdminPapel, AdminUserRow } from '@/src/types/azoup';
 import { podeAcessarTelaAdmin, telasEfetivasAdmin } from '@/src/utils/admin-permissions';
@@ -90,9 +91,22 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data, error }) => {
       if (!mounted) return;
-      const s = data.session ?? null;
+
+      if (error || !data.user) {
+        if (error && isInvalidRefreshError(error.message)) {
+          await clearAuthSession();
+        }
+        setSession(null);
+        setAdminLoading(false);
+        loadedUserIdRef.current = null;
+        setSessionLoading(false);
+        return;
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const s = sessionData.session ?? null;
       setSession(s);
       if (s?.user?.id) {
         setAdminLoading(true);
@@ -114,6 +128,9 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
         setAdminProfile(null);
         setAdminError(null);
         setAdminLoading(false);
+        if (event === 'SIGNED_OUT') {
+          setSession(null);
+        }
         return;
       }
 
@@ -195,10 +212,14 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : 'Falha ao validar acesso administrativo';
+          if (msg.includes('Sessão expirada') || isInvalidRefreshError(msg)) {
+            await clearAuthSession();
+            setSession(null);
+          }
           setAdminProfile(null);
           adminProfileRef.current = null;
           loadedUserIdRef.current = null;
-          setAdminError(msg);
+          setAdminError(msg.includes('Sessão expirada') ? null : msg);
           console.warn('[admin-auth]', msg);
         }
       } finally {

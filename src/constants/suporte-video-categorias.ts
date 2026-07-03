@@ -5,6 +5,7 @@ export const SUPORTE_VIDEO_CATEGORIAS = [
   'Estoque',
   'Cadastros',
   'Configurações',
+  'Método 360',
 ] as const;
 
 export type SuporteVideoCategoria = (typeof SUPORTE_VIDEO_CATEGORIAS)[number];
