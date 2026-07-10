@@ -1,4 +1,5 @@
 import { supabase } from '@/src/lib/supabase';
+import { obterMrrViaFunction } from '@/src/services/stripe-admin-api';
 import type { AssinaturaClienteRow, ClienteAzoupRow, HistoricoFaturaRow } from '@/src/types/azoup';
 import {
   classificarStatusAssinatura,
@@ -9,6 +10,14 @@ import {
   prioridadeAssinatura,
 } from '@/src/utils/assinatura-status';
 
+export type PlanoClientesResumo = {
+  plano_id: string;
+  nome: string;
+  ativos: number;
+  inativos: number;
+  total: number;
+};
+
 export type DashboardMetricas = {
   total_clientes: number;
   clientes_assinatura_ativa: number;
@@ -16,7 +25,11 @@ export type DashboardMetricas = {
   clientes_inadimplentes: number;
   clientes_cancelados: number;
   mrr_centavos: number;
-  planos_ranking: { plano_id: string; nome: string; quantidade: number }[];
+  mrr_bruto_centavos: number;
+  desconto_centavos: number;
+  assinaturas_com_desconto: number;
+  mrr_fonte: 'stripe' | 'local';
+  planos_clientes: PlanoClientesResumo[];
   tokens_medio_mes?: number | null;
   armazenamento_medio_gb?: number | null;
 };
@@ -44,6 +57,12 @@ function pickAssinaturaPorCliente(assinaturas: AssinaturaClienteRow[]): Map<stri
   return out;
 }
 
+function mrrLocalDeAssinatura(a: AssinaturaClienteRow): number {
+  if (a.valor_atual_centavos != null) return Number(a.valor_atual_centavos);
+  if (a.valor_mensal_atual != null) return Math.round(Number(a.valor_mensal_atual) * 100);
+  return 0;
+}
+
 export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
   const { count: total_clientes, error: errCount } = await supabase
     .from('clientes_azoup')
@@ -51,9 +70,10 @@ export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
 
   if (errCount) throw new Error(errCount.message);
 
-  const [assinaturasRaw, planosRaw] = await Promise.all([
+  const [assinaturasRaw, planosRaw, mrrStripe] = await Promise.all([
     supabase.from('assinaturas_clientes').select('*').limit(5000),
     supabase.from('planos_assinatura').select('id,nome'),
+    obterMrrViaFunction().catch(() => null),
   ]);
 
   if (assinaturasRaw.error) throw new Error(assinaturasRaw.error.message);
@@ -70,9 +90,9 @@ export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
   let clientes_assinatura_ativa = 0;
   let clientes_inadimplentes = 0;
   let clientes_cancelados = 0;
-  let mrr_centavos = 0;
+  let mrr_local_centavos = 0;
 
-  const ranking = new Map<string, number>();
+  const porPlano = new Map<string, { ativos: number; inativos: number }>();
 
   porCliente.forEach((a) => {
     if (isAssinaturaTrial(a)) clientes_trial += 1;
@@ -80,31 +100,30 @@ export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
     if (isAssinaturaInadimplente(a)) clientes_inadimplentes += 1;
     if (isAssinaturaCancelada(a)) clientes_cancelados += 1;
 
-    const centavosMrr =
-      a.valor_atual_centavos != null
-        ? Number(a.valor_atual_centavos)
-        : a.valor_mensal_atual != null
-          ? Math.round(Number(a.valor_mensal_atual) * 100)
-          : 0;
-
+    const centavosMrr = mrrLocalDeAssinatura(a);
     if (centavosMrr > 0 && isAssinaturaAtiva(a)) {
-      mrr_centavos += centavosMrr;
+      mrr_local_centavos += centavosMrr;
     }
 
-    if (a.plano_id != null && `${a.plano_id}` !== '' && classificarStatusAssinatura(a) !== 'cancelada') {
-      const pid = String(a.plano_id);
-      ranking.set(pid, (ranking.get(pid) ?? 0) + 1);
-    }
+    if (a.plano_id == null || `${a.plano_id}` === '') return;
+    const pid = String(a.plano_id);
+    const bucket = porPlano.get(pid) ?? { ativos: 0, inativos: 0 };
+    const grupo = classificarStatusAssinatura(a);
+    // Ativos = assinatura em uso (ativa ou trial); inativos = cancelada / inadimplente / outros
+    if (grupo === 'ativa' || grupo === 'trial') bucket.ativos += 1;
+    else bucket.inativos += 1;
+    porPlano.set(pid, bucket);
   });
 
-  const planos_ranking = [...ranking.entries()]
-    .map(([plano_id, quantidade]) => ({
+  const planos_clientes: PlanoClientesResumo[] = [...porPlano.entries()]
+    .map(([plano_id, counts]) => ({
       plano_id,
-      nome: planosMap.get(plano_id) ?? plano_id,
-      quantidade,
+      nome: planosMap.get(plano_id) ?? `Plano #${plano_id}`,
+      ativos: counts.ativos,
+      inativos: counts.inativos,
+      total: counts.ativos + counts.inativos,
     }))
-    .sort((a, b) => b.quantidade - a.quantidade)
-    .slice(0, 8);
+    .sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome));
 
   const { data: uso } = await supabase.from('credito_ia_gasto').select('*').limit(1000);
 
@@ -118,6 +137,11 @@ export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
     }
   }
 
+  const mrr_centavos = mrrStripe?.mrr_centavos ?? mrr_local_centavos;
+  const mrr_bruto_centavos = mrrStripe?.mrr_bruto_centavos ?? mrr_local_centavos;
+  const desconto_centavos = mrrStripe?.desconto_centavos ?? 0;
+  const assinaturas_com_desconto = mrrStripe?.assinaturas_com_desconto ?? 0;
+
   return {
     total_clientes: total_clientes ?? 0,
     clientes_assinatura_ativa,
@@ -125,7 +149,11 @@ export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
     clientes_inadimplentes,
     clientes_cancelados,
     mrr_centavos,
-    planos_ranking,
+    mrr_bruto_centavos,
+    desconto_centavos,
+    assinaturas_com_desconto,
+    mrr_fonte: mrrStripe ? 'stripe' : 'local',
+    planos_clientes,
     tokens_medio_mes,
     armazenamento_medio_gb: null,
   };

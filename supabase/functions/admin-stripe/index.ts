@@ -145,6 +145,95 @@ function reaisParaCentavos(reais: number): number {
   return Math.round(Number(reais) * 100);
 }
 
+function centavosParaReais(centavos: number): number {
+  return Math.round(Number(centavos)) / 100;
+}
+
+function isStatusAssinaturaAtivaLocal(status: string | null | undefined): boolean {
+  const s = `${status ?? ''}`.trim().toLowerCase();
+  if (!s) return false;
+  if (s.includes('cancel') || s.includes('encerr') || s.includes('inativ')) return false;
+  if (s.includes('trial') || s.includes('teste')) return false;
+  if (s.includes('inadimpl') || s.includes('vencid') || s.includes('atrasad') || s.includes('past_due')) return false;
+  return s.includes('ativo') || s.includes('ativa') || s === 'active' || s.includes('active');
+}
+
+type MrrAssinaturaValor = {
+  liquido_centavos: number;
+  bruto_centavos: number;
+  desconto_centavos: number;
+};
+
+function aplicarDescontoStripe(brutoCentavos: number, discount: Stripe.Discount | null | undefined): MrrAssinaturaValor {
+  const bruto = Math.max(0, Math.round(brutoCentavos));
+  if (!discount?.coupon || bruto <= 0) {
+    return { liquido_centavos: bruto, bruto_centavos: bruto, desconto_centavos: 0 };
+  }
+  const coupon = discount.coupon;
+  let desconto = 0;
+  if (coupon.percent_off != null) {
+    desconto = Math.round((bruto * Number(coupon.percent_off)) / 100);
+  } else if (coupon.amount_off != null) {
+    desconto = Math.min(bruto, Math.round(Number(coupon.amount_off)));
+  }
+  return {
+    bruto_centavos: bruto,
+    desconto_centavos: desconto,
+    liquido_centavos: Math.max(0, bruto - desconto),
+  };
+}
+
+function mrrDeItensAssinatura(subscription: Stripe.Subscription): MrrAssinaturaValor {
+  let bruto = 0;
+  for (const item of subscription.items?.data ?? []) {
+    const unit = item.price?.unit_amount ?? 0;
+    const qty = item.quantity ?? 1;
+    if (item.price?.recurring?.interval === 'year') {
+      bruto += Math.round((unit * qty) / 12);
+    } else {
+      bruto += unit * qty;
+    }
+  }
+  return aplicarDescontoStripe(bruto, subscription.discount);
+}
+
+async function mrrDeAssinaturaStripe(stripe: Stripe, subscriptionId: string): Promise<MrrAssinaturaValor> {
+  try {
+    const upcoming = await stripe.invoices.retrieveUpcoming({ subscription: subscriptionId });
+    const liquido = Math.max(0, Math.round(Number(upcoming.total ?? 0)));
+    const descontoLista = upcoming.total_discount_amounts ?? [];
+    const desconto = Math.max(
+      0,
+      descontoLista.reduce((acc, d) => acc + Math.round(Number(d.amount ?? 0)), 0),
+    );
+    const bruto = Math.max(liquido + desconto, Math.round(Number(upcoming.subtotal ?? liquido + desconto)));
+    return {
+      liquido_centavos: liquido,
+      bruto_centavos: bruto,
+      desconto_centavos: Math.min(desconto, bruto),
+    };
+  } catch {
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+      expand: ['discount', 'items.data.price'],
+    });
+    return mrrDeItensAssinatura(subscription);
+  }
+}
+
+async function mapInBatches<T, R>(
+  items: T[],
+  batchSize: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const chunk = items.slice(i, i + batchSize);
+    const partial = await Promise.all(chunk.map(fn));
+    out.push(...partial);
+  }
+  return out;
+}
+
 function parseNumeroPositivo(raw: unknown, campo: string, obrigatorio = true): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) {
@@ -507,6 +596,102 @@ serve(async (req) => {
       return new Response(JSON.stringify({ subscription }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    if (body.op === 'compute_mrr') {
+      const { data: assinaturas, error: assErr } = await supabaseAdmin
+        .from('assinaturas_clientes')
+        .select('id,cliente_id,status,stripe_subscription_id,valor_mensal_atual')
+        .not('stripe_subscription_id', 'is', null)
+        .limit(5000);
+
+      if (assErr) throw assErr;
+
+      const ativas = (assinaturas ?? []).filter((a) => {
+        const sid = `${a.stripe_subscription_id ?? ''}`.trim();
+        return sid.length > 0 && isStatusAssinaturaAtivaLocal(a.status as string | null);
+      });
+
+      // Uma assinatura por cliente (prioriza a primeira ativa encontrada)
+      const porCliente = new Map<string, (typeof ativas)[number]>();
+      for (const a of ativas) {
+        const cid = `${a.cliente_id}`;
+        if (!porCliente.has(cid)) porCliente.set(cid, a);
+      }
+      const unicas = [...porCliente.values()];
+
+      type ItemResult = {
+        id: number | string;
+        ok: boolean;
+        liquido_centavos: number;
+        bruto_centavos: number;
+        desconto_centavos: number;
+        erro?: string;
+      };
+
+      const resultados = await mapInBatches(unicas, 8, async (a): Promise<ItemResult> => {
+        const subId = `${a.stripe_subscription_id}`.trim();
+        try {
+          const valores = await mrrDeAssinaturaStripe(stripe, subId);
+          const valorReais = centavosParaReais(valores.liquido_centavos);
+          await supabaseAdmin
+            .from('assinaturas_clientes')
+            .update({
+              valor_mensal_atual: valorReais,
+              atualizado_em: new Date().toISOString(),
+            } as never)
+            .eq('id', a.id);
+
+          return {
+            id: a.id as number | string,
+            ok: true,
+            liquido_centavos: valores.liquido_centavos,
+            bruto_centavos: valores.bruto_centavos,
+            desconto_centavos: valores.desconto_centavos,
+          };
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Falha ao consultar Stripe';
+          // Fallback: valor já gravado no banco
+          const fallbackCentavos =
+            a.valor_mensal_atual != null ? Math.round(Number(a.valor_mensal_atual) * 100) : 0;
+          return {
+            id: a.id as number | string,
+            ok: false,
+            liquido_centavos: fallbackCentavos,
+            bruto_centavos: fallbackCentavos,
+            desconto_centavos: 0,
+            erro: msg,
+          };
+        }
+      });
+
+      let mrr_centavos = 0;
+      let mrr_bruto_centavos = 0;
+      let desconto_centavos = 0;
+      let assinaturas_com_desconto = 0;
+      let assinaturas_consultadas = 0;
+      let assinaturas_com_erro = 0;
+
+      for (const r of resultados) {
+        assinaturas_consultadas += 1;
+        if (!r.ok) assinaturas_com_erro += 1;
+        mrr_centavos += r.liquido_centavos;
+        mrr_bruto_centavos += r.bruto_centavos;
+        desconto_centavos += r.desconto_centavos;
+        if (r.desconto_centavos > 0) assinaturas_com_desconto += 1;
+      }
+
+      return new Response(
+        JSON.stringify({
+          mrr_centavos,
+          mrr_bruto_centavos,
+          desconto_centavos,
+          assinaturas_com_desconto,
+          assinaturas_consultadas,
+          assinaturas_com_erro,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
     }
 
     if (body.op === 'create_coupon') {

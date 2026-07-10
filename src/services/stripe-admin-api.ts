@@ -79,6 +79,19 @@ export async function obterAssinaturaStripe(payload: StripeSubscriptionPayload) 
   return invoke<{ subscription: Record<string, unknown> }>('get_subscription', payload);
 }
 
+export type ComputeMrrResponse = {
+  mrr_centavos: number;
+  mrr_bruto_centavos: number;
+  desconto_centavos: number;
+  assinaturas_com_desconto: number;
+  assinaturas_consultadas: number;
+  assinaturas_com_erro: number;
+};
+
+export async function obterMrrViaFunction() {
+  return invoke<ComputeMrrResponse>('compute_mrr', {});
+}
+
 export async function obterAdminProfileViaFunction() {
   return invoke<{ admin_profile: Record<string, unknown> }>('get_admin_profile', {});
 }
