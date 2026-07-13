@@ -10,6 +10,14 @@ export function formatBRLFromReais(reais?: number | null) {
   return Number(reais).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+/** Formata YYYY-MM-DD sem deslocar fuso (ex.: data_retorno). */
+export function formatYmdBR(ymd?: string | null) {
+  if (!ymd) return '—';
+  const m = `${ymd}`.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return formatDateBR(ymd);
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
 export function formatDateBR(iso?: string | null) {
   if (!iso) return '—';
   try {

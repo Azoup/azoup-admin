@@ -259,6 +259,16 @@ export interface AdminClienteMensagemDiariaRow {
   updated_at?: string | null;
 }
 
+export interface AdminClienteCongelamentoRow {
+  cliente_id: string;
+  congelado: boolean;
+  data_retorno?: string | null;
+  observacao?: string | null;
+  admin_email?: string | null;
+  updated_at?: string | null;
+  created_at?: string | null;
+}
+
 export interface AdminAuditLogRow {
   id: string;
   admin_email?: string | null;
@@ -395,4 +405,6 @@ export interface ClienteAzoupAdminView extends ClienteAzoupRow {
   empresa_matriz_cnpj?: string | null;
   /** Mensagem/contato marcado como enviado hoje (reset automático a cada dia). */
   mensagem_enviada_hoje?: boolean;
+  /** Congelamento de acompanhamento + data para chamar de novo. */
+  congelamento?: AdminClienteCongelamentoRow | null;
 }

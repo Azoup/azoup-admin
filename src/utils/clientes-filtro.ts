@@ -10,10 +10,11 @@ import {
 } from 'date-fns';
 
 import type { ClienteAzoupAdminView } from '@/src/types/azoup';
+import { clientePrecisaChamar } from '@/src/services/repos/congelamento-repo';
 import { classificarStatusAssinatura } from '@/src/utils/assinatura-status';
 import { digitsOnlyPhone } from '@/src/utils/whatsapp';
 
-export type ClienteStatusFiltro = 'todos' | 'ativo' | 'trial' | 'inativo';
+export type ClienteStatusFiltro = 'todos' | 'ativo' | 'trial' | 'inativo' | 'congelado' | 'chamar';
 
 export type PeriodoFiltroPreset =
   | 'todos'
@@ -116,6 +117,9 @@ function matchBusca(item: ClienteAzoupAdminView, busca: string): boolean {
 
 function matchStatus(item: ClienteAzoupAdminView, status: ClienteStatusFiltro): boolean {
   if (status === 'todos') return true;
+
+  if (status === 'congelado') return Boolean(item.congelamento?.congelado);
+  if (status === 'chamar') return clientePrecisaChamar(item.congelamento);
 
   const grupo = classificarStatusAssinatura(item.assinatura);
 

@@ -22,8 +22,9 @@ import {
   temFiltroAtivo,
   type ClientesFiltroState,
 } from '@/src/utils/clientes-filtro';
-import { formatBRLFromCentavos, formatBRLFromReais, formatDateBR } from '@/src/utils/format';
+import { formatBRLFromCentavos, formatBRLFromReais, formatDateBR, formatYmdBR } from '@/src/utils/format';
 import { resolveClienteWhatsAppUrl } from '@/src/utils/whatsapp';
+import { clientePrecisaChamar } from '@/src/services/repos/congelamento-repo';
 
 const WHATSAPP_GREEN = '#25D366';
 const MENSAGEM_OK = '#16a34a';
@@ -156,6 +157,19 @@ export default function ClientsListScreen() {
                       {item.meses_em_aberto?.length ? (
                         <Text style={{ color: theme.warning, fontWeight: '700', fontSize: 13 }}>
                           Meses com pendência: {item.meses_em_aberto.join(', ')}
+                        </Text>
+                      ) : null}
+                      {item.congelamento?.congelado ? (
+                        <Text
+                          style={{
+                            color: clientePrecisaChamar(item.congelamento) ? theme.error : theme.cadastroAction,
+                            fontWeight: '800',
+                            fontSize: 13,
+                          }}
+                        >
+                          {clientePrecisaChamar(item.congelamento)
+                            ? `Chamar agora · retorno ${formatYmdBR(item.congelamento.data_retorno)}`
+                            : `Congelado · chamar em ${formatYmdBR(item.congelamento.data_retorno)}`}
                         </Text>
                       ) : null}
                     </View>

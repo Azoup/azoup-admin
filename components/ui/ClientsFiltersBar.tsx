@@ -22,13 +22,15 @@ type Props = {
   filtrados: number;
 };
 
-const STATUS_OPTIONS = ['todos', 'ativo', 'trial', 'inativo'] as const;
+const STATUS_OPTIONS = ['todos', 'ativo', 'trial', 'inativo', 'congelado', 'chamar'] as const;
 
 const STATUS_LABELS: Record<ClienteStatusFiltro, string> = {
   todos: 'Todos',
   ativo: 'Ativo',
   trial: 'Trial',
   inativo: 'Inativo',
+  congelado: 'Congelado',
+  chamar: 'Chamar',
 };
 
 export function ClientsFiltersBar({ value, onChange, total, filtrados }: Props) {

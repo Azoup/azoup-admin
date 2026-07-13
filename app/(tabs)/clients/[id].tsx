@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { ConversaClienteCard } from '@/components/ui/ConversaClienteCard';
 import { FormField } from '@/components/ui/FormField';
@@ -23,17 +23,29 @@ import {
   resolverLimitesEfetivos,
   upsertLimitesOverride,
 } from '@/src/services/repos/clientes-repo';
+import {
+  clientePrecisaChamar,
+  congelarCliente,
+  descongelarCliente,
+} from '@/src/services/repos/congelamento-repo';
 import { listarConversasClientes } from '@/src/services/repos/conversas-repo';
 import { obterAssinaturaStripe } from '@/src/services/stripe-admin-api';
 import { rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
-import { formatBRLFromCentavos, formatBRLFromReais, formatDateBR, formatDateTimeBR } from '@/src/utils/format';
+import {
+  dataHojeBrasil,
+  formatBRLFromCentavos,
+  formatBRLFromReais,
+  formatDateBR,
+  formatDateTimeBR,
+  formatYmdBR,
+} from '@/src/utils/format';
 
 export default function ClientDetailScreen() {
   const { theme } = useTheme();
   const styles = useMemo(() => getStyles(theme), [theme]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
-  const { adminProfile, canEditLimits } = useAdminAuth();
+  const { adminProfile, canEditLimits, session } = useAdminAuth();
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['cliente_azoup_admin', id],
@@ -56,6 +68,9 @@ export default function ClientDetailScreen() {
   const [motivo, setMotivo] = useState('');
   const [stripeJson, setStripeJson] = useState<string | null>(null);
   const [saveHint, setSaveHint] = useState<string | null>(null);
+  const [dataRetorno, setDataRetorno] = useState('');
+  const [obsCongelar, setObsCongelar] = useState('');
+  const [congelarErro, setCongelarErro] = useState<string | null>(null);
 
   useEffect(() => {
     setLimU('');
@@ -64,7 +79,66 @@ export default function ClientDetailScreen() {
     setLimT('');
     setMotivo('');
     setSaveHint(null);
+    setCongelarErro(null);
   }, [id]);
+
+  useEffect(() => {
+    if (data?.congelamento?.congelado) {
+      setDataRetorno(`${data.congelamento.data_retorno ?? ''}`.slice(0, 10));
+      setObsCongelar(data.congelamento.observacao ?? '');
+    } else {
+      setDataRetorno('');
+      setObsCongelar('');
+    }
+  }, [data?.congelamento?.congelado, data?.congelamento?.data_retorno, data?.congelamento?.observacao]);
+
+  const congelarMutation = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('Cliente inválido');
+      return congelarCliente({
+        clienteId: id,
+        dataRetorno,
+        observacao: obsCongelar,
+        adminEmail: session?.user?.email ?? adminProfile?.email ?? null,
+      });
+    },
+    onSuccess: async (row) => {
+      setCongelarErro(null);
+      await registrarAuditoria({ id: adminProfile?.id, email: adminProfile?.email }, {
+        acao: 'CLIENTE_CONGELAR',
+        entidade: 'admin_cliente_congelamento',
+        entidade_id: id,
+        valores_anteriores: {},
+        valores_novos: row as unknown as Record<string, unknown>,
+      });
+      await qc.invalidateQueries({ queryKey: ['cliente_azoup_admin', id] });
+      await qc.invalidateQueries({ queryKey: ['clientes_azoup_admin'] });
+    },
+    onError: (e) => setCongelarErro(e instanceof Error ? e.message : 'Erro ao congelar'),
+  });
+
+  const descongelarMutation = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('Cliente inválido');
+      return descongelarCliente({
+        clienteId: id,
+        adminEmail: session?.user?.email ?? adminProfile?.email ?? null,
+      });
+    },
+    onSuccess: async (row) => {
+      setCongelarErro(null);
+      await registrarAuditoria({ id: adminProfile?.id, email: adminProfile?.email }, {
+        acao: 'CLIENTE_DESCONGELAR',
+        entidade: 'admin_cliente_congelamento',
+        entidade_id: id,
+        valores_anteriores: {},
+        valores_novos: row as unknown as Record<string, unknown>,
+      });
+      await qc.invalidateQueries({ queryKey: ['cliente_azoup_admin', id] });
+      await qc.invalidateQueries({ queryKey: ['clientes_azoup_admin'] });
+    },
+    onError: (e) => setCongelarErro(e instanceof Error ? e.message : 'Erro ao descongelar'),
+  });
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -164,6 +238,8 @@ export default function ClientDetailScreen() {
   const nome =
     data.nome_fantasia ?? data.nome ?? data.razao_social ?? data.email ?? `Cliente ${data.id.slice(0, 8)}`;
   const metricas = data.metricas_uso;
+  const congelado = Boolean(data.congelamento?.congelado);
+  const precisaChamar = clientePrecisaChamar(data.congelamento);
 
   const ultimoAcessoLabel =
     metricas?.ultimo_acesso_fonte === 'auth'
@@ -176,6 +252,59 @@ export default function ClientDetailScreen() {
     <Screen scroll>
       <BackLink href="/clients" label="Voltar para clientes" />
       <PageHeader title={nome} subtitle={`E-mail: ${data.email ?? '—'} · ${data.telefone ?? data.celular ?? '—'}`} />
+
+      <ScreenCard style={{ gap: 10 }}>
+        <SectionTitle>Congelar / chamar de novo</SectionTitle>
+        {congelado ? (
+          <Text
+            style={{
+              color: precisaChamar ? theme.error : theme.cadastroAction,
+              fontWeight: '800',
+            }}
+          >
+            {precisaChamar
+              ? `Hora de chamar · retorno ${formatYmdBR(data.congelamento?.data_retorno)}`
+              : `Congelado até ${formatYmdBR(data.congelamento?.data_retorno)}`}
+          </Text>
+        ) : (
+          <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+            Congela o acompanhamento e agenda a data para ligar novamente.
+          </Text>
+        )}
+
+        <FormField label="Data para chamar" required helper="Formato AAAA-MM-DD">
+          <FormInput
+            value={dataRetorno}
+            onChangeText={setDataRetorno}
+            placeholder={dataHojeBrasil()}
+            autoCapitalize="none"
+          />
+        </FormField>
+        <FormField label="Observação">
+          <FormInput
+            value={obsCongelar}
+            onChangeText={setObsCongelar}
+            placeholder="Motivo do congelamento / o que falar na ligação"
+          />
+        </FormField>
+
+        {congelarErro ? <Text style={{ color: theme.error }}>{congelarErro}</Text> : null}
+
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <PrimaryButton
+            label={congelarMutation.isPending ? 'Salvando…' : congelado ? 'Atualizar retorno' : 'Congelar cliente'}
+            loading={congelarMutation.isPending}
+            onPress={() => congelarMutation.mutate()}
+          />
+          {congelado ? (
+            <SecondaryButton
+              label={descongelarMutation.isPending ? 'Descongelando…' : 'Descongelar'}
+              disabled={descongelarMutation.isPending}
+              onPress={() => descongelarMutation.mutate()}
+            />
+          ) : null}
+        </View>
+      </ScreenCard>
 
       <ScreenCard>
         <SectionTitle>Uso do sistema</SectionTitle>

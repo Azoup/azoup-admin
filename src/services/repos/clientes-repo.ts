@@ -1,11 +1,13 @@
 import { differenceInCalendarDays, parseISO } from 'date-fns';
 
 import { supabase } from '@/src/lib/supabase';
+import { listarCongelamentosClientes, buscarCongelamentoCliente } from '@/src/services/repos/congelamento-repo';
 import { listarClientesComMensagemHoje } from '@/src/services/repos/mensagem-contato-repo';
 import { obterMetricasClienteViaFunction } from '@/src/services/stripe-admin-api';
 import { prioridadeAssinatura } from '@/src/utils/assinatura-status';
 import { contarNotasFiscaisGeradasDoCliente } from '@/src/utils/nota-fiscal-metricas';
 import type {
+  AdminClienteCongelamentoRow,
   AssinaturaClienteRow,
   AssinaturaLimitesOverrideRow,
   ClienteAzoupAdminView,
@@ -153,6 +155,17 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
     );
   }
 
+  let congelamentos = new Map<string, AdminClienteCongelamentoRow>();
+  try {
+    congelamentos = await listarCongelamentosClientes(ids);
+  } catch (e) {
+    console.warn(
+      '[admin_cliente_congelamento] Leitura ignorada na listagem:',
+      e instanceof Error ? e.message : e,
+      '— execute supabase/sql/admin_cliente_congelamento.sql no Supabase.',
+    );
+  }
+
   return rows.map((c) => {
     const assinatura = pickLatestAssinatura(assinPorCliente.get(c.id) ?? []);
     const plano = assinatura?.plano_id != null ? planoPorId.get(String(assinatura.plano_id)) ?? null : null;
@@ -186,6 +199,7 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
       empresa_matriz_nome: matriz ? rotuloEmpresaMatriz(matriz) : null,
       empresa_matriz_cnpj: matriz?.cnpj ?? null,
       mensagem_enviada_hoje: mensagemHoje.has(c.id),
+      congelamento: congelamentos.get(c.id) ?? null,
     };
   });
 }
@@ -326,11 +340,18 @@ export async function montarVisaoCliente(clienteId: string, base?: ClienteAzoupR
     cliente = data as ClienteAzoupRow;
   }
 
-  const [assinatura, limites_override, historico_faturas, metricas_uso] = await Promise.all([
+  const [assinatura, limites_override, historico_faturas, metricas_uso, congelamento] = await Promise.all([
     buscarAssinaturaRecente(clienteId),
     buscarOverride(clienteId),
     buscarHistoricoFaturas(clienteId),
     buscarMetricasUsoCliente(clienteId),
+    buscarCongelamentoCliente(clienteId).catch((e) => {
+      console.warn(
+        '[admin_cliente_congelamento] Leitura ignorada no detalhe:',
+        e instanceof Error ? e.message : e,
+      );
+      return null;
+    }),
   ]);
   const plano = await buscarPlano(assinatura?.plano_id);
 
@@ -357,6 +378,7 @@ export async function montarVisaoCliente(clienteId: string, base?: ClienteAzoupR
     meses_em_aberto: [...mesesAbertos].sort(),
     cobrancas_falhas,
     metricas_uso,
+    congelamento,
   };
 }
 
