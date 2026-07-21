@@ -109,7 +109,7 @@ export async function carregarMetricasDashboard(): Promise<DashboardMetricas> {
     const pid = String(a.plano_id);
     const bucket = porPlano.get(pid) ?? { ativos: 0, inativos: 0 };
     const grupo = classificarStatusAssinatura(a);
-    // Ativos = assinatura em uso (ativa ou trial); inativos = cancelada / inadimplente / outros
+    // Ativos = assinatura em uso (ativa ou trial vigente); inativos = cancelada / inadimplente / trial expirado / outros
     if (grupo === 'ativa' || grupo === 'trial') bucket.ativos += 1;
     else bucket.inativos += 1;
     porPlano.set(pid, bucket);

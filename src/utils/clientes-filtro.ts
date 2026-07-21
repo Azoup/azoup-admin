@@ -129,6 +129,7 @@ function matchStatus(item: ClienteAzoupAdminView, status: ClienteStatusFiltro): 
     return (
       grupo === 'cancelada' ||
       grupo === 'inadimplente' ||
+      grupo === 'trial_expirado' ||
       grupo === 'outro' ||
       !item.assinatura?.status
     );

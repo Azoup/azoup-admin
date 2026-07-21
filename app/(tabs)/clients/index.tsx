@@ -23,6 +23,10 @@ import {
   type ClientesFiltroState,
 } from '@/src/utils/clientes-filtro';
 import { formatBRLFromCentavos, formatBRLFromReais, formatDateBR, formatYmdBR } from '@/src/utils/format';
+import {
+  isAssinaturaTrialExpirado,
+  rotuloStatusAssinatura,
+} from '@/src/utils/assinatura-status';
 import { resolveClienteWhatsAppUrl } from '@/src/utils/whatsapp';
 import { clientePrecisaChamar } from '@/src/services/repos/congelamento-repo';
 
@@ -125,6 +129,8 @@ export default function ClientsListScreen() {
           const inicioSistema = item.created_at ?? item.assinatura?.data_inicio ?? item.assinatura?.criado_em ?? null;
           const mensagemOk = Boolean(item.mensagem_enviada_hoje);
           const alternando = togglingId === item.id;
+          const statusAssinatura = rotuloStatusAssinatura(item.assinatura);
+          const trialExpirado = isAssinaturaTrialExpirado(item.assinatura);
 
           return (
             <View style={{ marginHorizontal: 12, marginVertical: 6 }}>
@@ -151,8 +157,14 @@ export default function ClientsListScreen() {
                             ? formatBRLFromReais(item.assinatura.valor_mensal_atual)
                             : formatBRLFromCentavos(item.plano?.valor_mensal_centavos)}
                       </Text>
-                      <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-                        Assinatura: {item.assinatura?.status ?? '—'} · Falhas: {item.cobrancas_falhas ?? 0}
+                      <Text
+                        style={{
+                          color: trialExpirado ? theme.warning : theme.textMuted,
+                          fontSize: 13,
+                          fontWeight: trialExpirado ? '800' : '400',
+                        }}
+                      >
+                        Assinatura: {statusAssinatura} · Falhas: {item.cobrancas_falhas ?? 0}
                       </Text>
                       {item.meses_em_aberto?.length ? (
                         <Text style={{ color: theme.warning, fontWeight: '700', fontSize: 13 }}>
