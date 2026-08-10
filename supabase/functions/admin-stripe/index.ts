@@ -491,7 +491,7 @@ serve(async (req) => {
     if (body.op === 'list_acompanhamento') {
       const { data: clientes, error: cliErr } = await supabaseAdmin
         .from('clientes_azoup')
-        .select('id,nome,nome_fantasia,razao_social,email,telefone,celular,created_at')
+        .select('id,nome,email,telefone,created_at')
         .order('created_at', { ascending: false })
         .limit(5000);
       if (cliErr) throw cliErr;
@@ -504,48 +504,75 @@ serve(async (req) => {
         });
       }
 
+      // Evita URL/filtro enorme no PostgREST: processa IDs em lotes.
+      async function carregarEmLotes<T>(
+        carregar: (chunk: string[]) => Promise<{ data: T[] | null; error: { message: string } | null }>,
+      ): Promise<{ data: T[]; error: string | null }> {
+        const out: T[] = [];
+        const chunkSize = 200;
+        for (let i = 0; i < ids.length; i += chunkSize) {
+          const chunk = ids.slice(i, i + chunkSize);
+          const { data, error } = await carregar(chunk);
+          if (error) return { data: out, error: error.message };
+          if (data?.length) out.push(...data);
+        }
+        return { data: out, error: null };
+      }
+
       const [
-        assinaturasRes,
-        empresasRes,
-        produtosRes,
-        vendasRes,
-        opsRes,
-        clientesCadRes,
-        fornecedoresRes,
+        assinaturasPack,
+        empresasPack,
+        produtosPack,
+        vendasPack,
+        opsPack,
+        clientesCadPack,
+        fornecedoresPack,
         planosRes,
       ] = await Promise.all([
-        supabaseAdmin
-          .from('assinaturas_clientes')
-          .select(
-            'id,cliente_id,plano_id,status,trial_fim,data_inicio,data_proxima_cobranca,periodo_fim,criado_em,atualizado_em,valor_mensal_atual',
-          )
-          .in('cliente_id', ids)
-          .limit(10000),
-        supabaseAdmin
-          .from('empresas')
-          .select('cliente_id,razao_social,nome_fantasia,cnpj')
-          .in('cliente_id', ids)
-          .eq('empresa_matriz', true),
-        supabaseAdmin.from('produtos').select('cliente_id').in('cliente_id', ids).limit(50000),
-        supabaseAdmin.from('venda').select('cliente_id_tenant').in('cliente_id_tenant', ids).limit(50000),
-        supabaseAdmin.from('producao_op').select('cliente_id_tenant').in('cliente_id_tenant', ids).limit(50000),
-        supabaseAdmin.from('clientes_cadastros').select('cliente_id').in('cliente_id', ids).limit(50000),
-        supabaseAdmin.from('fornecedores_cadastros').select('cliente_id').in('cliente_id', ids).limit(50000),
+        carregarEmLotes((chunk) =>
+          supabaseAdmin
+            .from('assinaturas_clientes')
+            .select(
+              'id,cliente_id,plano_id,status,trial_fim,data_inicio,data_proxima_cobranca,periodo_fim,criado_em,atualizado_em,valor_mensal_atual',
+            )
+            .in('cliente_id', chunk)
+            .limit(5000),
+        ),
+        carregarEmLotes((chunk) =>
+          supabaseAdmin
+            .from('empresas')
+            .select('cliente_id,razao_social,nome_fantasia,cnpj')
+            .in('cliente_id', chunk)
+            .eq('empresa_matriz', true),
+        ),
+        carregarEmLotes((chunk) =>
+          supabaseAdmin.from('produtos').select('cliente_id').in('cliente_id', chunk).limit(20000),
+        ),
+        carregarEmLotes((chunk) =>
+          supabaseAdmin.from('venda').select('cliente_id_tenant').in('cliente_id_tenant', chunk).limit(20000),
+        ),
+        carregarEmLotes((chunk) =>
+          supabaseAdmin.from('producao_op').select('cliente_id_tenant').in('cliente_id_tenant', chunk).limit(20000),
+        ),
+        carregarEmLotes((chunk) =>
+          supabaseAdmin.from('clientes_cadastros').select('cliente_id').in('cliente_id', chunk).limit(20000),
+        ),
+        carregarEmLotes((chunk) =>
+          supabaseAdmin.from('fornecedores_cadastros').select('cliente_id').in('cliente_id', chunk).limit(20000),
+        ),
         supabaseAdmin.from('planos_assinatura').select('id,nome'),
       ]);
 
-      if (assinaturasRes.error) throw assinaturasRes.error;
-      if (empresasRes.error) throw empresasRes.error;
-      if (produtosRes.error) throw produtosRes.error;
-      if (vendasRes.error) throw vendasRes.error;
-      if (opsRes.error) throw opsRes.error;
-      // cadastros podem falhar por RLS/tabela ausente — degradar para 0
-      if (clientesCadRes.error) {
-        console.warn('[list_acompanhamento] clientes_cadastros:', clientesCadRes.error.message);
+      if (assinaturasPack.error) throw new Error(`assinaturas_clientes: ${assinaturasPack.error}`);
+      if (empresasPack.error) throw new Error(`empresas: ${empresasPack.error}`);
+      if (produtosPack.error) console.warn('[list_acompanhamento] produtos:', produtosPack.error);
+      if (vendasPack.error) console.warn('[list_acompanhamento] venda:', vendasPack.error);
+      if (opsPack.error) console.warn('[list_acompanhamento] producao_op:', opsPack.error);
+      if (clientesCadPack.error) console.warn('[list_acompanhamento] clientes_cadastros:', clientesCadPack.error);
+      if (fornecedoresPack.error) {
+        console.warn('[list_acompanhamento] fornecedores_cadastros:', fornecedoresPack.error);
       }
-      if (fornecedoresRes.error) {
-        console.warn('[list_acompanhamento] fornecedores_cadastros:', fornecedoresRes.error.message);
-      }
+      if (planosRes.error) console.warn('[list_acompanhamento] planos_assinatura:', planosRes.error.message);
 
       const planosMap = new Map<string, string>();
       for (const p of planosRes.data ?? []) {
@@ -553,7 +580,7 @@ serve(async (req) => {
       }
 
       const assinPorCliente = new Map<string, Record<string, unknown>[]>();
-      for (const a of (assinaturasRes.data ?? []) as Record<string, unknown>[]) {
+      for (const a of assinaturasPack.data as Record<string, unknown>[]) {
         const cid = `${a.cliente_id}`;
         const arr = assinPorCliente.get(cid) ?? [];
         arr.push(a);
@@ -561,25 +588,27 @@ serve(async (req) => {
       }
 
       const empresaPorCliente = new Map<string, Record<string, unknown>>();
-      for (const e of (empresasRes.data ?? []) as Record<string, unknown>[]) {
+      for (const e of empresasPack.data as Record<string, unknown>[]) {
         empresaPorCliente.set(`${e.cliente_id}`, e);
       }
 
-      const produtosCount = contarPorCampo(produtosRes.data as Array<Record<string, unknown>>, 'cliente_id');
+      const produtosCount = contarPorCampo(produtosPack.data as Array<Record<string, unknown>>, 'cliente_id');
       const vendasCount = contarPorCampo(
-        vendasRes.data as Array<Record<string, unknown>>,
+        vendasPack.data as Array<Record<string, unknown>>,
         'cliente_id_tenant',
       );
       const opsCount = contarPorCampo(
-        opsRes.data as Array<Record<string, unknown>>,
+        opsPack.data as Array<Record<string, unknown>>,
         'cliente_id_tenant',
       );
-      const clientesCadCount = clientesCadRes.error
-        ? new Map<string, number>()
-        : contarPorCampo(clientesCadRes.data as Array<Record<string, unknown>>, 'cliente_id');
-      const fornecedoresCount = fornecedoresRes.error
-        ? new Map<string, number>()
-        : contarPorCampo(fornecedoresRes.data as Array<Record<string, unknown>>, 'cliente_id');
+      const clientesCadCount = contarPorCampo(
+        clientesCadPack.data as Array<Record<string, unknown>>,
+        'cliente_id',
+      );
+      const fornecedoresCount = contarPorCampo(
+        fornecedoresPack.data as Array<Record<string, unknown>>,
+        'cliente_id',
+      );
 
       const payload = rows.map((c) => {
         const id = c.id as string;
@@ -588,10 +617,10 @@ serve(async (req) => {
         const planoId = assinatura?.plano_id != null ? String(assinatura.plano_id) : null;
         return {
           id,
-          nome: c.nome_fantasia ?? c.nome ?? c.razao_social ?? c.email ?? `Cliente ${id.slice(0, 8)}`,
+          nome: c.nome ?? c.email ?? `Cliente ${id.slice(0, 8)}`,
           email: c.email ?? null,
           telefone: c.telefone ?? null,
-          celular: c.celular ?? null,
+          celular: null,
           created_at: c.created_at ?? null,
           empresa_nome: empresa
             ? `${empresa.nome_fantasia ?? ''}`.trim() || `${empresa.razao_social ?? ''}`.trim() || null
