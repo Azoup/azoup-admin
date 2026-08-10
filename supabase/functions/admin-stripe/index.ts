@@ -7,7 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const ADMIN_SCREEN_KEYS = ['dashboard', 'clients', 'conversas', 'billing', 'audit', 'admins', 'marketing', 'config_suporte', 'metodo360'] as const;
+const ADMIN_SCREEN_KEYS = ['dashboard', 'clients', 'conversas', 'billing', 'audit', 'admins', 'marketing', 'config_suporte', 'metodo360', 'acompanhamento'] as const;
 
 function normalizarTelasAcesso(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -260,6 +260,40 @@ async function criarPrecoMensalStripe(
   });
 }
 
+function contarPorCampo(
+  rows: Array<Record<string, unknown>> | null | undefined,
+  campo: string,
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const row of rows ?? []) {
+    const key = `${row[campo] ?? ''}`.trim();
+    if (!key) continue;
+    map.set(key, (map.get(key) ?? 0) + 1);
+  }
+  return map;
+}
+
+function pickBestAssinatura(
+  rows: Array<Record<string, unknown>>,
+): Record<string, unknown> | null {
+  if (!rows.length) return null;
+  const score = (status: unknown) => {
+    const s = `${status ?? ''}`.trim().toLowerCase();
+    if (s.includes('cancel') || s.includes('encerr') || s.includes('inativ')) return 10;
+    if (s.includes('trial') || s.includes('teste')) return 90;
+    if (s.includes('inadimpl') || s.includes('past_due')) return 70;
+    if (s.includes('ativo') || s.includes('ativa') || s.includes('active')) return 100;
+    return 50;
+  };
+  return [...rows].sort((a, b) => {
+    const diff = score(b.status) - score(a.status);
+    if (diff !== 0) return diff;
+    const da = `${b.atualizado_em ?? b.data_inicio ?? b.criado_em ?? ''}`;
+    const db = `${a.atualizado_em ?? a.data_inicio ?? a.criado_em ?? ''}`;
+    return da.localeCompare(db);
+  })[0] ?? null;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -452,6 +486,135 @@ serve(async (req) => {
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
+    }
+
+    if (body.op === 'list_acompanhamento') {
+      const { data: clientes, error: cliErr } = await supabaseAdmin
+        .from('clientes_azoup')
+        .select('id,nome,nome_fantasia,razao_social,email,telefone,celular,created_at')
+        .order('created_at', { ascending: false })
+        .limit(5000);
+      if (cliErr) throw cliErr;
+
+      const rows = clientes ?? [];
+      const ids = rows.map((c) => c.id as string);
+      if (!ids.length) {
+        return new Response(JSON.stringify({ clientes: [] }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const [
+        assinaturasRes,
+        empresasRes,
+        produtosRes,
+        vendasRes,
+        opsRes,
+        clientesCadRes,
+        fornecedoresRes,
+        planosRes,
+      ] = await Promise.all([
+        supabaseAdmin
+          .from('assinaturas_clientes')
+          .select(
+            'id,cliente_id,plano_id,status,trial_fim,data_inicio,data_proxima_cobranca,periodo_fim,criado_em,atualizado_em,valor_mensal_atual',
+          )
+          .in('cliente_id', ids)
+          .limit(10000),
+        supabaseAdmin
+          .from('empresas')
+          .select('cliente_id,razao_social,nome_fantasia,cnpj')
+          .in('cliente_id', ids)
+          .eq('empresa_matriz', true),
+        supabaseAdmin.from('produtos').select('cliente_id').in('cliente_id', ids).limit(50000),
+        supabaseAdmin.from('venda').select('cliente_id_tenant').in('cliente_id_tenant', ids).limit(50000),
+        supabaseAdmin.from('producao_op').select('cliente_id_tenant').in('cliente_id_tenant', ids).limit(50000),
+        supabaseAdmin.from('clientes_cadastros').select('cliente_id').in('cliente_id', ids).limit(50000),
+        supabaseAdmin.from('fornecedores_cadastros').select('cliente_id').in('cliente_id', ids).limit(50000),
+        supabaseAdmin.from('planos_assinatura').select('id,nome'),
+      ]);
+
+      if (assinaturasRes.error) throw assinaturasRes.error;
+      if (empresasRes.error) throw empresasRes.error;
+      if (produtosRes.error) throw produtosRes.error;
+      if (vendasRes.error) throw vendasRes.error;
+      if (opsRes.error) throw opsRes.error;
+      // cadastros podem falhar por RLS/tabela ausente — degradar para 0
+      if (clientesCadRes.error) {
+        console.warn('[list_acompanhamento] clientes_cadastros:', clientesCadRes.error.message);
+      }
+      if (fornecedoresRes.error) {
+        console.warn('[list_acompanhamento] fornecedores_cadastros:', fornecedoresRes.error.message);
+      }
+
+      const planosMap = new Map<string, string>();
+      for (const p of planosRes.data ?? []) {
+        planosMap.set(String(p.id), `${p.nome ?? p.id}`);
+      }
+
+      const assinPorCliente = new Map<string, Record<string, unknown>[]>();
+      for (const a of (assinaturasRes.data ?? []) as Record<string, unknown>[]) {
+        const cid = `${a.cliente_id}`;
+        const arr = assinPorCliente.get(cid) ?? [];
+        arr.push(a);
+        assinPorCliente.set(cid, arr);
+      }
+
+      const empresaPorCliente = new Map<string, Record<string, unknown>>();
+      for (const e of (empresasRes.data ?? []) as Record<string, unknown>[]) {
+        empresaPorCliente.set(`${e.cliente_id}`, e);
+      }
+
+      const produtosCount = contarPorCampo(produtosRes.data as Array<Record<string, unknown>>, 'cliente_id');
+      const vendasCount = contarPorCampo(
+        vendasRes.data as Array<Record<string, unknown>>,
+        'cliente_id_tenant',
+      );
+      const opsCount = contarPorCampo(
+        opsRes.data as Array<Record<string, unknown>>,
+        'cliente_id_tenant',
+      );
+      const clientesCadCount = clientesCadRes.error
+        ? new Map<string, number>()
+        : contarPorCampo(clientesCadRes.data as Array<Record<string, unknown>>, 'cliente_id');
+      const fornecedoresCount = fornecedoresRes.error
+        ? new Map<string, number>()
+        : contarPorCampo(fornecedoresRes.data as Array<Record<string, unknown>>, 'cliente_id');
+
+      const payload = rows.map((c) => {
+        const id = c.id as string;
+        const assinatura = pickBestAssinatura(assinPorCliente.get(id) ?? []);
+        const empresa = empresaPorCliente.get(id) ?? null;
+        const planoId = assinatura?.plano_id != null ? String(assinatura.plano_id) : null;
+        return {
+          id,
+          nome: c.nome_fantasia ?? c.nome ?? c.razao_social ?? c.email ?? `Cliente ${id.slice(0, 8)}`,
+          email: c.email ?? null,
+          telefone: c.telefone ?? null,
+          celular: c.celular ?? null,
+          created_at: c.created_at ?? null,
+          empresa_nome: empresa
+            ? `${empresa.nome_fantasia ?? ''}`.trim() || `${empresa.razao_social ?? ''}`.trim() || null
+            : null,
+          empresa_cnpj: empresa?.cnpj ?? null,
+          produtos: produtosCount.get(id) ?? 0,
+          vendas: vendasCount.get(id) ?? 0,
+          ordens_producao: opsCount.get(id) ?? 0,
+          clientes_cadastrados: clientesCadCount.get(id) ?? 0,
+          fornecedores_cadastrados: fornecedoresCount.get(id) ?? 0,
+          plano_id: planoId,
+          plano_nome: planoId ? planosMap.get(planoId) ?? null : null,
+          assinatura_status: assinatura?.status ?? null,
+          trial_fim: assinatura?.trial_fim ?? null,
+          data_inicio: assinatura?.data_inicio ?? null,
+          data_renovacao: assinatura?.data_proxima_cobranca ?? assinatura?.periodo_fim ?? null,
+          valor_mensal_atual: assinatura?.valor_mensal_atual ?? null,
+        };
+      });
+
+      return new Response(JSON.stringify({ clientes: payload }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     if (body.op === 'list_admin_users') {
@@ -718,7 +881,25 @@ serve(async (req) => {
       }
 
       if (p.max_redemptions != null) couponParams.max_redemptions = Number(p.max_redemptions);
-      if (p.redeem_by) couponParams.redeem_by = Math.floor(new Date(`${p.redeem_by}`).getTime() / 1000);
+      if (p.redeem_by) {
+        const raw = `${p.redeem_by}`.trim();
+        const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        // Interpreta AAAA-MM-DD como fim do dia em America/Sao_Paulo (23:59:59).
+        const redeemAt = ymd
+          ? new Date(`${ymd[1]}-${ymd[2]}-${ymd[3]}T23:59:59-03:00`)
+          : new Date(raw);
+        const redeemByUnix = Math.floor(redeemAt.getTime() / 1000);
+        const agoraUnix = Math.floor(Date.now() / 1000);
+        if (!Number.isFinite(redeemByUnix) || Number.isNaN(redeemAt.getTime())) {
+          throw new Error('Data "Válido até" inválida. Use o formato AAAA-MM-DD.');
+        }
+        if (redeemByUnix <= agoraUnix) {
+          throw new Error(
+            'A data "Válido até" precisa ser hoje ou uma data futura (AAAA-MM-DD).',
+          );
+        }
+        couponParams.redeem_by = redeemByUnix;
+      }
 
       const productIds = new Set<string>(
         ((p.aplicavel_product_ids as string[] | undefined) ?? []).filter(Boolean),

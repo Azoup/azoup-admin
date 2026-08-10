@@ -30,29 +30,36 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.map((screen) => {
         ? '/(tabs)/config-suporte'
         : screen.key === 'metodo360'
           ? '/(tabs)/metodo360'
-          : `/(tabs)/${screen.key}`;
+          : screen.key === 'acompanhamento'
+            ? '/(tabs)/acompanhamento'
+            : `/(tabs)/${screen.key}`;
 
   const icon: ComponentProps<typeof FontAwesome>['name'] =
     screen.key === 'dashboard'
       ? 'dashboard'
       : screen.key === 'clients'
         ? 'users'
-        : screen.key === 'conversas'
-          ? 'comments'
-          : screen.key === 'billing'
-            ? 'credit-card'
-            : screen.key === 'audit'
-              ? 'history'
-              : screen.key === 'marketing'
-                ? 'bullhorn'
-                : screen.key === 'config_suporte'
-                  ? 'youtube-play'
-                  : screen.key === 'metodo360'
-                    ? 'graduation-cap'
-                    : 'shield';
+        : screen.key === 'acompanhamento'
+          ? 'heartbeat'
+          : screen.key === 'conversas'
+            ? 'comments'
+            : screen.key === 'billing'
+              ? 'credit-card'
+              : screen.key === 'audit'
+                ? 'history'
+                : screen.key === 'marketing'
+                  ? 'bullhorn'
+                  : screen.key === 'config_suporte'
+                    ? 'youtube-play'
+                    : screen.key === 'metodo360'
+                      ? 'graduation-cap'
+                      : 'shield';
 
   const group: AdminNavItem['group'] =
-    screen.key === 'dashboard' || screen.key === 'clients' || screen.key === 'conversas'
+    screen.key === 'dashboard' ||
+    screen.key === 'clients' ||
+    screen.key === 'acompanhamento' ||
+    screen.key === 'conversas'
       ? 'visao'
       : screen.key === 'billing' || screen.key === 'marketing' || screen.key === 'audit'
         ? 'gestao'

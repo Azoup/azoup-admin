@@ -135,6 +135,33 @@ export async function obterMetricasClienteViaFunction(payload: ClienteMetricasPa
   return invoke<ClienteMetricasResponse>('get_cliente_metricas', payload);
 }
 
+export type AcompanhamentoClienteApiRow = {
+  id: string;
+  nome: string;
+  email?: string | null;
+  telefone?: string | null;
+  celular?: string | null;
+  created_at?: string | null;
+  empresa_nome?: string | null;
+  empresa_cnpj?: string | null;
+  produtos: number;
+  vendas: number;
+  ordens_producao: number;
+  clientes_cadastrados: number;
+  fornecedores_cadastrados: number;
+  plano_id?: string | null;
+  plano_nome?: string | null;
+  assinatura_status?: string | null;
+  trial_fim?: string | null;
+  data_inicio?: string | null;
+  data_renovacao?: string | null;
+  valor_mensal_atual?: number | null;
+};
+
+export async function obterAcompanhamentoViaFunction() {
+  return invoke<{ clientes: AcompanhamentoClienteApiRow[] }>('list_acompanhamento', {});
+}
+
 export type RegisterAuditLogPayload = {
   acao: string;
   entidade?: string | null;

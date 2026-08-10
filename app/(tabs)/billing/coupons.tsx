@@ -16,8 +16,20 @@ import { useTheme } from '@/src/contexts/ThemeContext';
 import { registrarAuditoria } from '@/src/services/audit';
 import { inserirCupomAdmin, listarCuponsAdmin, listarPlanos } from '@/src/services/repos/billing-repo';
 import { criarCupomStripe } from '@/src/services/stripe-admin-api';
-import { rotuloDuracaoCupom, rotuloValidadeCupom } from '@/src/utils/format';
+import { rotuloDuracaoCupom, rotuloValidadeCupom, dataHojeBrasil } from '@/src/utils/format';
 import { stripePriceIdDoPlano, stripeProductIdDoPlano } from '@/src/utils/plano-stripe';
+
+function validarRedeemByLocal(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return 'Data "Válido até" inválida. Use AAAA-MM-DD (ex.: 2026-12-31).';
+  }
+  if (raw < dataHojeBrasil()) {
+    return 'A data "Válido até" precisa ser hoje ou uma data futura.';
+  }
+  return null;
+}
 
 export default function CouponsScreen() {
   const { theme } = useTheme();
@@ -72,6 +84,9 @@ export default function CouponsScreen() {
 
       if (!payload.codigo) throw new Error('Código é obrigatório');
       if (!selectedPlanIds.length) throw new Error('Selecione ao menos um plano vinculado ao cupom.');
+
+      const erroData = validarRedeemByLocal(redeemBy);
+      if (erroData) throw new Error(erroData);
 
       const planosSel = planOptions.filter((p) => selectedPlanIds.includes(p.id));
       const semStripe = planosSel.filter((p) => !p.product && !p.price);
@@ -171,7 +186,10 @@ export default function CouponsScreen() {
             <FormField label="Máximo de usos">
               <FormInput placeholder="Opcional" value={maxRedemptions} onChangeText={setMaxRedemptions} keyboardType="number-pad" />
             </FormField>
-            <FormField label="Válido até" helper="Opcional. Formato AAAA-MM-DD (ex.: 2026-12-31).">
+            <FormField
+              label="Válido até"
+              helper="Opcional. Formato AAAA-MM-DD (ex.: 2026-12-31). Precisa ser hoje ou data futura."
+            >
               <FormInput placeholder="2026-12-31" value={redeemBy} onChangeText={setRedeemBy} />
             </FormField>
 
