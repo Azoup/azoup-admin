@@ -31,10 +31,10 @@ const PRESET_OPTIONS = [
 const PRESET_LABELS: Record<(typeof PRESET_OPTIONS)[number], string> = {
   todos: 'Todos',
   hoje: 'Hoje',
-  '7d': '7d',
-  '30d': '30d',
-  mes_atual: 'Mês',
-  mes_passado: 'Ant.',
+  '7d': '7 dias',
+  '30d': '30 dias',
+  mes_atual: 'Este mês',
+  mes_passado: 'Mês ant.',
   personalizado: 'Datas',
 };
 

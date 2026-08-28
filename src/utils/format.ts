@@ -32,6 +32,46 @@ export function dataHojeBrasil(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 }
 
+/**
+ * Converte timestamp/ISO/YYYY-MM-DD para data de calendário em America/Sao_Paulo (YYYY-MM-DD).
+ * Aceita formatos Postgres (`2024-01-15 12:00:00+00`) e ISO.
+ */
+export function dataCalendarioBrasil(raw?: string | Date | null): string | null {
+  if (raw == null || raw === '') return null;
+
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  }
+
+  let d: Date;
+  if (raw instanceof Date) {
+    d = raw;
+  } else {
+    let t = `${raw}`.trim();
+    // Postgres: "2024-01-15 12:00:00+00" → ISO com T e offset completo
+    if (/^\d{4}-\d{2}-\d{2} /.test(t)) t = t.replace(' ', 'T');
+    t = t.replace(/([+-]\d{2})$/, '$1:00');
+    d = new Date(t);
+    if (Number.isNaN(d.getTime())) d = new Date(`${raw}`.trim());
+  }
+
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
+}
+
+/** Soma/subtrai dias em uma data YYYY-MM-DD (calendário, sem fuso). */
+export function somarDiasYmd(ymd: string, dias: number): string {
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return ymd;
+  const utc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) + dias * 86_400_000;
+  const dt = new Date(utc);
+  const y = dt.getUTCFullYear();
+  const mo = `${dt.getUTCMonth() + 1}`.padStart(2, '0');
+  const d = `${dt.getUTCDate()}`.padStart(2, '0');
+  return `${y}-${mo}-${d}`;
+}
+
 export function formatHoraBR(raw?: string | null) {
   if (!raw) return '';
   const m = `${raw}`.match(/^(\d{1,2}):(\d{2})/);
