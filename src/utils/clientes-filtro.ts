@@ -4,7 +4,14 @@ import { classificarStatusAssinatura } from '@/src/utils/assinatura-status';
 import { dataCalendarioBrasil, dataHojeBrasil, somarDiasYmd } from '@/src/utils/format';
 import { digitsOnlyPhone } from '@/src/utils/whatsapp';
 
-export type ClienteStatusFiltro = 'todos' | 'ativo' | 'trial' | 'inativo' | 'congelado' | 'chamar';
+export type ClienteStatusFiltro =
+  | 'todos'
+  | 'ativo'
+  | 'trial'
+  | 'inativo'
+  | 'cancelado'
+  | 'congelado'
+  | 'chamar';
 
 export type PeriodoFiltroPreset =
   | 'todos'
@@ -125,9 +132,9 @@ function matchStatus(item: ClienteAzoupAdminView, status: ClienteStatusFiltro): 
 
   if (status === 'ativo') return grupo === 'ativa';
   if (status === 'trial') return grupo === 'trial';
+  if (status === 'cancelado') return grupo === 'cancelada';
   if (status === 'inativo') {
     return (
-      grupo === 'cancelada' ||
       grupo === 'inadimplente' ||
       grupo === 'trial_expirado' ||
       grupo === 'outro' ||
