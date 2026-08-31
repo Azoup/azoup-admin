@@ -52,7 +52,7 @@ export const ACOMPANHAMENTO_ETIQUETAS: {
   {
     key: 'esta_usando',
     label: 'Está usando',
-    descricao: 'Demais clientes com uso mais consolidado',
+    descricao: 'Uso consolidado, ou 0 vendas com mais de 10 OPs',
   },
 ];
 
@@ -87,8 +87,9 @@ export function diasUsandoSistema(createdAt?: string | null, dataInicio?: string
 }
 
 /**
- * Urgente: zero em produto OU venda OU OP;
+ * Urgente: zero em produto OU (venda e OP sem uso forte) OU OP;
  * ou trial com < 7 dias restantes e (produtos < 5 OU vendas < 5 OU OPs < 5).
+ * Exceção: 0 vendas com mais de 10 OPs → está usando (produção ativa sem PDV).
  * Precisa de ajuda: não urgente e (produtos < 10 OU vendas < 10 OU OPs < 10).
  * Pode esperar: não precisa de ajuda e (produtos < 20 OU vendas < 20 OU OPs < 20).
  * Está usando: demais.
@@ -104,6 +105,9 @@ export function classificarAcompanhamento(input: {
   const vendas = Number(input.vendas) || 0;
   const ops = Number(input.ordens_producao) || 0;
   const diasTrial = diasTrialRestantes(input.trial_fim, input.assinatura_status);
+
+  // Produção consolidada sem vendas: considera em uso (não urgente).
+  if (vendas === 0 && ops > 10) return 'esta_usando';
 
   const semUsoBasico = produtos === 0 || vendas === 0 || ops === 0;
   const trialCritico =

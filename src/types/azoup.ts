@@ -259,6 +259,14 @@ export interface AdminClienteMensagemDiariaRow {
   updated_at?: string | null;
 }
 
+export interface AdminAcompanhamentoObservacaoRow {
+  id: string;
+  cliente_id: string;
+  observacao: string;
+  admin_email?: string | null;
+  created_at?: string | null;
+}
+
 export interface AdminClienteCongelamentoRow {
   cliente_id: string;
   congelado: boolean;

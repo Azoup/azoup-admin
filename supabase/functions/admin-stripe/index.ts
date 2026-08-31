@@ -505,6 +505,7 @@ serve(async (req) => {
       }
 
       // Evita URL/filtro enorme no PostgREST: processa IDs em lotes.
+      // Para contagens, pagina até o fim (sem cortar em 20k — isso zerava/subcontava uso).
       async function carregarEmLotes<T>(
         carregar: (chunk: string[]) => Promise<{ data: T[] | null; error: { message: string } | null }>,
       ): Promise<{ data: T[]; error: string | null }> {
@@ -515,6 +516,32 @@ serve(async (req) => {
           const { data, error } = await carregar(chunk);
           if (error) return { data: out, error: error.message };
           if (data?.length) out.push(...data);
+        }
+        return { data: out, error: null };
+      }
+
+      async function carregarContagemEmLotes(
+        carregarPage: (
+          chunk: string[],
+          from: number,
+          to: number,
+        ) => Promise<{ data: Array<Record<string, unknown>> | null; error: { message: string } | null }>,
+      ): Promise<{ data: Array<Record<string, unknown>>; error: string | null }> {
+        const out: Array<Record<string, unknown>> = [];
+        const chunkSize = 150;
+        const pageSize = 1000;
+        for (let i = 0; i < ids.length; i += chunkSize) {
+          const chunk = ids.slice(i, i + chunkSize);
+          let from = 0;
+          for (;;) {
+            const to = from + pageSize - 1;
+            const { data, error } = await carregarPage(chunk, from, to);
+            if (error) return { data: out, error: error.message };
+            const rows = data ?? [];
+            if (rows.length) out.push(...rows);
+            if (rows.length < pageSize) break;
+            from += pageSize;
+          }
         }
         return { data: out, error: null };
       }
@@ -545,20 +572,28 @@ serve(async (req) => {
             .in('cliente_id', chunk)
             .eq('empresa_matriz', true),
         ),
-        carregarEmLotes((chunk) =>
-          supabaseAdmin.from('produtos').select('cliente_id').in('cliente_id', chunk).limit(20000),
+        carregarContagemEmLotes((chunk, from, to) =>
+          supabaseAdmin.from('produtos').select('cliente_id').in('cliente_id', chunk).range(from, to),
         ),
-        carregarEmLotes((chunk) =>
-          supabaseAdmin.from('venda').select('cliente_id_tenant').in('cliente_id_tenant', chunk).limit(20000),
+        carregarContagemEmLotes((chunk, from, to) =>
+          supabaseAdmin
+            .from('venda')
+            .select('cliente_id_tenant')
+            .in('cliente_id_tenant', chunk)
+            .range(from, to),
         ),
-        carregarEmLotes((chunk) =>
-          supabaseAdmin.from('producao_op').select('cliente_id_tenant').in('cliente_id_tenant', chunk).limit(20000),
+        carregarContagemEmLotes((chunk, from, to) =>
+          supabaseAdmin
+            .from('producao_op')
+            .select('cliente_id_tenant')
+            .in('cliente_id_tenant', chunk)
+            .range(from, to),
         ),
-        carregarEmLotes((chunk) =>
-          supabaseAdmin.from('clientes_cadastros').select('cliente_id').in('cliente_id', chunk).limit(20000),
+        carregarContagemEmLotes((chunk, from, to) =>
+          supabaseAdmin.from('clientes_cadastros').select('cliente_id').in('cliente_id', chunk).range(from, to),
         ),
-        carregarEmLotes((chunk) =>
-          supabaseAdmin.from('fornecedores_cadastros').select('cliente_id').in('cliente_id', chunk).limit(20000),
+        carregarContagemEmLotes((chunk, from, to) =>
+          supabaseAdmin.from('fornecedores_cadastros').select('cliente_id').in('cliente_id', chunk).range(from, to),
         ),
         supabaseAdmin.from('planos_assinatura').select('id,nome'),
       ]);
