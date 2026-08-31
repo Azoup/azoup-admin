@@ -3,9 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,12 +16,12 @@ import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
-import { ScreenCard } from '@/components/ui/ScreenCard';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
+import { moverClienteKanban } from '@/src/services/repos/kanban-acompanhamento-repo';
 import {
   contarObservacoesAcompanhamento,
   criarObservacaoAcompanhamento,
@@ -29,17 +29,19 @@ import {
 } from '@/src/services/repos/observacoes-acompanhamento-repo';
 import type { AdminAcompanhamentoObservacaoRow } from '@/src/types/azoup';
 import {
-  ACOMPANHAMENTO_ETIQUETAS,
+  ACOMPANHAMENTO_COLUNAS,
   type AcompanhamentoCliente,
-  type AcompanhamentoEtiqueta,
+  type AcompanhamentoColuna,
 } from '@/src/utils/acompanhamento';
 import { formatBRLFromReais, formatDateBR, formatDateTimeBR, formatYmdBR } from '@/src/utils/format';
 import { digitsOnlyPhone, resolveClienteWhatsAppUrl } from '@/src/utils/whatsapp';
 
 const WHATSAPP_GREEN = '#25D366';
-const PAGE_SIZE = 10;
+const COL_WIDTH = 280;
+const DRAG_MIME = 'application/x-acompanhamento-cliente';
 
-function corEtiqueta(key: AcompanhamentoEtiqueta, theme: ReturnType<typeof useTheme>['theme']) {
+function corColuna(key: AcompanhamentoColuna, theme: ReturnType<typeof useTheme>['theme']) {
+  if (key === 'fila_espera') return theme.textMuted;
   if (key === 'urgentes') return theme.error;
   if (key === 'precisa_ajuda') return theme.warning;
   if (key === 'pode_esperar') return theme.cadastroAction;
@@ -67,7 +69,7 @@ function matchBuscaAcompanhamento(item: AcompanhamentoCliente, busca: string): b
 function MetaLinha({ label, value }: { label: string; value: string }) {
   const { theme } = useTheme();
   return (
-    <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+    <Text style={{ color: theme.textMuted, fontSize: 12 }}>
       {label}: <Text style={{ color: theme.text, fontWeight: '700' }}>{value}</Text>
     </Text>
   );
@@ -187,34 +189,115 @@ function ObservacoesModal({
   );
 }
 
-function ClienteAcompanhamentoCard({
+function MoverModal({
+  cliente,
+  visible,
+  onClose,
+  onMover,
+  moving,
+}: {
+  cliente: AcompanhamentoCliente | null;
+  visible: boolean;
+  onClose: () => void;
+  onMover: (coluna: AcompanhamentoColuna) => void;
+  moving: boolean;
+}) {
+  const { theme } = useTheme();
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={[styles.modalOverlay, { justifyContent: 'center' }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[styles.moverCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <Text style={{ fontWeight: '800', fontSize: 16, color: theme.headerText }}>
+            Mover · {cliente?.nome ?? 'Cliente'}
+          </Text>
+          <Text style={{ color: theme.textMuted, fontSize: 13 }}>Escolha a coluna de destino</Text>
+          {ACOMPANHAMENTO_COLUNAS.map((col) => {
+            const ativa = cliente?.coluna === col.key;
+            const cor = corColuna(col.key, theme);
+            return (
+              <Pressable
+                key={col.key}
+                disabled={moving || ativa}
+                onPress={() => onMover(col.key)}
+                style={({ pressed }) => [
+                  styles.moverOpt,
+                  {
+                    borderColor: cor,
+                    backgroundColor: ativa ? `${cor}22` : theme.surfaceMuted,
+                    opacity: moving ? 0.6 : pressed ? 0.85 : 1,
+                  },
+                ]}
+              >
+                <Text style={{ color: theme.headerText, fontWeight: '700' }}>
+                  {col.label}
+                  {ativa ? ' (atual)' : ''}
+                </Text>
+              </Pressable>
+            );
+          })}
+          {moving ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function KanbanCard({
   item,
   expandido,
   onToggle,
   qtdObservacoes,
   onAbrirObservacoes,
+  onAbrirMover,
 }: {
   item: AcompanhamentoCliente;
   expandido: boolean;
   onToggle: () => void;
   qtdObservacoes: number;
   onAbrirObservacoes: () => void;
+  onAbrirMover: () => void;
 }) {
   const { theme } = useTheme();
   const contato = item.celular ?? item.telefone ?? '—';
   const whatsappUrl = resolveClienteWhatsAppUrl(item.celular, item.telefone);
 
+  const webDragProps =
+    Platform.OS === 'web'
+      ? ({
+          draggable: true,
+          onDragStart: (e: { dataTransfer?: { setData: (t: string, v: string) => void; effectAllowed: string } }) => {
+            e.dataTransfer?.setData(DRAG_MIME, item.id);
+            e.dataTransfer?.setData('text/plain', item.id);
+            if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+          },
+        } as Record<string, unknown>)
+      : {};
+
   return (
-    <ScreenCard style={{ gap: 8 }}>
-      <Pressable onPress={onToggle} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1, gap: 4 })}>
+    <View
+      {...webDragProps}
+      style={[
+        styles.card,
+        {
+          backgroundColor: theme.surface,
+          borderColor: theme.border,
+          cursor: Platform.OS === 'web' ? 'grab' : undefined,
+        } as object,
+      ]}
+    >
+      <Pressable onPress={onToggle} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1, gap: 3 })}>
         <View style={styles.rowBetween}>
-          <Text style={{ fontWeight: '800', fontSize: 16, color: theme.headerText, flex: 1 }}>{item.nome}</Text>
-          <FontAwesome name={expandido ? 'chevron-up' : 'chevron-down'} size={14} color={theme.textMuted} />
+          <Text style={{ fontWeight: '800', fontSize: 14, color: theme.headerText, flex: 1 }} numberOfLines={2}>
+            {item.nome}
+          </Text>
+          <FontAwesome name={expandido ? 'chevron-up' : 'chevron-down'} size={12} color={theme.textMuted} />
         </View>
-        <Text style={{ color: theme.textMuted, fontSize: 13 }}>Contato: {contato}</Text>
-        <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-          Empresa: {item.empresa_nome ?? '—'}
-          {item.empresa_cnpj ? ` · ${item.empresa_cnpj}` : ''}
+        <Text style={{ color: theme.textMuted, fontSize: 12 }} numberOfLines={1}>
+          {item.empresa_nome ?? '—'}
+        </Text>
+        <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+          P {item.produtos} · V {item.vendas} · OP {item.ordens_producao}
         </Text>
       </Pressable>
 
@@ -222,38 +305,37 @@ function ClienteAcompanhamentoCard({
         <Pressable
           onPress={onAbrirObservacoes}
           style={({ pressed }) => [
-            styles.obsBtn,
-            {
-              backgroundColor: theme.surfaceMuted,
-              borderColor: theme.border,
-              opacity: pressed ? 0.85 : 1,
-            },
+            styles.miniBtn,
+            { borderColor: theme.border, backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.85 : 1 },
           ]}
         >
-          <FontAwesome name="comment" size={14} color={theme.cadastroAction} />
-          <Text style={{ color: theme.headerText, fontWeight: '700', fontSize: 13 }}>
-            Observações{qtdObservacoes > 0 ? ` (${qtdObservacoes})` : ''}
+          <FontAwesome name="comment" size={12} color={theme.cadastroAction} />
+          <Text style={{ color: theme.headerText, fontWeight: '700', fontSize: 11 }}>
+            Obs{qtdObservacoes > 0 ? ` (${qtdObservacoes})` : ''}
           </Text>
+        </Pressable>
+        <Pressable
+          onPress={onAbrirMover}
+          style={({ pressed }) => [
+            styles.miniBtn,
+            { borderColor: theme.border, backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.85 : 1 },
+          ]}
+        >
+          <FontAwesome name="arrows" size={12} color={theme.cadastroAction} />
+          <Text style={{ color: theme.headerText, fontWeight: '700', fontSize: 11 }}>Mover</Text>
         </Pressable>
       </View>
 
       {expandido ? (
         <View style={[styles.detalhe, { borderTopColor: theme.border }]}>
-          <MetaLinha label="Produtos" value={String(item.produtos)} />
-          <MetaLinha label="Vendas" value={String(item.vendas)} />
-          <MetaLinha label="OPs" value={String(item.ordens_producao)} />
-          <MetaLinha label="Clientes cadastrados" value={String(item.clientes_cadastrados)} />
-          <MetaLinha label="Fornecedores cadastrados" value={String(item.fornecedores_cadastrados)} />
           <MetaLinha label="Contato" value={contato} />
-          <MetaLinha label="Empresa" value={item.empresa_nome ?? '—'} />
           <MetaLinha label="CNPJ" value={item.empresa_cnpj ?? '—'} />
-          <MetaLinha
-            label="Tempo no sistema"
-            value={item.dias_usando === 1 ? '1 dia' : `${item.dias_usando} dias`}
-          />
+          <MetaLinha label="Clientes" value={String(item.clientes_cadastrados)} />
+          <MetaLinha label="Fornecedores" value={String(item.fornecedores_cadastrados)} />
+          <MetaLinha label="Tempo" value={`${item.dias_usando} dias`} />
           <MetaLinha label="Plano" value={item.plano_nome ?? '—'} />
           <MetaLinha
-            label="Valor atual"
+            label="Valor"
             value={item.valor_mensal_atual != null ? formatBRLFromReais(item.valor_mensal_atual) : '—'}
           />
           <MetaLinha
@@ -266,17 +348,14 @@ function ClienteAcompanhamentoCard({
           />
           {item.dias_trial_restantes != null ? (
             <MetaLinha
-              label="Trial restante"
+              label="Trial"
               value={
                 item.dias_trial_restantes < 0
                   ? 'Expirado'
-                  : item.dias_trial_restantes === 1
-                    ? '1 dia'
-                    : `${item.dias_trial_restantes} dias`
+                  : `${item.dias_trial_restantes} dia(s)`
               }
             />
           ) : null}
-
           {whatsappUrl ? (
             <Pressable
               onPress={() => void Linking.openURL(whatsappUrl)}
@@ -289,25 +368,129 @@ function ClienteAcompanhamentoCard({
                 },
               ]}
             >
-              <FontAwesome name="whatsapp" size={18} color={WHATSAPP_GREEN} />
-              <Text style={{ color: WHATSAPP_GREEN, fontWeight: '800' }}>Chamar no WhatsApp</Text>
+              <FontAwesome name="whatsapp" size={14} color={WHATSAPP_GREEN} />
+              <Text style={{ color: WHATSAPP_GREEN, fontWeight: '800', fontSize: 12 }}>WhatsApp</Text>
             </Pressable>
           ) : null}
         </View>
       ) : null}
-    </ScreenCard>
+    </View>
+  );
+}
+
+function KanbanColumn({
+  coluna,
+  clientes,
+  dropOver,
+  expandidoId,
+  obsCounts,
+  onToggleExpand,
+  onAbrirObservacoes,
+  onAbrirMover,
+  onDragEnter,
+  onDragLeave,
+  onDropCliente,
+}: {
+  coluna: (typeof ACOMPANHAMENTO_COLUNAS)[number];
+  clientes: AcompanhamentoCliente[];
+  dropOver: boolean;
+  expandidoId: string | null;
+  obsCounts: Map<string, number>;
+  onToggleExpand: (id: string) => void;
+  onAbrirObservacoes: (c: AcompanhamentoCliente) => void;
+  onAbrirMover: (c: AcompanhamentoCliente) => void;
+  onDragEnter: () => void;
+  onDragLeave: () => void;
+  onDropCliente: (clienteId: string) => void;
+}) {
+  const { theme } = useTheme();
+  const cor = corColuna(coluna.key, theme);
+
+  const webDropProps =
+    Platform.OS === 'web'
+      ? ({
+          onDragOver: (e: { preventDefault?: () => void; dataTransfer?: { dropEffect: string } }) => {
+            e.preventDefault?.();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+          },
+          onDragEnter: (e: { preventDefault?: () => void }) => {
+            e.preventDefault?.();
+            onDragEnter();
+          },
+          onDragLeave: () => onDragLeave(),
+          onDrop: (e: {
+            preventDefault?: () => void;
+            dataTransfer?: { getData: (t: string) => string };
+          }) => {
+            e.preventDefault?.();
+            const id =
+              e.dataTransfer?.getData(DRAG_MIME) || e.dataTransfer?.getData('text/plain') || '';
+            if (id) onDropCliente(id);
+            onDragLeave();
+          },
+        } as Record<string, unknown>)
+      : {};
+
+  return (
+    <View
+      {...webDropProps}
+      style={[
+        styles.column,
+        {
+          backgroundColor: theme.surfaceMuted,
+          borderColor: dropOver ? cor : theme.border,
+          borderWidth: dropOver ? 2 : 1,
+        },
+      ]}
+    >
+      <View style={[styles.columnHeader, { borderBottomColor: theme.border }]}>
+        <View style={[styles.dot, { backgroundColor: cor }]} />
+        <Text style={{ fontWeight: '800', color: theme.headerText, flex: 1 }} numberOfLines={1}>
+          {coluna.label}
+        </Text>
+        <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: 12 }}>{clientes.length}</Text>
+      </View>
+      <Text style={{ color: theme.textMuted, fontSize: 11, paddingHorizontal: 10, paddingBottom: 6 }}>
+        {coluna.descricao}
+      </Text>
+
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 8, gap: 8, paddingBottom: 16 }}
+        nestedScrollEnabled
+      >
+        {clientes.length === 0 ? (
+          <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center', marginTop: 12 }}>
+            Arraste um cliente para cá
+          </Text>
+        ) : (
+          clientes.map((item) => (
+            <KanbanCard
+              key={item.id}
+              item={item}
+              expandido={expandidoId === item.id}
+              onToggle={() => onToggleExpand(item.id)}
+              qtdObservacoes={obsCounts.get(item.id) ?? 0}
+              onAbrirObservacoes={() => onAbrirObservacoes(item)}
+              onAbrirMover={() => onAbrirMover(item)}
+            />
+          ))
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 export default function AcompanhamentoScreen() {
   const { theme } = useTheme();
-  const { canAccessScreen } = useAdminAuth();
+  const { canAccessScreen, session } = useAdminAuth();
   const qc = useQueryClient();
-  const [etiquetaAtiva, setEtiquetaAtiva] = useState<AcompanhamentoEtiqueta>('urgentes');
-  const [expandidoId, setExpandidoId] = useState<string | null>(null);
   const [busca, setBusca] = useState('');
-  const [pagina, setPagina] = useState(1);
+  const [expandidoId, setExpandidoId] = useState<string | null>(null);
   const [clienteObs, setClienteObs] = useState<AcompanhamentoCliente | null>(null);
+  const [clienteMover, setClienteMover] = useState<AcompanhamentoCliente | null>(null);
+  const [dropOverColuna, setDropOverColuna] = useState<AcompanhamentoColuna | null>(null);
+  const [erroMove, setErroMove] = useState<string | null>(null);
 
   const q = useQuery({
     queryKey: ['acompanhamento_clientes'],
@@ -323,22 +506,80 @@ export default function AcompanhamentoScreen() {
     enabled: canAccessScreen('acompanhamento') && ids.length > 0,
   });
 
-  const listaFiltrada = useMemo(() => {
-    const base = q.data?.porEtiqueta[etiquetaAtiva] ?? [];
-    return base.filter((c) => matchBuscaAcompanhamento(c, busca));
-  }, [q.data, etiquetaAtiva, busca]);
+  const porColunaFiltrado = useMemo(() => {
+    const base = q.data?.porColuna;
+    const out: Record<AcompanhamentoColuna, AcompanhamentoCliente[]> = {
+      fila_espera: [],
+      urgentes: [],
+      precisa_ajuda: [],
+      pode_esperar: [],
+      esta_usando: [],
+    };
+    if (!base) return out;
+    for (const col of ACOMPANHAMENTO_COLUNAS) {
+      out[col.key] = (base[col.key] ?? []).filter((c) => matchBuscaAcompanhamento(c, busca));
+    }
+    return out;
+  }, [q.data, busca]);
 
-  const totalPaginas = Math.max(1, Math.ceil(listaFiltrada.length / PAGE_SIZE));
-  const paginaAtual = Math.min(pagina, totalPaginas);
-
-  const listaPaginada = useMemo(() => {
-    const start = (paginaAtual - 1) * PAGE_SIZE;
-    return listaFiltrada.slice(start, start + PAGE_SIZE);
-  }, [listaFiltrada, paginaAtual]);
-
-  useEffect(() => {
-    setPagina(1);
-  }, [etiquetaAtiva, busca]);
+  const moverMutation = useMutation({
+    mutationFn: async ({
+      clienteId,
+      coluna,
+    }: {
+      clienteId: string;
+      coluna: AcompanhamentoColuna;
+    }) =>
+      moverClienteKanban({
+        clienteId,
+        coluna,
+        adminEmail: session?.user?.email ?? null,
+      }),
+    onMutate: async ({ clienteId, coluna }) => {
+      setErroMove(null);
+      await qc.cancelQueries({ queryKey: ['acompanhamento_clientes'] });
+      const prev = qc.getQueryData<Awaited<ReturnType<typeof carregarAcompanhamentoClientes>>>([
+        'acompanhamento_clientes',
+      ]);
+      if (prev) {
+        const clientes = prev.clientes.map((c) =>
+          c.id === clienteId ? { ...c, coluna, etiqueta: coluna } : c,
+        );
+        const porColuna: typeof prev.porColuna = {
+          fila_espera: [],
+          urgentes: [],
+          precisa_ajuda: [],
+          pode_esperar: [],
+          esta_usando: [],
+        };
+        for (const c of clientes) {
+          porColuna[c.coluna].push(c);
+        }
+        qc.setQueryData(['acompanhamento_clientes'], {
+          ...prev,
+          clientes,
+          porColuna,
+          porEtiqueta: porColuna,
+        });
+      }
+      return { prev };
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['acompanhamento_clientes'], ctx.prev);
+      setErroMove(
+        e instanceof Error && e.message.includes('admin_acompanhamento_kanban')
+          ? 'Execute supabase/sql/admin_acompanhamento_kanban.sql no Supabase.'
+          : e instanceof Error
+            ? e.message
+            : 'Erro ao mover cliente',
+      );
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+      setClienteMover(null);
+      setDropOverColuna(null);
+    },
+  });
 
   if (!canAccessScreen('acompanhamento')) {
     return (
@@ -351,139 +592,68 @@ export default function AcompanhamentoScreen() {
   }
 
   return (
-    <>
-      <FlatList
-        style={{ flex: 1, backgroundColor: theme.background }}
-        contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 10 }}
-        data={listaPaginada}
-        keyExtractor={(item) => item.id}
-        refreshing={q.isRefetching}
-        onRefresh={() => void q.refetch()}
-        keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={
-          <View style={{ gap: 12, marginBottom: 4 }}>
-            <PageHeader
-              title="Acompanhamento"
-              subtitle="Clientes separados por urgência de uso do sistema (produtos, vendas e OPs)."
+    <View style={{ flex: 1, backgroundColor: theme.background }}>
+      <ScrollView
+        horizontal
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 16, gap: 12, minHeight: '100%' }}
+        showsHorizontalScrollIndicator
+      >
+        <View style={{ gap: 12, minWidth: ACOMPANHAMENTO_COLUNAS.length * (COL_WIDTH + 12) }}>
+          <PageHeader
+            title="Acompanhamento"
+            subtitle="Kanban: clientes ativos/trial começam na Fila de espera — arraste para as colunas."
+          />
+
+          <View style={styles.searchRow}>
+            <FontAwesome name="search" size={13} color={theme.textMuted} style={styles.searchIcon} />
+            <FormInput
+              style={styles.searchInput}
+              placeholder="Buscar por nome, e-mail, telefone ou empresa…"
+              value={busca}
+              onChangeText={setBusca}
+              autoCapitalize="none"
+              autoCorrect={false}
             />
-
-            <View style={styles.chipsWrap}>
-              {ACOMPANHAMENTO_ETIQUETAS.map((e) => {
-                const qtd = q.data?.porEtiqueta[e.key]?.length ?? 0;
-                const ativa = etiquetaAtiva === e.key;
-                const cor = corEtiqueta(e.key, theme);
-                return (
-                  <Pressable
-                    key={e.key}
-                    onPress={() => {
-                      setEtiquetaAtiva(e.key);
-                      setExpandidoId(null);
-                    }}
-                    style={[
-                      styles.chip,
-                      {
-                        backgroundColor: ativa ? cor : theme.surfaceMuted,
-                        borderColor: cor,
-                      },
-                    ]}
-                  >
-                    <Text style={{ color: ativa ? '#fff' : theme.headerText, fontWeight: '800', fontSize: 13 }}>
-                      {e.label} ({qtd})
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-              {ACOMPANHAMENTO_ETIQUETAS.find((e) => e.key === etiquetaAtiva)?.descricao}
-            </Text>
-
-            <View style={styles.searchRow}>
-              <FontAwesome name="search" size={13} color={theme.textMuted} style={styles.searchIcon} />
-              <FormInput
-                style={styles.searchInput}
-                placeholder="Buscar por nome, e-mail, telefone ou empresa…"
-                value={busca}
-                onChangeText={setBusca}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              {busca ? (
-                <Pressable onPress={() => setBusca('')} hitSlop={8} style={styles.clearIcon}>
-                  <FontAwesome name="times-circle" size={14} color={theme.textMuted} />
-                </Pressable>
-              ) : null}
-            </View>
-
-            <SectionTitle>{`Lista · ${listaFiltrada.length}`}</SectionTitle>
-
-            {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando acompanhamento…</Text> : null}
-            {q.error ? (
-              <Text style={{ color: theme.error }}>
-                {q.error instanceof Error ? q.error.message : 'Erro ao carregar acompanhamento'}
-              </Text>
+            {busca ? (
+              <Pressable onPress={() => setBusca('')} hitSlop={8} style={styles.clearIcon}>
+                <FontAwesome name="times-circle" size={14} color={theme.textMuted} />
+              </Pressable>
             ) : null}
           </View>
-        }
-        renderItem={({ item }) => (
-          <ClienteAcompanhamentoCard
-            item={item}
-            expandido={expandidoId === item.id}
-            onToggle={() => setExpandidoId((cur) => (cur === item.id ? null : item.id))}
-            qtdObservacoes={obsCountQuery.data?.get(item.id) ?? 0}
-            onAbrirObservacoes={() => setClienteObs(item)}
-          />
-        )}
-        ListEmptyComponent={
-          !q.isLoading && !q.error ? (
-            <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: 8 }}>
-              {busca.trim()
-                ? 'Nenhum cliente encontrado com essa busca nesta etiqueta.'
-                : 'Nenhum cliente nesta etiqueta.'}
+
+          {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando Kanban…</Text> : null}
+          {q.error ? (
+            <Text style={{ color: theme.error }}>
+              {q.error instanceof Error ? q.error.message : 'Erro ao carregar acompanhamento'}
             </Text>
-          ) : null
-        }
-        ListFooterComponent={
-          listaFiltrada.length > 0 ? (
-            <View style={styles.pager}>
-              <Pressable
-                disabled={paginaAtual <= 1}
-                onPress={() => setPagina((p) => Math.max(1, p - 1))}
-                style={({ pressed }) => [
-                  styles.pageBtn,
-                  {
-                    borderColor: theme.border,
-                    backgroundColor: theme.surfaceMuted,
-                    opacity: paginaAtual <= 1 ? 0.4 : pressed ? 0.85 : 1,
-                  },
-                ]}
-              >
-                <Text style={{ color: theme.headerText, fontWeight: '700' }}>Anterior</Text>
-              </Pressable>
+          ) : null}
+          {erroMove ? <Text style={{ color: theme.error }}>{erroMove}</Text> : null}
 
-              <Text style={{ color: theme.textMuted, fontWeight: '700' }}>
-                Página {paginaAtual} de {totalPaginas}
-              </Text>
-
-              <Pressable
-                disabled={paginaAtual >= totalPaginas}
-                onPress={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
-                style={({ pressed }) => [
-                  styles.pageBtn,
-                  {
-                    borderColor: theme.border,
-                    backgroundColor: theme.surfaceMuted,
-                    opacity: paginaAtual >= totalPaginas ? 0.4 : pressed ? 0.85 : 1,
-                  },
-                ]}
-              >
-                <Text style={{ color: theme.headerText, fontWeight: '700' }}>Próxima</Text>
-              </Pressable>
-            </View>
-          ) : null
-        }
-      />
+          <View style={styles.boardRow}>
+            {ACOMPANHAMENTO_COLUNAS.map((col) => (
+              <KanbanColumn
+                key={col.key}
+                coluna={col}
+                clientes={porColunaFiltrado[col.key]}
+                dropOver={dropOverColuna === col.key}
+                expandidoId={expandidoId}
+                obsCounts={obsCountQuery.data ?? new Map()}
+                onToggleExpand={(id) => setExpandidoId((cur) => (cur === id ? null : id))}
+                onAbrirObservacoes={setClienteObs}
+                onAbrirMover={setClienteMover}
+                onDragEnter={() => setDropOverColuna(col.key)}
+                onDragLeave={() => setDropOverColuna((cur) => (cur === col.key ? null : cur))}
+                onDropCliente={(clienteId) => {
+                  const atual = q.data?.clientes.find((c) => c.id === clienteId);
+                  if (!atual || atual.coluna === col.key) return;
+                  moverMutation.mutate({ clienteId, coluna: col.key });
+                }}
+              />
+            ))}
+          </View>
+        </View>
+      </ScrollView>
 
       <ObservacoesModal
         cliente={clienteObs}
@@ -493,62 +663,71 @@ export default function AcompanhamentoScreen() {
           void qc.invalidateQueries({ queryKey: ['acompanhamento_observacoes_counts'] });
         }}
       />
-    </>
+
+      <MoverModal
+        cliente={clienteMover}
+        visible={Boolean(clienteMover)}
+        onClose={() => setClienteMover(null)}
+        moving={moverMutation.isPending}
+        onMover={(coluna) => {
+          if (!clienteMover) return;
+          moverMutation.mutate({ clienteId: clienteMover.id, coluna });
+        }}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  searchRow: { position: 'relative', justifyContent: 'center' },
+  searchRow: { position: 'relative', justifyContent: 'center', maxWidth: 480 },
   searchIcon: { position: 'absolute', left: 8, zIndex: 1 },
   searchInput: { height: 36, fontSize: 13, paddingLeft: 28, paddingRight: 28 },
   clearIcon: { position: 'absolute', right: 8, zIndex: 1 },
-  rowBetween: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  obsBtn: {
+  boardRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12, flex: 1, minHeight: 520 },
+  column: {
+    width: COL_WIDTH,
+    borderRadius: 12,
+    overflow: 'hidden',
+    minHeight: 480,
+    maxHeight: 720,
+  },
+  columnHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+  },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  card: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    gap: 6,
+  },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  cardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  miniBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  detalhe: { gap: 3, paddingTop: 8, marginTop: 2, borderTopWidth: 1 },
+  whatsappBtn: {
+    marginTop: 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  detalhe: {
-    gap: 4,
-    paddingTop: 10,
-    marginTop: 4,
-    borderTopWidth: 1,
-  },
-  whatsappBtn: {
-    marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
     alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  pager: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 8,
-    marginBottom: 12,
-  },
-  pageBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
     borderWidth: 1,
   },
   modalOverlay: {
@@ -563,6 +742,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 16,
     gap: 10,
+  },
+  moverCard: {
+    margin: 24,
+    marginBottom: 'auto',
+    marginTop: 'auto',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+    gap: 8,
+  },
+  moverOpt: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   obsItem: {
     borderWidth: 1,

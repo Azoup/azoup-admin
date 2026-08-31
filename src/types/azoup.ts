@@ -267,6 +267,14 @@ export interface AdminAcompanhamentoObservacaoRow {
   created_at?: string | null;
 }
 
+export interface AdminAcompanhamentoKanbanRow {
+  cliente_id: string;
+  coluna: string;
+  ordem?: number | null;
+  admin_email?: string | null;
+  updated_at?: string | null;
+}
+
 export interface AdminClienteCongelamentoRow {
   cliente_id: string;
   congelado: boolean;
