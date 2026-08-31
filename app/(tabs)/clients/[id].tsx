@@ -30,7 +30,7 @@ import {
 } from '@/src/services/repos/congelamento-repo';
 import { listarConversasClientes } from '@/src/services/repos/conversas-repo';
 import { obterAssinaturaStripe } from '@/src/services/stripe-admin-api';
-import { rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
+import { dataCancelamentoAssinatura, rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
 import {
   dataHojeBrasil,
   formatBRLFromCentavos,
@@ -240,6 +240,7 @@ export default function ClientDetailScreen() {
   const metricas = data.metricas_uso;
   const congelado = Boolean(data.congelamento?.congelado);
   const precisaChamar = clientePrecisaChamar(data.congelamento);
+  const dataCancelamento = dataCancelamentoAssinatura(data.assinatura);
 
   const ultimoAcessoLabel =
     metricas?.ultimo_acesso_fonte === 'auth'
@@ -335,6 +336,7 @@ export default function ClientDetailScreen() {
         <SectionTitle>Assinatura</SectionTitle>
         <Meta label="Status" value={rotuloStatusAssinatura(data.assinatura)} />
         <Meta label="Início" value={formatDateBR(data.assinatura?.data_inicio)} />
+        {dataCancelamento ? <Meta label="Cancelado em" value={formatYmdBR(dataCancelamento)} /> : null}
         <Meta label="Dias como assinante" value={String(data.dias_como_assinante ?? 0)} />
         <Meta
           label="Valor atual"

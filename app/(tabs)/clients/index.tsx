@@ -24,6 +24,7 @@ import {
 } from '@/src/utils/clientes-filtro';
 import { formatBRLFromCentavos, formatBRLFromReais, formatDateBR, formatYmdBR } from '@/src/utils/format';
 import {
+  dataCancelamentoAssinatura,
   isAssinaturaTrialExpirado,
   rotuloStatusAssinatura,
 } from '@/src/utils/assinatura-status';
@@ -131,6 +132,7 @@ export default function ClientsListScreen() {
           const alternando = togglingId === item.id;
           const statusAssinatura = rotuloStatusAssinatura(item.assinatura);
           const trialExpirado = isAssinaturaTrialExpirado(item.assinatura);
+          const dataCancelamento = dataCancelamentoAssinatura(item.assinatura);
 
           return (
             <View style={{ marginHorizontal: 12, marginVertical: 6 }}>
@@ -166,6 +168,11 @@ export default function ClientsListScreen() {
                       >
                         Assinatura: {statusAssinatura} · Falhas: {item.cobrancas_falhas ?? 0}
                       </Text>
+                      {dataCancelamento ? (
+                        <Text style={{ color: theme.error, fontWeight: '700', fontSize: 13 }}>
+                          Cancelado em: {formatYmdBR(dataCancelamento)}
+                        </Text>
+                      ) : null}
                       {item.meses_em_aberto?.length ? (
                         <Text style={{ color: theme.warning, fontWeight: '700', fontSize: 13 }}>
                           Meses com pendência: {item.meses_em_aberto.join(', ')}

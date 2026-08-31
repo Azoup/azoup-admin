@@ -3,7 +3,7 @@
  * Valores tipicos no Azoup: Ativo, Trial, Cancelado, Inadimplente, etc.
  */
 
-import { dataHojeBrasil } from '@/src/utils/format';
+import { dataCalendarioBrasil, dataHojeBrasil } from '@/src/utils/format';
 
 export type AssinaturaStatusGrupo =
   | 'ativa'
@@ -16,6 +16,8 @@ export type AssinaturaStatusGrupo =
 export type AssinaturaComStatus = {
   status?: string | null;
   trial_fim?: string | null;
+  data_fim?: string | null;
+  atualizado_em?: string | null;
 };
 
 function normStatus(status?: string | null): string {
@@ -71,6 +73,12 @@ export function isAssinaturaInadimplente(row?: AssinaturaComStatus | null): bool
 
 export function isAssinaturaCancelada(row?: AssinaturaComStatus | null): boolean {
   return classificarStatusAssinatura(row) === 'cancelada';
+}
+
+/** Data de cancelamento (YYYY-MM-DD) — `data_fim`, com fallback em `atualizado_em`. */
+export function dataCancelamentoAssinatura(row?: AssinaturaComStatus | null): string | null {
+  if (!isAssinaturaCancelada(row)) return null;
+  return dataCalendarioBrasil(row?.data_fim) ?? dataCalendarioBrasil(row?.atualizado_em) ?? null;
 }
 
 /** Rotulo amigavel para UI (trial vencido = "Inativo no trial"). */
