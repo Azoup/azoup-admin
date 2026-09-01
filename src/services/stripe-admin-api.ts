@@ -135,6 +135,32 @@ export async function obterMetricasClienteViaFunction(payload: ClienteMetricasPa
   return invoke<ClienteMetricasResponse>('get_cliente_metricas', payload);
 }
 
+export type ClienteCobrancaPayload = {
+  cliente_id?: string;
+  stripe_subscription_id?: string;
+};
+
+export type ClienteCobrancaResponse = {
+  cobranca: {
+    tem_cupom: boolean;
+    cupom_codigo: string | null;
+    cupom_nome: string | null;
+    desconto_tipo: 'percent' | 'amount' | null;
+    desconto_percentual: number | null;
+    desconto_valor_centavos: number | null;
+    desconto_centavos: number;
+    valor_bruto_centavos: number | null;
+    valor_liquido_centavos: number | null;
+    duracao: string | null;
+    duracao_meses: number | null;
+    fonte: 'stripe' | 'local';
+  };
+};
+
+export async function obterCobrancaClienteViaFunction(payload: ClienteCobrancaPayload) {
+  return invoke<ClienteCobrancaResponse>('get_cliente_cobranca', payload);
+}
+
 export type AcompanhamentoClienteApiRow = {
   id: string;
   nome: string;

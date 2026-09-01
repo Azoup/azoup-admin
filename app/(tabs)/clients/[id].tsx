@@ -29,7 +29,7 @@ import {
   descongelarCliente,
 } from '@/src/services/repos/congelamento-repo';
 import { listarConversasClientes } from '@/src/services/repos/conversas-repo';
-import { obterAssinaturaStripe } from '@/src/services/stripe-admin-api';
+import { obterAssinaturaStripe, obterCobrancaClienteViaFunction } from '@/src/services/stripe-admin-api';
 import { dataCancelamentoAssinatura, rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
 import {
   dataHojeBrasil,
@@ -56,6 +56,12 @@ export default function ClientDetailScreen() {
   const conversasQ = useQuery({
     queryKey: ['admin_cliente_conversas', id],
     queryFn: () => listarConversasClientes({ clienteId: id }),
+    enabled: Boolean(id),
+  });
+
+  const cobrancaQ = useQuery({
+    queryKey: ['admin_cliente_cobranca', id],
+    queryFn: () => obterCobrancaClienteViaFunction({ cliente_id: id }),
     enabled: Boolean(id),
   });
 
@@ -241,6 +247,31 @@ export default function ClientDetailScreen() {
   const congelado = Boolean(data.congelamento?.congelado);
   const precisaChamar = clientePrecisaChamar(data.congelamento);
   const dataCancelamento = dataCancelamentoAssinatura(data.assinatura);
+  const cobranca = cobrancaQ.data?.cobranca;
+
+  const rotuloDescontoCupom = (() => {
+    if (!cobranca?.tem_cupom) return null;
+    if (cobranca.desconto_tipo === 'percent' && cobranca.desconto_percentual != null) {
+      return `${cobranca.desconto_percentual}%`;
+    }
+    if (cobranca.desconto_tipo === 'amount' && cobranca.desconto_valor_centavos != null) {
+      return formatBRLFromCentavos(cobranca.desconto_valor_centavos);
+    }
+    if (cobranca.desconto_centavos > 0) {
+      return formatBRLFromCentavos(cobranca.desconto_centavos);
+    }
+    return null;
+  })();
+
+  const rotuloDuracaoCupom = (() => {
+    if (!cobranca?.tem_cupom || !cobranca.duracao) return null;
+    if (cobranca.duracao === 'once') return 'uma vez';
+    if (cobranca.duracao === 'forever') return 'para sempre';
+    if (cobranca.duracao === 'repeating' && cobranca.duracao_meses != null) {
+      return `${cobranca.duracao_meses} ${cobranca.duracao_meses === 1 ? 'mês' : 'meses'}`;
+    }
+    return cobranca.duracao;
+  })();
 
   const ultimoAcessoLabel =
     metricas?.ultimo_acesso_fonte === 'auth'
@@ -339,15 +370,41 @@ export default function ClientDetailScreen() {
         {dataCancelamento ? <Meta label="Cancelado em" value={formatYmdBR(dataCancelamento)} /> : null}
         <Meta label="Dias como assinante" value={String(data.dias_como_assinante ?? 0)} />
         <Meta
-          label="Valor atual"
+          label={cobranca?.tem_cupom ? 'Valor sem desconto' : 'Valor atual'}
           value={
-            data.assinatura?.valor_atual_centavos != null
-              ? formatBRLFromCentavos(data.assinatura.valor_atual_centavos)
-              : data.assinatura?.valor_mensal_atual != null
-                ? formatBRLFromReais(data.assinatura.valor_mensal_atual)
-                : formatBRLFromCentavos(data.plano?.valor_mensal_centavos)
+            cobranca?.tem_cupom && cobranca.valor_bruto_centavos != null
+              ? formatBRLFromCentavos(cobranca.valor_bruto_centavos)
+              : cobranca?.valor_liquido_centavos != null
+                ? formatBRLFromCentavos(cobranca.valor_liquido_centavos)
+                : data.assinatura?.valor_atual_centavos != null
+                  ? formatBRLFromCentavos(data.assinatura.valor_atual_centavos)
+                  : data.assinatura?.valor_mensal_atual != null
+                    ? formatBRLFromReais(data.assinatura.valor_mensal_atual)
+                    : formatBRLFromCentavos(data.plano?.valor_mensal_centavos)
           }
         />
+        {cobrancaQ.isLoading ? (
+          <Meta label="Cupom de desconto" value="Consultando Stripe…" />
+        ) : cobrancaQ.error ? (
+          <Meta label="Cupom de desconto" value="Não foi possível consultar" />
+        ) : cobranca?.tem_cupom ? (
+          <>
+            <Meta
+              label="Cupom de desconto"
+              value={cobranca.cupom_codigo ?? cobranca.cupom_nome ?? 'Sim'}
+            />
+            {rotuloDescontoCupom ? <Meta label="Desconto do cupom" value={rotuloDescontoCupom} /> : null}
+            {cobranca.desconto_centavos > 0 ? (
+              <Meta label="Desconto mensal" value={formatBRLFromCentavos(cobranca.desconto_centavos)} />
+            ) : null}
+            {rotuloDuracaoCupom ? <Meta label="Duração do cupom" value={rotuloDuracaoCupom} /> : null}
+            {cobranca.valor_liquido_centavos != null ? (
+              <Meta label="Valor pago (mensal)" value={formatBRLFromCentavos(cobranca.valor_liquido_centavos)} />
+            ) : null}
+          </>
+        ) : (
+          <Meta label="Cupom de desconto" value="Não" />
+        )}
         <Meta
           label="Adicionais"
           value={`usuários ${data.assinatura?.usuarios_adicionais ?? data.assinatura?.usuarios_extras ?? 0} · empresas ${data.assinatura?.empresas_adicionais ?? data.assinatura?.empresas_extras ?? 0}`}

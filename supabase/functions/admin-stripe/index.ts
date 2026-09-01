@@ -220,6 +220,65 @@ async function mrrDeAssinaturaStripe(stripe: Stripe, subscriptionId: string): Pr
   }
 }
 
+type ClienteCobrancaInfo = {
+  tem_cupom: boolean;
+  cupom_codigo: string | null;
+  cupom_nome: string | null;
+  desconto_tipo: 'percent' | 'amount' | null;
+  desconto_percentual: number | null;
+  desconto_valor_centavos: number | null;
+  desconto_centavos: number;
+  valor_bruto_centavos: number | null;
+  valor_liquido_centavos: number | null;
+  duracao: string | null;
+  duracao_meses: number | null;
+  fonte: 'stripe' | 'local';
+};
+
+function extrairCupomAssinatura(
+  subscription: Stripe.Subscription | null,
+  valores: MrrAssinaturaValor,
+): Omit<ClienteCobrancaInfo, 'fonte'> {
+  const coupon = subscription?.discount?.coupon;
+  const descontoCentavos = valores.desconto_centavos;
+
+  if (!coupon || descontoCentavos <= 0) {
+    return {
+      tem_cupom: false,
+      cupom_codigo: null,
+      cupom_nome: null,
+      desconto_tipo: null,
+      desconto_percentual: null,
+      desconto_valor_centavos: null,
+      desconto_centavos: 0,
+      valor_bruto_centavos: valores.bruto_centavos,
+      valor_liquido_centavos: valores.liquido_centavos,
+      duracao: null,
+      duracao_meses: null,
+    };
+  }
+
+  const promo = subscription?.discount?.promotion_code;
+  let codigo: string | null = null;
+  if (typeof promo === 'object' && promo?.code) {
+    codigo = promo.code;
+  }
+
+  return {
+    tem_cupom: true,
+    cupom_codigo: codigo ?? coupon.name ?? coupon.id,
+    cupom_nome: coupon.name ?? null,
+    desconto_tipo: coupon.percent_off != null ? 'percent' : 'amount',
+    desconto_percentual: coupon.percent_off ?? null,
+    desconto_valor_centavos: coupon.amount_off ?? null,
+    desconto_centavos: descontoCentavos,
+    valor_bruto_centavos: valores.bruto_centavos,
+    valor_liquido_centavos: valores.liquido_centavos,
+    duracao: coupon.duration ?? null,
+    duracao_meses: coupon.duration_in_months ?? null,
+  };
+}
+
 async function mapInBatches<T, R>(
   items: T[],
   batchSize: number,
@@ -486,6 +545,103 @@ serve(async (req) => {
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
+    }
+
+    if (body.op === 'get_cliente_cobranca') {
+      const clienteId = `${body.payload?.cliente_id ?? ''}`.trim();
+      let subId = `${body.payload?.stripe_subscription_id ?? ''}`.trim();
+
+      let assinaturaLocal: {
+        stripe_subscription_id: string | null;
+        valor_mensal_atual: number | null;
+        valor_atual_centavos: number | null;
+      } | null = null;
+
+      if (clienteId) {
+        const { data, error } = await supabaseAdmin
+          .from('assinaturas_clientes')
+          .select('stripe_subscription_id, valor_mensal_atual, valor_atual_centavos')
+          .eq('cliente_id', clienteId)
+          .order('data_inicio', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) throw error;
+        assinaturaLocal = data;
+        if (!subId && data?.stripe_subscription_id) {
+          subId = `${data.stripe_subscription_id}`.trim();
+        }
+      }
+
+      if (!subId) {
+        const valorLocal =
+          assinaturaLocal?.valor_atual_centavos ??
+          (assinaturaLocal?.valor_mensal_atual != null
+            ? Math.round(Number(assinaturaLocal.valor_mensal_atual) * 100)
+            : null);
+
+        const cobranca: ClienteCobrancaInfo = {
+          tem_cupom: false,
+          cupom_codigo: null,
+          cupom_nome: null,
+          desconto_tipo: null,
+          desconto_percentual: null,
+          desconto_valor_centavos: null,
+          desconto_centavos: 0,
+          valor_bruto_centavos: valorLocal,
+          valor_liquido_centavos: valorLocal,
+          duracao: null,
+          duracao_meses: null,
+          fonte: 'local',
+        };
+
+        return new Response(JSON.stringify({ cobranca }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const stripe = new Stripe(stripeSecret, { apiVersion: '2023-10-16' });
+
+      const [valores, subscription] = await Promise.all([
+        mrrDeAssinaturaStripe(stripe, subId),
+        stripe.subscriptions.retrieve(subId, {
+          expand: ['discount.coupon', 'discount.promotion_code'],
+        }),
+      ]);
+
+      let cobranca: ClienteCobrancaInfo = {
+        ...extrairCupomAssinatura(subscription, valores),
+        fonte: 'stripe',
+      };
+
+      const couponId = subscription.discount?.coupon?.id;
+      if (couponId && cobranca.tem_cupom) {
+        const { data: adminCoupon } = await supabaseAdmin
+          .from('admin_coupons')
+          .select('code, discount_type, discount_value, duration, duration_in_months')
+          .eq('stripe_coupon_id', couponId)
+          .limit(1)
+          .maybeSingle();
+
+        if (adminCoupon?.code) {
+          cobranca = {
+            ...cobranca,
+            cupom_codigo: adminCoupon.code,
+            desconto_tipo: adminCoupon.discount_type === 'amount' ? 'amount' : 'percent',
+            desconto_percentual:
+              adminCoupon.discount_type === 'percent' ? Number(adminCoupon.discount_value) : null,
+            desconto_valor_centavos:
+              adminCoupon.discount_type === 'amount'
+                ? Math.round(Number(adminCoupon.discount_value) * 100)
+                : null,
+            duracao: adminCoupon.duration ?? cobranca.duracao,
+            duracao_meses: adminCoupon.duration_in_months ?? cobranca.duracao_meses,
+          };
+        }
+      }
+
+      return new Response(JSON.stringify({ cobranca }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     if (body.op === 'list_acompanhamento') {
