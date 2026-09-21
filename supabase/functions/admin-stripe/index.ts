@@ -235,6 +235,316 @@ type ClienteCobrancaInfo = {
   fonte: 'stripe' | 'local';
 };
 
+type CobrancaPdfInfo = {
+  invoice_id: string;
+  status: string;
+  valor_centavos: number;
+  vencimento: string | null;
+  invoice_pdf_url: string | null;
+  hosted_invoice_url: string | null;
+  boleto_linha_digitavel: string | null;
+  boleto_pdf_url: string | null;
+  pdf_url: string;
+  aviso: string | null;
+};
+
+function soDigitos(raw: string | null | undefined): string {
+  return `${raw ?? ''}`.replace(/\D/g, '');
+}
+
+function unixToIso(unix: number | null | undefined): string | null {
+  if (unix == null || !Number.isFinite(unix)) return null;
+  return new Date(unix * 1000).toISOString();
+}
+
+async function garantirDocumentoFiscalCustomer(
+  stripe: Stripe,
+  customerId: string,
+  cpf: string | null | undefined,
+  cnpj: string | null | undefined,
+): Promise<void> {
+  const customer = await stripe.customers.retrieve(customerId);
+  if ((customer as Stripe.DeletedCustomer).deleted) {
+    throw new Error('Customer Stripe excluído');
+  }
+
+  const taxIds = await stripe.customers.listTaxIds(customerId, { limit: 10 });
+  if (!taxIds.data.length) {
+    const cnpjDigits = soDigitos(cnpj);
+    const cpfDigits = soDigitos(cpf);
+    try {
+      if (cnpjDigits.length === 14) {
+        await stripe.customers.createTaxId(customerId, { type: 'br_cnpj', value: cnpjDigits });
+      } else if (cpfDigits.length === 11) {
+        await stripe.customers.createTaxId(customerId, { type: 'br_cpf', value: cpfDigits });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : `${e}`;
+      // Já existe / inválido: segue e deixa o Stripe falhar na finalização se necessário
+      console.warn('[gerar_cobranca_pdf] tax_id:', msg);
+    }
+  }
+
+  const cust = customer as Stripe.Customer;
+  if (!cust.address?.country || cust.address.country !== 'BR') {
+    try {
+      await stripe.customers.update(customerId, {
+        address: {
+          country: 'BR',
+          line1: cust.address?.line1 || 'Brasil',
+          city: cust.address?.city || 'Sao Paulo',
+          state: cust.address?.state || 'SP',
+          postal_code: cust.address?.postal_code || '01000000',
+        },
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : `${e}`;
+      console.warn('[gerar_cobranca_pdf] address:', msg);
+    }
+  }
+}
+
+async function tentarHabilitarBoletoNaFatura(stripe: Stripe, invoiceId: string): Promise<void> {
+  try {
+    await stripe.invoices.update(invoiceId, {
+      payment_settings: {
+        payment_method_types: ['boleto', 'card'],
+      },
+    } as Stripe.InvoiceUpdateParams);
+  } catch {
+    // Fatura já finalizada ou conta sem boleto — segue com PDF/link disponíveis
+  }
+}
+
+async function extrairDadosBoleto(
+  stripe: Stripe,
+  invoice: Stripe.Invoice,
+): Promise<{ linha: string | null; pdf: string | null }> {
+  let linha: string | null = null;
+  let pdf: string | null = null;
+
+  const piRef = invoice.payment_intent;
+  if (!piRef) return { linha, pdf };
+
+  const piId = typeof piRef === 'string' ? piRef : piRef.id;
+  try {
+    const pi = await stripe.paymentIntents.retrieve(piId, {
+      expand: ['latest_charge', 'payment_method'],
+    });
+
+    const next = pi.next_action as {
+      type?: string;
+      boleto_display_details?: {
+        number?: string | null;
+        hosted_voucher_url?: string | null;
+        pdf?: string | null;
+      };
+    } | null;
+
+    const details = next?.boleto_display_details;
+    if (details) {
+      linha = details.number ?? null;
+      pdf = details.hosted_voucher_url ?? details.pdf ?? null;
+    }
+
+    const charge = pi.latest_charge;
+    if (typeof charge === 'object' && charge && !('deleted' in charge && charge.deleted)) {
+      const boleto = (charge as Stripe.Charge).payment_method_details?.boleto as
+        | { number?: string | null; pdf?: string | null }
+        | null
+        | undefined;
+      if (boleto) {
+        linha = linha ?? boleto.number ?? null;
+        pdf = pdf ?? boleto.pdf ?? null;
+      }
+    }
+  } catch (e) {
+    console.warn('[gerar_cobranca_pdf] boleto extract:', e instanceof Error ? e.message : e);
+  }
+
+  return { linha, pdf };
+}
+
+async function montarCobrancaPdfInfo(
+  stripe: Stripe,
+  invoice: Stripe.Invoice,
+  aviso: string | null = null,
+): Promise<CobrancaPdfInfo> {
+  const full = await stripe.invoices.retrieve(invoice.id, {
+    expand: ['payment_intent', 'payment_intent.latest_charge'],
+  });
+
+  if (full.status === 'paid') {
+    throw new Error('A fatura Stripe já está paga — não há boleto pendente.');
+  }
+
+  const boleto = await extrairDadosBoleto(stripe, full);
+  const invoice_pdf_url = full.invoice_pdf ?? null;
+  const hosted_invoice_url = full.hosted_invoice_url ?? null;
+  const boleto_pdf_url = boleto.pdf;
+  const pdf_url = boleto_pdf_url ?? invoice_pdf_url ?? hosted_invoice_url;
+
+  if (!pdf_url) {
+    throw new Error(
+      'Stripe não retornou PDF nem link de pagamento. Verifique se a fatura foi finalizada e se boleto/cartão estão habilitados na conta.',
+    );
+  }
+
+  return {
+    invoice_id: full.id,
+    status: full.status ?? 'unknown',
+    valor_centavos: Math.max(0, Math.round(Number(full.amount_due ?? full.total ?? 0))),
+    vencimento: unixToIso(full.due_date) ?? unixToIso(full.status_transitions?.finalized_at ?? null),
+    invoice_pdf_url,
+    hosted_invoice_url,
+    boleto_linha_digitavel: boleto.linha,
+    boleto_pdf_url,
+    pdf_url,
+    aviso,
+  };
+}
+
+async function obterOuCriarFaturaParaCobranca(
+  stripe: Stripe,
+  customerId: string,
+  subscriptionId: string,
+): Promise<{ invoice: Stripe.Invoice; aviso: string | null }> {
+  const abertas = await stripe.invoices.list({
+    customer: customerId,
+    subscription: subscriptionId,
+    status: 'open',
+    limit: 10,
+  });
+  if (abertas.data.length) {
+    const invoice = [...abertas.data].sort((a, b) => (b.created ?? 0) - (a.created ?? 0))[0];
+    await tentarHabilitarBoletoNaFatura(stripe, invoice.id);
+    return { invoice, aviso: null };
+  }
+
+  const drafts = await stripe.invoices.list({
+    customer: customerId,
+    subscription: subscriptionId,
+    status: 'draft',
+    limit: 10,
+  });
+  if (drafts.data.length) {
+    const draft = [...drafts.data].sort((a, b) => (b.created ?? 0) - (a.created ?? 0))[0];
+    try {
+      await stripe.invoices.update(draft.id, {
+        collection_method: 'send_invoice',
+        days_until_due: 3,
+        payment_settings: { payment_method_types: ['boleto', 'card'] },
+      } as Stripe.InvoiceUpdateParams);
+    } catch {
+      await tentarHabilitarBoletoNaFatura(stripe, draft.id);
+    }
+    const finalized = await stripe.invoices.finalizeInvoice(draft.id);
+    return { invoice: finalized, aviso: null };
+  }
+
+  const sub = await stripe.subscriptions.retrieve(subscriptionId, {
+    expand: ['latest_invoice'],
+  });
+  const latest = sub.latest_invoice;
+  if (latest && typeof latest === 'object') {
+    if (latest.status === 'open') {
+      await tentarHabilitarBoletoNaFatura(stripe, latest.id);
+      return { invoice: latest, aviso: null };
+    }
+    if (latest.status === 'draft') {
+      await tentarHabilitarBoletoNaFatura(stripe, latest.id);
+      const finalized = await stripe.invoices.finalizeInvoice(latest.id);
+      return { invoice: finalized, aviso: null };
+    }
+  }
+
+  try {
+    let created = await stripe.invoices.create({
+      customer: customerId,
+      subscription: subscriptionId,
+      collection_method: 'send_invoice',
+      days_until_due: 3,
+      pending_invoice_items_behavior: 'include',
+      payment_settings: { payment_method_types: ['boleto', 'card'] },
+      auto_advance: false,
+      metadata: { origem: 'painel_adm_gerar_cobranca_pdf' },
+    } as Stripe.InvoiceCreateParams);
+
+    if ((created.amount_due ?? 0) > 0 || (created.total ?? 0) > 0) {
+      if (created.status === 'draft') {
+        created = await stripe.invoices.finalizeInvoice(created.id);
+      }
+      return { invoice: created, aviso: null };
+    }
+
+    if (created.status === 'draft') {
+      try {
+        await stripe.invoices.del(created.id);
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch (e) {
+    console.warn('[gerar_cobranca_pdf] create subscription invoice:', e instanceof Error ? e.message : e);
+  }
+
+  let upcoming: Stripe.Invoice;
+  try {
+    upcoming = await stripe.invoices.retrieveUpcoming({
+      customer: customerId,
+      subscription: subscriptionId,
+    });
+  } catch {
+    throw new Error(
+      'Não há fatura aberta nem próxima cobrança no Stripe para esta assinatura. Se o cliente já está em dia, não há boleto a gerar.',
+    );
+  }
+
+  const valor = Math.max(0, Math.round(Number(upcoming.amount_due ?? upcoming.total ?? 0)));
+  if (valor <= 0) {
+    throw new Error('Próxima cobrança Stripe está zerada — nada a gerar.');
+  }
+
+  const descricao =
+    upcoming.lines?.data?.[0]?.description?.trim() ||
+    `Próxima cobrança da assinatura ${subscriptionId}`;
+
+  await stripe.invoiceItems.create({
+    customer: customerId,
+    amount: valor,
+    currency: upcoming.currency || 'brl',
+    description: descricao,
+    metadata: {
+      origem: 'painel_adm_gerar_cobranca_pdf',
+      stripe_subscription_id: subscriptionId,
+      equivalente_upcoming: 'true',
+    },
+  });
+
+  let avulsa = await stripe.invoices.create({
+    customer: customerId,
+    collection_method: 'send_invoice',
+    days_until_due: 3,
+    payment_settings: { payment_method_types: ['boleto', 'card'] },
+    auto_advance: false,
+    metadata: {
+      origem: 'painel_adm_gerar_cobranca_pdf',
+      stripe_subscription_id: subscriptionId,
+      equivalente_upcoming: 'true',
+    },
+  } as Stripe.InvoiceCreateParams);
+
+  if (avulsa.status === 'draft') {
+    avulsa = await stripe.invoices.finalizeInvoice(avulsa.id);
+  }
+
+  return {
+    invoice: avulsa,
+    aviso:
+      'PDF gerado com base na próxima cobrança (ainda não havia fatura aberta). Confira no Stripe para evitar cobrança duplicada na renovação automática.',
+  };
+}
+
 function extrairCupomAssinatura(
   subscription: Stripe.Subscription | null,
   valores: MrrAssinaturaValor,
@@ -977,6 +1287,56 @@ serve(async (req) => {
         expand: ['latest_invoice', 'customer'],
       });
       return new Response(JSON.stringify({ subscription }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (body.op === 'gerar_cobranca_pdf') {
+      const clienteId = `${body.payload?.cliente_id ?? ''}`.trim();
+      if (!clienteId) throw new Error('cliente_id obrigatório');
+
+      const { data: assinatura, error: assErr } = await supabaseAdmin
+        .from('assinaturas_clientes')
+        .select('id, cliente_id, stripe_subscription_id, stripe_customer_id, status')
+        .eq('cliente_id', clienteId)
+        .order('data_inicio', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (assErr) throw assErr;
+      if (!assinatura) throw new Error('Cliente sem assinatura local');
+
+      let subId = `${assinatura.stripe_subscription_id ?? ''}`.trim();
+      let customerId = `${assinatura.stripe_customer_id ?? ''}`.trim();
+
+      if (!subId) throw new Error('Assinatura sem stripe_subscription_id — não é possível gerar boleto');
+
+      if (!customerId) {
+        const sub = await stripe.subscriptions.retrieve(subId);
+        customerId =
+          typeof sub.customer === 'string' ? sub.customer : `${sub.customer?.id ?? ''}`.trim();
+      }
+      if (!customerId) throw new Error('Não foi possível resolver stripe_customer_id');
+
+      const [{ data: clienteRow }, { data: empresaRow }] = await Promise.all([
+        supabaseAdmin.from('clientes_azoup').select('cpf').eq('id', clienteId).maybeSingle(),
+        supabaseAdmin
+          .from('empresas')
+          .select('cnpj')
+          .eq('cliente_id', clienteId)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      const cpf = (clienteRow as { cpf?: string | null } | null)?.cpf ?? null;
+      const cnpj = (empresaRow as { cnpj?: string | null } | null)?.cnpj ?? null;
+
+      await garantirDocumentoFiscalCustomer(stripe, customerId, cpf, cnpj);
+
+      const { invoice, aviso } = await obterOuCriarFaturaParaCobranca(stripe, customerId, subId);
+      const cobranca = await montarCobrancaPdfInfo(stripe, invoice, aviso);
+
+      return new Response(JSON.stringify({ cobranca }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

@@ -161,6 +161,29 @@ export async function obterCobrancaClienteViaFunction(payload: ClienteCobrancaPa
   return invoke<ClienteCobrancaResponse>('get_cliente_cobranca', payload);
 }
 
+export type GerarCobrancaPdfPayload = {
+  cliente_id: string;
+};
+
+export type GerarCobrancaPdfResponse = {
+  cobranca: {
+    invoice_id: string;
+    status: string;
+    valor_centavos: number;
+    vencimento: string | null;
+    invoice_pdf_url: string | null;
+    hosted_invoice_url: string | null;
+    boleto_linha_digitavel: string | null;
+    boleto_pdf_url: string | null;
+    pdf_url: string;
+    aviso: string | null;
+  };
+};
+
+export async function gerarCobrancaPdfViaFunction(payload: GerarCobrancaPdfPayload) {
+  return invoke<GerarCobrancaPdfResponse>('gerar_cobranca_pdf', payload);
+}
+
 export type AcompanhamentoClienteApiRow = {
   id: string;
   nome: string;

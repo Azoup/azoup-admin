@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Linking, Platform, StyleSheet, View } from 'react-native';
 
 import { ConversaClienteCard } from '@/components/ui/ConversaClienteCard';
 import { FormField } from '@/components/ui/FormField';
@@ -29,7 +29,12 @@ import {
   descongelarCliente,
 } from '@/src/services/repos/congelamento-repo';
 import { listarConversasClientes } from '@/src/services/repos/conversas-repo';
-import { obterAssinaturaStripe, obterCobrancaClienteViaFunction } from '@/src/services/stripe-admin-api';
+import {
+  gerarCobrancaPdfViaFunction,
+  obterAssinaturaStripe,
+  obterCobrancaClienteViaFunction,
+  type GerarCobrancaPdfResponse,
+} from '@/src/services/stripe-admin-api';
 import { dataCancelamentoAssinatura, rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
 import {
   dataHojeBrasil,
@@ -39,6 +44,18 @@ import {
   formatDateTimeBR,
   formatYmdBR,
 } from '@/src/utils/format';
+
+async function copiarTexto(texto: string): Promise<boolean> {
+  try {
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(texto);
+      return true;
+    }
+  } catch {
+    /* fallback abaixo */
+  }
+  return false;
+}
 
 export default function ClientDetailScreen() {
   const { theme } = useTheme();
@@ -77,6 +94,9 @@ export default function ClientDetailScreen() {
   const [dataRetorno, setDataRetorno] = useState('');
   const [obsCongelar, setObsCongelar] = useState('');
   const [congelarErro, setCongelarErro] = useState<string | null>(null);
+  const [cobrancaPdf, setCobrancaPdf] = useState<GerarCobrancaPdfResponse['cobranca'] | null>(null);
+  const [cobrancaPdfErro, setCobrancaPdfErro] = useState<string | null>(null);
+  const [copiaHint, setCopiaHint] = useState<string | null>(null);
 
   useEffect(() => {
     setLimU('');
@@ -86,6 +106,9 @@ export default function ClientDetailScreen() {
     setMotivo('');
     setSaveHint(null);
     setCongelarErro(null);
+    setCobrancaPdf(null);
+    setCobrancaPdfErro(null);
+    setCopiaHint(null);
   }, [id]);
 
   useEffect(() => {
@@ -235,6 +258,36 @@ export default function ClientDetailScreen() {
     } catch (e) {
       setStripeJson((e as Error).message);
     }
+  }
+
+  const gerarCobrancaPdfMutation = useMutation({
+    mutationFn: async () => {
+      if (!id) throw new Error('Cliente inválido');
+      return gerarCobrancaPdfViaFunction({ cliente_id: id });
+    },
+    onMutate: () => {
+      setCobrancaPdfErro(null);
+      setCopiaHint(null);
+    },
+    onSuccess: (res) => {
+      setCobrancaPdf(res.cobranca);
+    },
+    onError: (e) => {
+      setCobrancaPdf(null);
+      setCobrancaPdfErro(e instanceof Error ? e.message : 'Falha ao gerar cobrança');
+    },
+  });
+
+  async function abrirPdf() {
+    const url = cobrancaPdf?.pdf_url;
+    if (!url) return;
+    await Linking.openURL(url);
+  }
+
+  async function copiarCampo(label: string, valor: string | null | undefined) {
+    if (!valor) return;
+    const ok = await copiarTexto(valor);
+    setCopiaHint(ok ? `${label} copiado.` : `Selecione e copie: ${valor}`);
   }
 
   if (!id) return <Text>Cliente inválido.</Text>;
@@ -410,6 +463,74 @@ export default function ClientDetailScreen() {
           value={`usuários ${data.assinatura?.usuarios_adicionais ?? data.assinatura?.usuarios_extras ?? 0} · empresas ${data.assinatura?.empresas_adicionais ?? data.assinatura?.empresas_extras ?? 0}`}
         />
         <Meta label="Stripe subscription" value={data.assinatura?.stripe_subscription_id ?? '—'} />
+        {data.assinatura?.stripe_subscription_id ? (
+          <View style={{ gap: 8, marginTop: 8 }}>
+            <PrimaryButton
+              label={gerarCobrancaPdfMutation.isPending ? 'Gerando PDF…' : 'Gerar boleto / PDF'}
+              loading={gerarCobrancaPdfMutation.isPending}
+              disabled={gerarCobrancaPdfMutation.isPending}
+              onPress={() => gerarCobrancaPdfMutation.mutate()}
+            />
+            {cobrancaPdfErro ? (
+              <Text style={{ color: theme.error, fontSize: 13 }}>{cobrancaPdfErro}</Text>
+            ) : null}
+            {cobrancaPdf ? (
+              <View
+                style={{
+                  gap: 6,
+                  padding: 12,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: theme.borderInput,
+                  backgroundColor: theme.surfaceMuted,
+                }}
+              >
+                <Text style={{ color: theme.text, fontWeight: '700' }}>Cobrança gerada</Text>
+                <Meta label="Fatura Stripe" value={cobrancaPdf.invoice_id} />
+                <Meta label="Status" value={cobrancaPdf.status} />
+                <Meta label="Valor" value={formatBRLFromCentavos(cobrancaPdf.valor_centavos)} />
+                <Meta
+                  label="Vencimento"
+                  value={cobrancaPdf.vencimento ? formatDateBR(cobrancaPdf.vencimento) : '—'}
+                />
+                {cobrancaPdf.boleto_linha_digitavel ? (
+                  <Meta label="Linha digitável" value={cobrancaPdf.boleto_linha_digitavel} />
+                ) : null}
+                {cobrancaPdf.aviso ? (
+                  <Text style={{ color: theme.warning, fontSize: 12 }}>{cobrancaPdf.aviso}</Text>
+                ) : null}
+                <SecondaryButton label="Baixar PDF" onPress={() => void abrirPdf()} />
+                <SecondaryButton
+                  label="Copiar link do PDF"
+                  onPress={() => void copiarCampo('Link do PDF', cobrancaPdf.pdf_url)}
+                />
+                {cobrancaPdf.boleto_linha_digitavel ? (
+                  <SecondaryButton
+                    label="Copiar linha digitável"
+                    onPress={() =>
+                      void copiarCampo('Linha digitável', cobrancaPdf.boleto_linha_digitavel)
+                    }
+                  />
+                ) : null}
+                {cobrancaPdf.hosted_invoice_url ? (
+                  <SecondaryButton
+                    label="Abrir link de pagamento"
+                    onPress={() => void Linking.openURL(cobrancaPdf.hosted_invoice_url!)}
+                  />
+                ) : null}
+                {copiaHint ? (
+                  <Text selectable style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {copiaHint}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
+        ) : (
+          <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 8 }}>
+            Sem assinatura Stripe — não é possível gerar boleto/PDF.
+          </Text>
+        )}
         <SecondaryButton label="Carregar status detalhado (Stripe)" onPress={loadStripe} style={{ marginTop: 8 }} />
         {stripeJson ? (
           <Text selectable style={styles.mono}>
