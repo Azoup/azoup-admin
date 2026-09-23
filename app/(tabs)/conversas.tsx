@@ -3,6 +3,8 @@ import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+
 import { ClienteMultiSelect } from '@/components/ui/ClienteMultiSelect';
 import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
 import { ConversaClienteCard } from '@/components/ui/ConversaClienteCard';
@@ -289,12 +291,11 @@ export default function ConversasScreen() {
             acoes={
               confirmarId === item.id ? (
                 <>
-                  <Text style={{ color: theme.error, fontWeight: '700', fontSize: 12 }}>Excluir esta conversa?</Text>
-                  <Pressable onPress={() => excluir.mutate(item.id)} hitSlop={6}>
-                    <Text style={{ color: theme.error, fontWeight: '800', fontSize: 12 }}>Excluir</Text>
+                  <Pressable onPress={() => excluir.mutate(item.id)} hitSlop={8} accessibilityLabel="Confirmar exclusão">
+                    <FontAwesome name="trash" size={15} color={theme.error} />
                   </Pressable>
-                  <Pressable onPress={() => setConfirmarId(null)} hitSlop={6}>
-                    <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: 12 }}>Cancelar</Text>
+                  <Pressable onPress={() => setConfirmarId(null)} hitSlop={8} accessibilityLabel="Cancelar">
+                    <FontAwesome name="times" size={16} color={theme.textMuted} />
                   </Pressable>
                 </>
               ) : (
@@ -307,18 +308,20 @@ export default function ConversasScreen() {
                       setClienteInicial(null);
                       setFormAberto(true);
                     }}
-                    hitSlop={6}
+                    hitSlop={8}
+                    accessibilityLabel="Editar"
                   >
-                    <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Editar</Text>
+                    <FontAwesome name="pencil" size={15} color={theme.cadastroAction} />
                   </Pressable>
                   <Pressable
                     onPress={() => {
                       setErroLista(null);
                       setConfirmarId(item.id);
                     }}
-                    hitSlop={6}
+                    hitSlop={8}
+                    accessibilityLabel="Excluir"
                   >
-                    <Text style={{ color: theme.error, fontWeight: '800', fontSize: 12 }}>Excluir</Text>
+                    <FontAwesome name="trash" size={15} color={theme.error} />
                   </Pressable>
                 </>
               )

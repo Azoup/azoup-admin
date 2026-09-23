@@ -326,26 +326,23 @@ function AcoesRegistro({
   const { theme } = useTheme();
   if (confirmar) {
     return (
-      <View style={{ gap: 6, alignItems: 'flex-end' }}>
-        <Text style={{ color: theme.error, fontSize: 12, fontWeight: '700' }}>Excluir este registro?</Text>
-        <View style={{ flexDirection: 'row', gap: 12 }}>
-          <Pressable onPress={onConfirmarExclusao} hitSlop={6}>
-            <Text style={{ color: theme.error, fontWeight: '800', fontSize: 12 }}>Excluir</Text>
-          </Pressable>
-          <Pressable onPress={onCancelarExclusao} hitSlop={6}>
-            <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: 12 }}>Cancelar</Text>
-          </Pressable>
-        </View>
+      <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
+        <Pressable onPress={onConfirmarExclusao} hitSlop={8} accessibilityLabel="Confirmar exclusão">
+          <FontAwesome name="trash" size={15} color={theme.error} />
+        </Pressable>
+        <Pressable onPress={onCancelarExclusao} hitSlop={8} accessibilityLabel="Cancelar">
+          <FontAwesome name="times" size={16} color={theme.textMuted} />
+        </Pressable>
       </View>
     );
   }
   return (
-    <View style={{ flexDirection: 'row', gap: 12 }}>
-      <Pressable onPress={onEditar} hitSlop={6}>
-        <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Editar</Text>
+    <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
+      <Pressable onPress={onEditar} hitSlop={8} accessibilityLabel="Editar">
+        <FontAwesome name="pencil" size={15} color={theme.cadastroAction} />
       </Pressable>
-      <Pressable onPress={onPedirExclusao} hitSlop={6}>
-        <Text style={{ color: theme.error, fontWeight: '800', fontSize: 12 }}>Excluir</Text>
+      <Pressable onPress={onPedirExclusao} hitSlop={8} accessibilityLabel="Excluir">
+        <FontAwesome name="trash" size={15} color={theme.error} />
       </Pressable>
     </View>
   );
