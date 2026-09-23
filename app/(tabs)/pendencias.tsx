@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Text } from '@/components/Themed';
@@ -14,9 +14,17 @@ import {
   type ReuniaoClienteRow,
 } from '@/src/services/repos/reunioes-repo';
 import { formatYmdBR } from '@/src/utils/format';
+import {
+  colunaSobPonto,
+  marcarColuna,
+  marcarScrollKanban,
+  posicionarFantasma,
+  SemArraste,
+  useCardPointerDrag,
+} from '@/src/utils/kanban-drag';
 
 const COL_WIDTH = 320;
-const DRAG_MIME = 'application/x-pendencia-reuniao';
+const SCROLL_PENDENCIAS = '[data-kanban-scroll="pendencias"]';
 
 const COLUNAS: { key: PendenciaColuna; label: string; cor: string }[] = [
   { key: 'atrasada', label: 'Atrasada', cor: '#F07167' },
@@ -29,38 +37,39 @@ function PendenciaCard({
   cor,
   onConcluir,
   onReabrir,
+  onArrastar,
+  onSoltar,
 }: {
   item: ReuniaoClienteRow;
   cor: string;
   onConcluir: () => void;
   onReabrir: () => void;
+  onArrastar: (x: number, y: number) => void;
+  onSoltar: (x: number, y: number) => void;
 }) {
   const { theme } = useTheme();
   const coluna = colunaPendencia(item);
   const empresa = item.empresa_nome?.trim() || 'Cliente';
-
-  const webDragProps =
-    Platform.OS === 'web'
-      ? ({
-          draggable: true,
-          onDragStart: (e: { dataTransfer?: { setData: (t: string, v: string) => void; effectAllowed: string } }) => {
-            e.dataTransfer?.setData(DRAG_MIME, item.id);
-            e.dataTransfer?.setData('text/plain', item.id);
-            if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-          },
-        } as Record<string, unknown>)
-      : {};
+  const arrastarRef = useRef(onArrastar);
+  const soltarRef = useRef(onSoltar);
+  arrastarRef.current = onArrastar;
+  soltarRef.current = onSoltar;
+  const { ref } = useCardPointerDrag({
+    scrollSelector: SCROLL_PENDENCIAS,
+    onMove: ({ x, y }) => arrastarRef.current(x, y),
+    onDrop: ({ x, y }) => soltarRef.current(x, y),
+    onCancel: () => soltarRef.current(-1, -1),
+  });
 
   return (
     <View
-      {...webDragProps}
+      ref={ref}
       style={[
         styles.card,
         {
           backgroundColor: theme.surface,
           borderColor: cor,
-          cursor: Platform.OS === 'web' ? 'grab' : undefined,
-        } as object,
+        },
       ]}
     >
       <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 15 }} numberOfLines={2}>
@@ -69,15 +78,17 @@ function PendenciaCard({
       <Text style={{ color: theme.text, fontSize: 13, lineHeight: 18 }}>{item.pendencia}</Text>
       <View style={styles.cardRodape}>
         <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: 12 }}>{formatYmdBR(item.data_retorno)}</Text>
-        {coluna === 'concluida' ? (
-          <Pressable onPress={onReabrir} hitSlop={6}>
-            <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Reabrir</Text>
-          </Pressable>
-        ) : (
-          <Pressable onPress={onConcluir} hitSlop={6}>
-            <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Concluir</Text>
-          </Pressable>
-        )}
+        <SemArraste>
+          {coluna === 'concluida' ? (
+            <Pressable onPress={onReabrir} hitSlop={6}>
+              <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Reabrir</Text>
+            </Pressable>
+          ) : (
+            <Pressable onPress={onConcluir} hitSlop={6}>
+              <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Concluir</Text>
+            </Pressable>
+          )}
+        </SemArraste>
       </View>
     </View>
   );
@@ -88,7 +99,16 @@ export default function PendenciasScreen() {
   const { canAccessScreen } = useAdminAuth();
   const qc = useQueryClient();
   const [dropOver, setDropOver] = useState<PendenciaColuna | null>(null);
+  const [rotuloArraste, setRotuloArraste] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const fantasmaRef = useRef<View>(null);
+  const posicaoArraste = useRef({ x: 0, y: 0 });
+  const colunaSobre = useRef<string | null>(null);
+  const arrasteId = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!rotuloArraste) return;
+    posicionarFantasma(fantasmaRef.current, posicaoArraste.current.x, posicaoArraste.current.y, true);
+  });
   const pode = canAccessScreen('acompanhamento') || canAccessScreen('pendencias');
 
   const q = useQuery({
@@ -119,6 +139,35 @@ export default function PendenciasScreen() {
     onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao atualizar pendência'),
   });
 
+  function colunaValida(valor: string | null): PendenciaColuna | null {
+    if (valor === 'atrasada' || valor === 'em_andamento' || valor === 'concluida') return valor;
+    return null;
+  }
+
+  function aoArrastar(item: ReuniaoClienteRow, x: number, y: number) {
+    posicaoArraste.current = { x, y };
+    posicionarFantasma(fantasmaRef.current, x, y, true);
+    if (arrasteId.current !== item.id) {
+      arrasteId.current = item.id;
+      setRotuloArraste(item.empresa_nome?.trim() || 'Pendência');
+    }
+    const col = colunaValida(colunaSobPonto(x, y));
+    if (colunaSobre.current !== col) {
+      colunaSobre.current = col;
+      setDropOver(col);
+    }
+  }
+
+  function aoSoltarPonto(item: ReuniaoClienteRow, x: number, y: number) {
+    const col = x < 0 ? null : colunaValida(colunaSobPonto(x, y));
+    posicionarFantasma(fantasmaRef.current, 0, 0, false);
+    arrasteId.current = null;
+    colunaSobre.current = null;
+    setRotuloArraste(null);
+    setDropOver(null);
+    if (col) aoSoltar(col, item.id);
+  }
+
   function aoSoltar(coluna: PendenciaColuna, id: string) {
     const atual = q.data?.find((r) => r.id === id);
     if (!atual) return;
@@ -141,11 +190,11 @@ export default function PendenciasScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
-      <ScrollView horizontal contentContainerStyle={{ padding: 16, gap: 12, minHeight: '100%' }}>
+      <ScrollView horizontal ref={marcarScrollKanban('pendencias')} contentContainerStyle={{ padding: 16, gap: 12, minHeight: '100%' }}>
         <View style={{ gap: 12, minWidth: COLUNAS.length * (COL_WIDTH + 12) }}>
           <PageHeader
             title="Pendências"
-            subtitle="Em andamento enquanto a data de retorno não vence. Depois disso, Atrasada. Concluída é manual."
+            subtitle="Segure o card e solte em outra coluna. Concluída é manual; Atrasada e Em andamento seguem a data de retorno."
           />
           {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando pendências…</Text> : null}
           {q.error ? (
@@ -160,36 +209,16 @@ export default function PendenciasScreen() {
           <View style={styles.board}>
             {COLUNAS.map((col) => {
               const itens = porColuna[col.key];
-              const webDrop =
-                Platform.OS === 'web'
-                  ? ({
-                      onDragOver: (e: { preventDefault?: () => void; dataTransfer?: { dropEffect: string } }) => {
-                        e.preventDefault?.();
-                        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-                      },
-                      onDragEnter: (e: { preventDefault?: () => void }) => {
-                        e.preventDefault?.();
-                        setDropOver(col.key);
-                      },
-                      onDragLeave: () => setDropOver((cur) => (cur === col.key ? null : cur)),
-                      onDrop: (e: { preventDefault?: () => void; dataTransfer?: { getData: (t: string) => string } }) => {
-                        e.preventDefault?.();
-                        const id = e.dataTransfer?.getData(DRAG_MIME) || e.dataTransfer?.getData('text/plain') || '';
-                        if (id) aoSoltar(col.key, id);
-                        setDropOver(null);
-                      },
-                    } as Record<string, unknown>)
-                  : {};
-
               return (
                 <View
                   key={col.key}
-                  {...webDrop}
+                  ref={marcarColuna(col.key)}
                   style={[
                     styles.coluna,
                     {
                       backgroundColor: theme.surfaceMuted,
                       borderColor: dropOver === col.key ? col.cor : theme.border,
+                      borderWidth: dropOver === col.key ? 2 : 1,
                     },
                   ]}
                 >
@@ -200,7 +229,7 @@ export default function PendenciasScreen() {
                       <Text style={{ color: '#1A1408', fontWeight: '800', fontSize: 12 }}>{itens.length}</Text>
                     </View>
                   </View>
-                  <ScrollView contentContainerStyle={{ padding: 10, gap: 10 }} nestedScrollEnabled>
+                  <ScrollView contentContainerStyle={{ padding: 10, gap: 10, flexGrow: 1 }} nestedScrollEnabled>
                     {itens.length === 0 ? (
                       <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center', marginTop: 12 }}>
                         Nenhuma pendência
@@ -213,6 +242,8 @@ export default function PendenciasScreen() {
                           cor={col.cor}
                           onConcluir={() => statusMutation.mutate({ id: item.id, concluida: true })}
                           onReabrir={() => statusMutation.mutate({ id: item.id, concluida: false })}
+                          onArrastar={(x, y) => aoArrastar(item, x, y)}
+                          onSoltar={(x, y) => aoSoltarPonto(item, x, y)}
                         />
                       ))
                     )}
@@ -223,6 +254,15 @@ export default function PendenciasScreen() {
           </View>
         </View>
       </ScrollView>
+      <View
+        ref={fantasmaRef}
+        pointerEvents="none"
+        style={[styles.fantasma, { backgroundColor: theme.surface, borderColor: theme.cadastroAction, opacity: 0 }]}
+      >
+        <Text style={{ color: theme.headerText, fontWeight: '800' }} numberOfLines={1}>
+          {rotuloArraste ?? 'Mover pendência'}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -235,4 +275,12 @@ const styles = StyleSheet.create({
   badge: { minWidth: 28, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   card: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 },
   cardRodape: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  fantasma: {
+    position: 'absolute',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    maxWidth: 240,
+  },
 });

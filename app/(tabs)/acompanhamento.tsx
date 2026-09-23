@@ -1,7 +1,7 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
@@ -27,15 +27,24 @@ import {
   agrupamentoAcompanhamentoVazio,
   iniciaisNome,
   rotuloTempoCadastro,
+  isAcompanhamentoColuna,
   type AcompanhamentoCliente,
   type AcompanhamentoColuna,
 } from '@/src/utils/acompanhamento';
+import {
+  colunaSobPonto,
+  marcarColuna,
+  marcarScrollKanban,
+  posicionarFantasma,
+  SemArraste,
+  useCardPointerDrag,
+} from '@/src/utils/kanban-drag';
 import { agoraHorarioLocal, hojeIsoLocal } from '@/src/utils/conversa-datetime';
 import { dataCalendarioBrasil, formatConversaQuando, formatDateTimeBR, formatYmdBR } from '@/src/utils/format';
 import { digitsOnlyPhone } from '@/src/utils/whatsapp';
 
 const COL_WIDTH = 300;
-const DRAG_MIME = 'application/x-acompanhamento-cliente';
+const SCROLL_ACOMPANHAMENTO = '[data-kanban-scroll="acompanhamento"]';
 const AVATAR = '#FF7A1A';
 const PENDENCIA = '#FF7A1A';
 
@@ -415,6 +424,8 @@ function KanbanCard({
   onRegistrarReuniao,
   onEditarFicha,
   onAbrirMover,
+  onArrastar,
+  onSoltar,
 }: {
   item: AcompanhamentoCliente;
   ultimoContato?: string | null;
@@ -425,39 +436,54 @@ function KanbanCard({
   onRegistrarReuniao: () => void;
   onEditarFicha: () => void;
   onAbrirMover: () => void;
+  onArrastar: (x: number, y: number) => void;
+  onSoltar: (x: number, y: number) => void;
 }) {
   const { theme } = useTheme();
   const empresa = `${item.empresa_nome ?? ''}`.trim();
   const pendencias = pendenciasAbertas;
-
-  const webDragProps =
-    Platform.OS === 'web'
-      ? ({
-          draggable: true,
-          onDragStart: (e: { dataTransfer?: { setData: (t: string, v: string) => void; effectAllowed: string } }) => {
-            e.dataTransfer?.setData(DRAG_MIME, item.id);
-            e.dataTransfer?.setData('text/plain', item.id);
-            if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
-          },
-        } as Record<string, unknown>)
-      : {};
+  const arrastarRef = useRef(onArrastar);
+  const soltarRef = useRef(onSoltar);
+  arrastarRef.current = onArrastar;
+  soltarRef.current = onSoltar;
+  const { ref: cardRef, arrastou } = useCardPointerDrag({
+    scrollSelector: SCROLL_ACOMPANHAMENTO,
+    onMove: ({ x, y }) => arrastarRef.current(x, y),
+    onDrop: ({ x, y }) => soltarRef.current(x, y),
+    onCancel: () => soltarRef.current(-1, -1),
+  });
 
   return (
     <View
-      {...webDragProps}
+      ref={cardRef}
       style={[
         styles.card,
         {
           backgroundColor: theme.surface,
           borderColor: theme.border,
-          cursor: Platform.OS === 'web' ? 'grab' : undefined,
-        } as object,
+        },
       ]}
     >
-      <Pressable onPress={onAbrir} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1, gap: 10 })}>
+      <Pressable
+        onPress={() => {
+          if (arrastou.current) {
+            arrastou.current = false;
+            return;
+          }
+          onAbrir();
+        }}
+        style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1, gap: 10 })}
+      >
       <View style={styles.cardTopo}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarTexto}>{iniciaisNome(item.nome)}</Text>
+        <View style={styles.avatarWrap}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarTexto}>{iniciaisNome(item.nome)}</Text>
+          </View>
+          {item.dias_trial_restantes != null ? (
+            <View style={styles.marcaTrial}>
+              <Text style={styles.marcaTrialTexto}>T</Text>
+            </View>
+          ) : null}
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={{ fontWeight: '800', fontSize: 15, color: theme.headerText }} numberOfLines={2}>
@@ -500,6 +526,7 @@ function KanbanCard({
         <Text style={{ color: theme.text, fontSize: 13, marginTop: 3 }}>{item.proxima_acao?.trim() || '—'}</Text>
       </View>
       </Pressable>
+      <SemArraste style={{ gap: 10 }}>
       <Pressable onPress={onEditarFicha} hitSlop={6}>
         <Text style={{ color: theme.cadastroAction, fontWeight: '700', fontSize: 12 }}>Editar ficha</Text>
       </Pressable>
@@ -522,6 +549,7 @@ function KanbanCard({
       <Pressable onPress={onAbrirMover} hitSlop={6}>
         <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'center' }}>Mover de coluna</Text>
       </Pressable>
+      </SemArraste>
     </View>
   );
 }
@@ -536,9 +564,8 @@ function KanbanColumn({
   onRegistrarReuniao,
   onEditarFicha,
   onAbrirMover,
-  onDragEnter,
-  onDragLeave,
-  onDropCliente,
+  onArrastar,
+  onSoltar,
   resumoReunioes,
 }: {
   coluna: (typeof ACOMPANHAMENTO_COLUNAS)[number];
@@ -551,36 +578,14 @@ function KanbanColumn({
   onRegistrarReuniao: (c: AcompanhamentoCliente) => void;
   onEditarFicha: (c: AcompanhamentoCliente) => void;
   onAbrirMover: (c: AcompanhamentoCliente) => void;
-  onDragEnter: () => void;
-  onDragLeave: () => void;
-  onDropCliente: (clienteId: string) => void;
+  onArrastar: (c: AcompanhamentoCliente, x: number, y: number) => void;
+  onSoltar: (c: AcompanhamentoCliente, x: number, y: number) => void;
 }) {
   const { theme } = useTheme();
 
-  const webDropProps =
-    Platform.OS === 'web'
-      ? ({
-          onDragOver: (e: { preventDefault?: () => void; dataTransfer?: { dropEffect: string } }) => {
-            e.preventDefault?.();
-            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-          },
-          onDragEnter: (e: { preventDefault?: () => void }) => {
-            e.preventDefault?.();
-            onDragEnter();
-          },
-          onDragLeave: () => onDragLeave(),
-          onDrop: (e: { preventDefault?: () => void; dataTransfer?: { getData: (t: string) => string } }) => {
-            e.preventDefault?.();
-            const id = e.dataTransfer?.getData(DRAG_MIME) || e.dataTransfer?.getData('text/plain') || '';
-            if (id) onDropCliente(id);
-            onDragLeave();
-          },
-        } as Record<string, unknown>)
-      : {};
-
   return (
     <View
-      {...webDropProps}
+      ref={marcarColuna(coluna.key)}
       style={[
         styles.column,
         {
@@ -611,6 +616,8 @@ function KanbanColumn({
               onRegistrarReuniao={() => onRegistrarReuniao(item)}
               onEditarFicha={() => onEditarFicha(item)}
               onAbrirMover={() => onAbrirMover(item)}
+              onArrastar={(x, y) => onArrastar(item, x, y)}
+              onSoltar={(x, y) => onSoltar(item, x, y)}
             />
           ))
         )}
@@ -630,6 +637,15 @@ export default function AcompanhamentoScreen() {
   const [clienteFicha, setClienteFicha] = useState<AcompanhamentoCliente | null>(null);
   const [clienteMover, setClienteMover] = useState<AcompanhamentoCliente | null>(null);
   const [dropOverColuna, setDropOverColuna] = useState<AcompanhamentoColuna | null>(null);
+  const [rotuloArraste, setRotuloArraste] = useState<string | null>(null);
+  const fantasmaRef = useRef<View>(null);
+  const posicaoArraste = useRef({ x: 0, y: 0 });
+  const colunaSobre = useRef<string | null>(null);
+  const arrasteId = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!rotuloArraste) return;
+    posicionarFantasma(fantasmaRef.current, posicaoArraste.current.x, posicaoArraste.current.y, true);
+  });
   const [erroMove, setErroMove] = useState<string | null>(null);
   const [erroFicha, setErroFicha] = useState<string | null>(null);
 
@@ -763,6 +779,7 @@ export default function AcompanhamentoScreen() {
     <View style={{ flex: 1, backgroundColor: theme.background }}>
       <ScrollView
         horizontal
+        ref={marcarScrollKanban('acompanhamento')}
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: 16, gap: 12, minHeight: '100%' }}
         showsHorizontalScrollIndicator
@@ -813,12 +830,29 @@ export default function AcompanhamentoScreen() {
                   setClienteFicha(c);
                 }}
                 onAbrirMover={setClienteMover}
-                onDragEnter={() => setDropOverColuna(col.key)}
-                onDragLeave={() => setDropOverColuna((cur) => (cur === col.key ? null : cur))}
-                onDropCliente={(clienteId) => {
-                  const atual = q.data?.clientes.find((c) => c.id === clienteId);
-                  if (!atual || atual.coluna === col.key) return;
-                  moverMutation.mutate({ clienteId, coluna: col.key });
+                onArrastar={(item, x, y) => {
+                  posicaoArraste.current = { x, y };
+                  posicionarFantasma(fantasmaRef.current, x, y, true);
+                  if (arrasteId.current !== item.id) {
+                    arrasteId.current = item.id;
+                    setRotuloArraste(item.nome);
+                  }
+                  const col = colunaSobPonto(x, y);
+                  const valida = isAcompanhamentoColuna(col) ? col : null;
+                  if (colunaSobre.current !== valida) {
+                    colunaSobre.current = valida;
+                    setDropOverColuna(valida);
+                  }
+                }}
+                onSoltar={(item, x, y) => {
+                  const col = x < 0 ? null : colunaSobPonto(x, y);
+                  posicionarFantasma(fantasmaRef.current, 0, 0, false);
+                  arrasteId.current = null;
+                  colunaSobre.current = null;
+                  setRotuloArraste(null);
+                  setDropOverColuna(null);
+                  if (!isAcompanhamentoColuna(col) || col === item.coluna) return;
+                  moverMutation.mutate({ clienteId: item.id, coluna: col });
                 }}
               />
             ))}
@@ -868,6 +902,15 @@ export default function AcompanhamentoScreen() {
           moverMutation.mutate({ clienteId: clienteMover.id, coluna });
         }}
       />
+      <View
+        ref={fantasmaRef}
+        pointerEvents="none"
+        style={[styles.fantasma, { backgroundColor: theme.surface, borderColor: theme.cadastroAction, opacity: 0 }]}
+      >
+        <Text style={{ color: theme.headerText, fontWeight: '800' }} numberOfLines={1}>
+          {rotuloArraste ?? 'Mover cliente'}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -892,6 +935,19 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   card: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 10 },
   cardTopo: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  avatarWrap: { width: 40, height: 40 },
+  marcaTrial: {
+    position: 'absolute',
+    top: -3,
+    right: -4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#F5C542',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  marcaTrialTexto: { color: '#1A1408', fontSize: 10, fontWeight: '800', lineHeight: 12 },
   avatar: {
     width: 40,
     height: 40,
@@ -925,4 +981,16 @@ const styles = StyleSheet.create({
   clienteFixo: { minHeight: 44, borderWidth: 1, borderRadius: 8, justifyContent: 'center', paddingHorizontal: 12 },
   moverCard: { width: '100%', maxWidth: 420, borderRadius: 12, borderWidth: 1, padding: 16, gap: 8 },
   moverOpt: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10 },
+  fantasma: {
+    position: 'absolute',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    maxWidth: 240,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 8,
+  },
 });
