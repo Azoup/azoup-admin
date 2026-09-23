@@ -6,6 +6,10 @@ const ACAO_LABELS: Record<string, string> = {
   LIMITES_OVERRIDE_UPSERT: 'Créditos ou limites alterados',
   STRIPE_COUPON_CREATE: 'Cupom de desconto criado',
   BILLING_TRIAL_DIAS_UPDATE: 'Período de trial alterado',
+  CONVERSA_UPDATE: 'Conversa editada',
+  CONVERSA_DELETE: 'Conversa excluída',
+  REUNIAO_UPDATE: 'Reunião editada',
+  REUNIAO_DELETE: 'Reunião excluída',
 };
 
 const ENTIDADE_LABELS: Record<string, string> = {
@@ -15,6 +19,8 @@ const ENTIDADE_LABELS: Record<string, string> = {
   admin_billing_settings: 'Configurações de cobrança',
   admin_coupons: 'Cupom promocional',
   clientes_azoup: 'Cliente',
+  admin_cliente_conversas: 'Conversa',
+  admin_cliente_reunioes: 'Reunião',
 };
 
 const CAMPO_LABELS: Record<string, string> = {
@@ -40,6 +46,14 @@ const CAMPO_LABELS: Record<string, string> = {
   active: 'Ativo',
   percent_off: 'Desconto (%)',
   amount_off_centavos: 'Desconto (centavos)',
+  cliente: 'Cliente',
+  data_conversa: 'Data da conversa',
+  hora_conversa: 'Horário',
+  descricao: 'O que foi conversado',
+  pendencia: 'Pendência',
+  data_retorno: 'Data do retorno',
+  assuntos: 'Assuntos tratados',
+  proxima_acao: 'Próxima ação',
 };
 
 const CAMPOS_IGNORADOS = new Set([
@@ -162,6 +176,20 @@ function montarResumo(acao: string, entidade: string, alteracoes: AuditAlteracao
   if (acao === 'STRIPE_COUPON_CREATE') {
     const codigo = alteracoes.find((l) => l.campo.toLowerCase().includes('código'));
     return codigo ? `Novo cupom "${codigo.para}" cadastrado no Stripe.` : 'Novo cupom promocional cadastrado.';
+  }
+  if (acao === 'CONVERSA_DELETE' || acao === 'REUNIAO_DELETE') {
+    const cliente = alteracoes.find((l) => l.campo === 'Cliente');
+    const tipo = acao === 'CONVERSA_DELETE' ? 'A conversa' : 'A reunião';
+    return cliente && cliente.de !== '—' ? `${tipo} de ${cliente.de} foi excluída.` : `${tipo} foi excluída.`;
+  }
+  if (acao === 'CONVERSA_UPDATE' || acao === 'REUNIAO_UPDATE') {
+    const tipo = acao === 'CONVERSA_UPDATE' ? 'conversa' : 'reunião';
+    if (alteracoes.length === 1) {
+      const l = alteracoes[0];
+      return `${l.campo}: ${l.de} → ${l.para}.`;
+    }
+    if (alteracoes.length > 1) return `${alteracoes.length} campos da ${tipo} foram alterados.`;
+    return `A ${tipo} foi editada.`;
   }
   if (alteracoes.length === 1) {
     const l = alteracoes[0];

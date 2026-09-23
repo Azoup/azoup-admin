@@ -13,6 +13,7 @@ import { RegistrarReuniaoModal } from '@/components/ui/RegistrarReuniaoModal';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
+import { registrarAuditoria } from '@/src/services/audit';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
 import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
@@ -450,7 +451,7 @@ function HistoricoClienteModal({
   onClose: () => void;
 }) {
   const { theme } = useTheme();
-  const { canDeleteRecords } = useAdminAuth();
+  const { adminProfile, canDeleteRecords } = useAdminAuth();
   const qc = useQueryClient();
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
@@ -484,10 +485,42 @@ function HistoricoClienteModal({
     void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
     void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
     void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+    void qc.invalidateQueries({ queryKey: ['admin_audit_logs'] });
   }
 
   const salvarReuniao = useMutation({
-    mutationFn: atualizarReuniaoCliente,
+    mutationFn: async (params: {
+      id: string;
+      pendencia: string;
+      dataRetorno: string;
+      assuntos: string;
+      proximaAcao: string;
+    }) => {
+      const anterior = (reunioesQ.data ?? []).find((r) => r.id === params.id);
+      await atualizarReuniaoCliente(params);
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'REUNIAO_UPDATE',
+          entidade: 'admin_cliente_reunioes',
+          entidade_id: params.id,
+          valores_anteriores: {
+            cliente: cliente?.nome ?? null,
+            pendencia: anterior?.pendencia ?? null,
+            data_retorno: anterior?.data_retorno ?? null,
+            assuntos: anterior?.assuntos ?? null,
+            proxima_acao: anterior?.proxima_acao ?? null,
+          },
+          valores_novos: {
+            cliente: cliente?.nome ?? null,
+            pendencia: params.pendencia.trim(),
+            data_retorno: params.dataRetorno.trim(),
+            assuntos: params.assuntos.trim() || null,
+            proxima_acao: params.proximaAcao.trim() || null,
+          },
+        },
+      );
+    },
     onSuccess: () => {
       setErro(null);
       setEditandoId(null);
@@ -497,7 +530,27 @@ function HistoricoClienteModal({
   });
 
   const excluirReuniao = useMutation({
-    mutationFn: excluirReuniaoCliente,
+    mutationFn: async (id: string) => {
+      if (!canDeleteRecords) throw new Error('Sem permissão para excluir.');
+      const anterior = (reunioesQ.data ?? []).find((r) => r.id === id);
+      await excluirReuniaoCliente(id);
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'REUNIAO_DELETE',
+          entidade: 'admin_cliente_reunioes',
+          entidade_id: id,
+          valores_anteriores: {
+            cliente: cliente?.nome ?? null,
+            pendencia: anterior?.pendencia ?? null,
+            data_retorno: anterior?.data_retorno ?? null,
+            assuntos: anterior?.assuntos ?? null,
+            proxima_acao: anterior?.proxima_acao ?? null,
+          },
+          valores_novos: null,
+        },
+      );
+    },
     onSuccess: () => {
       setErro(null);
       setConfirmarId(null);
@@ -508,7 +561,35 @@ function HistoricoClienteModal({
   });
 
   const salvarConversa = useMutation({
-    mutationFn: atualizarConversaCliente,
+    mutationFn: async (params: {
+      id: string;
+      dataConversa: string;
+      horaConversa: string;
+      descricao: string;
+    }) => {
+      const anterior = (conversasQ.data ?? []).find((c) => c.id === params.id);
+      await atualizarConversaCliente(params);
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'CONVERSA_UPDATE',
+          entidade: 'admin_cliente_conversas',
+          entidade_id: params.id,
+          valores_anteriores: {
+            cliente: cliente?.nome ?? null,
+            data_conversa: anterior?.data_conversa ?? null,
+            hora_conversa: anterior?.hora_conversa ?? null,
+            descricao: anterior?.descricao ?? null,
+          },
+          valores_novos: {
+            cliente: cliente?.nome ?? null,
+            data_conversa: params.dataConversa.trim(),
+            hora_conversa: params.horaConversa.trim() || null,
+            descricao: params.descricao.trim(),
+          },
+        },
+      );
+    },
     onSuccess: () => {
       setErro(null);
       setEditandoId(null);
@@ -518,7 +599,26 @@ function HistoricoClienteModal({
   });
 
   const excluirConversa = useMutation({
-    mutationFn: excluirConversaCliente,
+    mutationFn: async (id: string) => {
+      if (!canDeleteRecords) throw new Error('Sem permissão para excluir.');
+      const anterior = (conversasQ.data ?? []).find((c) => c.id === id);
+      await excluirConversaCliente(id);
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'CONVERSA_DELETE',
+          entidade: 'admin_cliente_conversas',
+          entidade_id: id,
+          valores_anteriores: {
+            cliente: cliente?.nome ?? null,
+            data_conversa: anterior?.data_conversa ?? null,
+            hora_conversa: anterior?.hora_conversa ?? null,
+            descricao: anterior?.descricao ?? null,
+          },
+          valores_novos: null,
+        },
+      );
+    },
     onSuccess: () => {
       setErro(null);
       setConfirmarId(null);

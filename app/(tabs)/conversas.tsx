@@ -18,6 +18,7 @@ import { ScreenCard } from '@/components/ui/ScreenCard';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
+import { registrarAuditoria } from '@/src/services/audit';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import {
   atualizarConversaCliente,
@@ -51,6 +52,7 @@ function ConversaFormModal({
   onSaved: () => void;
 }) {
   const { theme } = useTheme();
+  const { adminProfile } = useAdminAuth();
   const editando = Boolean(conversa);
   const [cliente, setCliente] = useState<ClienteAzoupRow | null>(null);
   const [dataConversa, setDataConversa] = useState(hojeIsoLocal);
@@ -78,12 +80,33 @@ function ConversaFormModal({
   const salvar = useMutation({
     mutationFn: async () => {
       if (conversa) {
-        return atualizarConversaCliente({
+        await atualizarConversaCliente({
           id: conversa.id,
           dataConversa,
           horaConversa,
           descricao,
         });
+        await registrarAuditoria(
+          { id: adminProfile?.id, email: adminProfile?.email },
+          {
+            acao: 'CONVERSA_UPDATE',
+            entidade: 'admin_cliente_conversas',
+            entidade_id: conversa.id,
+            valores_anteriores: {
+              cliente: rotuloClienteConversa(conversa),
+              data_conversa: conversa.data_conversa ?? null,
+              hora_conversa: conversa.hora_conversa ?? null,
+              descricao: conversa.descricao ?? null,
+            },
+            valores_novos: {
+              cliente: rotuloClienteConversa(conversa),
+              data_conversa: dataConversa.trim(),
+              hora_conversa: horaConversa.trim() || null,
+              descricao: descricao.trim(),
+            },
+          },
+        );
+        return;
       }
       if (!cliente) throw new Error('Selecione um cliente.');
       return criarConversaCliente({
@@ -205,10 +228,30 @@ export default function ConversasScreen() {
     void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
     void qc.invalidateQueries({ queryKey: ['clientes_com_conversas'] });
     void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+    void qc.invalidateQueries({ queryKey: ['admin_audit_logs'] });
   }
 
   const excluir = useMutation({
-    mutationFn: excluirConversaCliente,
+    mutationFn: async (id: string) => {
+      if (!canDeleteRecords) throw new Error('Sem permissão para excluir.');
+      const anterior = (conversasQ.data ?? []).find((c) => c.id === id);
+      await excluirConversaCliente(id);
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'CONVERSA_DELETE',
+          entidade: 'admin_cliente_conversas',
+          entidade_id: id,
+          valores_anteriores: {
+            cliente: anterior ? rotuloClienteConversa(anterior) : null,
+            data_conversa: anterior?.data_conversa ?? null,
+            hora_conversa: anterior?.hora_conversa ?? null,
+            descricao: anterior?.descricao ?? null,
+          },
+          valores_novos: null,
+        },
+      );
+    },
     onSuccess: () => {
       setErroLista(null);
       setConfirmarId(null);
