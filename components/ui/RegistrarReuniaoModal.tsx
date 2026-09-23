@@ -204,31 +204,27 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
                     ) : null}
                   </View>
                   <View style={styles.pendenciaLinha}>
-                    <View style={{ flex: 1 }}>
-                      <FormField label="Pendências geradas">
-                        <FormInput
-                          value={linha.texto}
-                          onChangeText={(texto) =>
-                            setLinhas((atual) => atual.map((item) => (item.id === linha.id ? { ...item, texto } : item)))
-                          }
-                          multiline
-                          placeholder="O que fica em aberto para o cliente"
-                          style={styles.area}
-                        />
-                      </FormField>
-                    </View>
-                    <View style={{ width: 160 }}>
-                      <FormField label="Data do retorno">
-                        <FormDateInput
-                          value={linha.dataRetorno}
-                          onChange={(dataRetorno) =>
-                            setLinhas((atual) =>
-                              atual.map((item) => (item.id === linha.id ? { ...item, dataRetorno } : item)),
-                            )
-                          }
-                        />
-                      </FormField>
-                    </View>
+                    <FormField label="Pendências geradas">
+                      <FormInput
+                        value={linha.texto}
+                        onChangeText={(texto) =>
+                          setLinhas((atual) => atual.map((item) => (item.id === linha.id ? { ...item, texto } : item)))
+                        }
+                        multiline
+                        placeholder="O que fica em aberto para o cliente"
+                        style={styles.areaPendencia}
+                      />
+                    </FormField>
+                    <FormField label="Data do retorno">
+                      <FormDateInput
+                        value={linha.dataRetorno}
+                        onChange={(dataRetorno) =>
+                          setLinhas((atual) =>
+                            atual.map((item) => (item.id === linha.id ? { ...item, dataRetorno } : item)),
+                          )
+                        }
+                      />
+                    </FormField>
                   </View>
                 </View>
               ))}
@@ -289,9 +285,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   area: { minHeight: 64, textAlignVertical: 'top' },
+  areaPendencia: { height: 120, minHeight: 120, textAlignVertical: 'top', paddingTop: 10 },
   pendenciaBloco: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 8 },
   pendenciaTopo: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  pendenciaLinha: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  pendenciaLinha: { gap: 8 },
   adicionar: {
     minHeight: 40,
     borderWidth: 1,

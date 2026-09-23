@@ -1,18 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
+import { FormDateInput } from '@/components/ui/FormDateInput';
+import { FormField } from '@/components/ui/FormField';
+import { FormInput } from '@/components/ui/FormInput';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
+import { listarClientesParaSelecao } from '@/src/services/repos/conversas-repo';
 import {
   colunaPendencia,
+  criarPendenciaAvulsa,
   definirReuniaoConcluida,
   listarReunioes,
   type PendenciaColuna,
   type ReuniaoClienteRow,
 } from '@/src/services/repos/reunioes-repo';
+import type { ClienteAzoupRow } from '@/src/types/azoup';
+import { rotuloCliente } from '@/src/utils/cliente-label';
 import { formatYmdBR } from '@/src/utils/format';
 import {
   colunaSobPonto,
@@ -94,10 +103,100 @@ function PendenciaCard({
   );
 }
 
+function NovaPendenciaModal({
+  visible,
+  adminEmail,
+  onClose,
+  onSaved,
+}: {
+  visible: boolean;
+  adminEmail: string | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { theme } = useTheme();
+  const [cliente, setCliente] = useState<ClienteAzoupRow | null>(null);
+  const [texto, setTexto] = useState('');
+  const [dataRetorno, setDataRetorno] = useState('');
+  const [erro, setErro] = useState<string | null>(null);
+
+  const clientesQ = useQuery({
+    queryKey: ['clientes_para_selecao'],
+    queryFn: listarClientesParaSelecao,
+    enabled: visible,
+  });
+
+  useEffect(() => {
+    if (!visible) return;
+    setCliente(null);
+    setTexto('');
+    setDataRetorno('');
+    setErro(null);
+  }, [visible]);
+
+  const salvar = useMutation({
+    mutationFn: () =>
+      criarPendenciaAvulsa({
+        clienteId: cliente?.id ?? '',
+        empresaNome: cliente ? rotuloCliente(cliente) : null,
+        pendencia: texto,
+        dataRetorno,
+        adminEmail,
+      }),
+    onSuccess: () => {
+      setErro(null);
+      onSaved();
+      onClose();
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao cadastrar pendência'),
+  });
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <ScrollView
+          style={{ width: '100%', maxWidth: 520, maxHeight: '90%' }}
+          contentContainerStyle={{ flexGrow: 0 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 18 }}>Nova pendência</Text>
+            <FormField label="Cliente" required>
+              <ClienteSearchPicker
+                todosClientes={clientesQ.data ?? []}
+                value={cliente}
+                onChange={setCliente}
+                loading={clientesQ.isLoading}
+                placeholderBusca="Buscar cliente por nome, e-mail ou telefone…"
+              />
+            </FormField>
+            <FormField label="Pendência" required>
+              <FormInput
+                value={texto}
+                onChangeText={setTexto}
+                placeholder="O que precisa ser feito"
+                multiline
+                style={{ minHeight: 88, height: 88, textAlignVertical: 'top', paddingTop: 10 }}
+              />
+            </FormField>
+            <FormField label="Data do retorno" required>
+              <FormDateInput value={dataRetorno} onChange={setDataRetorno} />
+            </FormField>
+            {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
+            <PrimaryButton label="Salvar pendência" loading={salvar.isPending} onPress={() => salvar.mutate()} />
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
 export default function PendenciasScreen() {
   const { theme } = useTheme();
-  const { canAccessScreen } = useAdminAuth();
+  const { canAccessScreen, session, adminProfile } = useAdminAuth();
   const qc = useQueryClient();
+  const [novaAberta, setNovaAberta] = useState(false);
   const [dropOver, setDropOver] = useState<PendenciaColuna | null>(null);
   const [rotuloArraste, setRotuloArraste] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -194,7 +293,18 @@ export default function PendenciasScreen() {
         <View style={{ gap: 12, minWidth: COLUNAS.length * (COL_WIDTH + 12) }}>
           <PageHeader
             title="Pendências"
-            subtitle="Segure o card e solte em outra coluna. Concluída é manual; Atrasada e Em andamento seguem a data de retorno."
+            subtitle="Cadastre uma pendência aqui ou ela entra ao registrar uma reunião. Atrasada e Em andamento seguem a data de retorno."
+            trailing={
+              <Pressable
+                onPress={() => setNovaAberta(true)}
+                style={({ pressed }) => [
+                  styles.novaBtn,
+                  { backgroundColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 },
+                ]}
+              >
+                <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 13 }}>Nova pendência</Text>
+              </Pressable>
+            }
           />
           {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando pendências…</Text> : null}
           {q.error ? (
@@ -254,6 +364,15 @@ export default function PendenciasScreen() {
           </View>
         </View>
       </ScrollView>
+      <NovaPendenciaModal
+        visible={novaAberta}
+        adminEmail={adminProfile?.email ?? session?.user?.email ?? null}
+        onClose={() => setNovaAberta(false)}
+        onSaved={() => {
+          void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
+          void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
+        }}
+      />
       <View
         ref={fantasmaRef}
         pointerEvents="none"
@@ -275,6 +394,15 @@ const styles = StyleSheet.create({
   badge: { minWidth: 28, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   card: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 },
   cardRodape: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  novaBtn: { minHeight: 36, borderRadius: 8, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalCard: { width: '100%', borderRadius: 16, borderWidth: 1, padding: 16, gap: 12 },
   fantasma: {
     position: 'absolute',
     borderWidth: 1,

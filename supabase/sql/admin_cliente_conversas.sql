@@ -44,6 +44,8 @@ alter table public.admin_cliente_conversas enable row level security;
 
 drop policy if exists painel_admin_conversas_select on public.admin_cliente_conversas;
 drop policy if exists painel_admin_conversas_insert on public.admin_cliente_conversas;
+drop policy if exists painel_admin_conversas_update on public.admin_cliente_conversas;
+drop policy if exists painel_admin_conversas_delete on public.admin_cliente_conversas;
 
 create policy painel_admin_conversas_select
 on public.admin_cliente_conversas
@@ -56,3 +58,16 @@ on public.admin_cliente_conversas
 for insert
 to authenticated
 with check (public.painel_admin_ativo());
+
+create policy painel_admin_conversas_update
+on public.admin_cliente_conversas
+for update
+to authenticated
+using (public.painel_admin_ativo())
+with check (public.painel_admin_ativo());
+
+create policy painel_admin_conversas_delete
+on public.admin_cliente_conversas
+for delete
+to authenticated
+using (public.painel_admin_ativo());

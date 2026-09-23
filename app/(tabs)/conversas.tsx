@@ -1,141 +1,131 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { FlatList, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { ClienteMultiSelect } from '@/components/ui/ClienteMultiSelect';
 import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
 import { ConversaClienteCard } from '@/components/ui/ConversaClienteCard';
 import { FormDateInput } from '@/components/ui/FormDateInput';
-import { FormTimeInput } from '@/components/ui/FormTimeInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
+import { FormTimeInput } from '@/components/ui/FormTimeInput';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ScreenCard } from '@/components/ui/ScreenCard';
-import { SecondaryButton } from '@/components/ui/SecondaryButton';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import {
+  atualizarConversaCliente,
   criarConversaCliente,
-  listarClientesComConversas,
+  excluirConversaCliente,
   listarClientesParaSelecao,
   listarConversasClientes,
+  rotuloClienteConversa,
+  type ClienteConversaComCliente,
 } from '@/src/services/repos/conversas-repo';
 import type { ClienteAzoupRow } from '@/src/types/azoup';
-import { rotuloCliente } from '@/src/utils/cliente-label';
 import { agoraHorarioLocal, hojeIsoLocal } from '@/src/utils/conversa-datetime';
 
-export default function ConversasScreen() {
+function ConversaFormModal({
+  visible,
+  conversa,
+  clienteInicial,
+  todosClientes,
+  loadingClientes,
+  adminEmail,
+  onClose,
+  onSaved,
+}: {
+  visible: boolean;
+  conversa: ClienteConversaComCliente | null;
+  clienteInicial: ClienteAzoupRow | null;
+  todosClientes: ClienteAzoupRow[];
+  loadingClientes: boolean;
+  adminEmail?: string | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { theme } = useTheme();
-  const { adminProfile, canAccessScreen } = useAdminAuth();
-  const qc = useQueryClient();
-  const { cliente_id: clienteIdParam } = useLocalSearchParams<{ cliente_id?: string }>();
-  const clienteIdInicial = `${clienteIdParam ?? ''}`.trim();
-  const clientePreSelecionadoRef = useRef<string | null>(null);
-
+  const editando = Boolean(conversa);
   const [cliente, setCliente] = useState<ClienteAzoupRow | null>(null);
   const [dataConversa, setDataConversa] = useState(hojeIsoLocal);
   const [horaConversa, setHoraConversa] = useState(agoraHorarioLocal);
   const [descricao, setDescricao] = useState('');
-  const [filtroCliente, setFiltroCliente] = useState<ClienteAzoupRow | null>(null);
-
-  const clientesQ = useQuery({
-    queryKey: ['clientes_selecao_conversas'],
-    queryFn: listarClientesParaSelecao,
-    enabled: canAccessScreen('conversas'),
-  });
-
-  const clientesComHistoricoQ = useQuery({
-    queryKey: ['clientes_com_conversas'],
-    queryFn: listarClientesComConversas,
-    enabled: canAccessScreen('conversas'),
-  });
-
-  const conversasQ = useQuery({
-    queryKey: ['admin_cliente_conversas', filtroCliente?.id ?? null],
-    queryFn: () => listarConversasClientes({ clienteId: filtroCliente?.id ?? null }),
-    enabled: canAccessScreen('conversas'),
-  });
-
-  const todosClientes = clientesQ.data ?? [];
-  const clientesComHistorico = clientesComHistoricoQ.data ?? [];
+  const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!clienteIdInicial || !todosClientes.length) return;
-    if (clientePreSelecionadoRef.current === clienteIdInicial) return;
-
-    const encontrado = todosClientes.find((c) => c.id === clienteIdInicial);
-    if (!encontrado) return;
-
-    clientePreSelecionadoRef.current = clienteIdInicial;
-    setCliente(encontrado);
-    setFiltroCliente(encontrado);
+    if (!visible) return;
+    setErro(null);
+    if (conversa) {
+      const encontrado = todosClientes.find((c) => c.id === conversa.cliente_id) ?? null;
+      setCliente(encontrado);
+      setDataConversa(`${conversa.data_conversa ?? ''}`.slice(0, 10));
+      setHoraConversa(`${conversa.hora_conversa ?? ''}`.slice(0, 5));
+      setDescricao(conversa.descricao ?? '');
+      return;
+    }
+    setCliente(clienteInicial);
     setDataConversa(hojeIsoLocal());
     setHoraConversa(agoraHorarioLocal());
     setDescricao('');
-  }, [clienteIdInicial, todosClientes]);
+  }, [visible, conversa, clienteInicial, todosClientes]);
 
-  const createMutation = useMutation({
+  const salvar = useMutation({
     mutationFn: async () => {
+      if (conversa) {
+        return atualizarConversaCliente({
+          id: conversa.id,
+          dataConversa,
+          horaConversa,
+          descricao,
+        });
+      }
       if (!cliente) throw new Error('Selecione um cliente.');
       return criarConversaCliente({
         clienteId: cliente.id,
         dataConversa,
         horaConversa,
         descricao,
-        adminEmail: adminProfile?.email,
+        adminEmail,
       });
     },
-    onSuccess: async () => {
-      setDescricao('');
-      setDataConversa(hojeIsoLocal());
-      setHoraConversa(agoraHorarioLocal());
-      await qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
-      await qc.invalidateQueries({ queryKey: ['clientes_com_conversas'] });
+    onSuccess: () => {
+      setErro(null);
+      onSaved();
+      onClose();
     },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao salvar conversa'),
   });
 
-  const loadingClientes = clientesQ.isLoading || clientesComHistoricoQ.isLoading;
-
-  if (!canAccessScreen('conversas')) {
-    return (
-      <View style={{ flex: 1, padding: 16, backgroundColor: theme.background }}>
-        <Text style={{ color: theme.warning, fontWeight: '800' }}>Seu perfil não tem acesso a Conversas.</Text>
-      </View>
-    );
-  }
-
   return (
-    <FlatList
-      style={{ flex: 1, backgroundColor: theme.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
-      data={conversasQ.data ?? []}
-      keyExtractor={(item) => item.id}
-      refreshing={conversasQ.isRefetching}
-      onRefresh={() => {
-        conversasQ.refetch();
-        clientesComHistoricoQ.refetch();
-      }}
-      keyboardShouldPersistTaps="handled"
-      ListHeaderComponent={
-        <View style={{ gap: 12 }}>
-          <PageHeader
-            title="Histórico de conversas"
-            subtitle="Selecione o cliente na lista ou busque por nome. Sem busca, aparecem os que já têm conversas."
-          />
-
-          <ScreenCard style={{ gap: 12 }}>
-            <SectionTitle>Novo registro</SectionTitle>
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <ScrollView
+          style={{ width: '100%', maxWidth: 520, maxHeight: '90%' }}
+          contentContainerStyle={{ flexGrow: 0 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 18 }}>
+              {editando ? 'Editar conversa' : 'Nova conversa'}
+            </Text>
             <FormField label="Cliente" required>
-              <ClienteSearchPicker
-                todosClientes={todosClientes}
-                clientesPadrao={clientesComHistorico}
-                value={cliente}
-                onChange={setCliente}
-                loading={loadingClientes}
-              />
+              {editando ? (
+                <Text style={{ color: theme.headerText, fontWeight: '700' }}>
+                  {conversa ? rotuloClienteConversa(conversa) : 'Cliente'}
+                </Text>
+              ) : (
+                <ClienteSearchPicker
+                  todosClientes={todosClientes}
+                  value={cliente}
+                  onChange={setCliente}
+                  loading={loadingClientes}
+                />
+              )}
             </FormField>
             <FormField label="Data da conversa" required>
               <FormDateInput value={dataConversa} onChange={setDataConversa} />
@@ -151,65 +141,217 @@ export default function ConversasScreen() {
                 numberOfLines={4}
                 textAlignVertical="top"
                 placeholder="Descreva o assunto, combinados, pendências…"
-                style={{ minHeight: 100, paddingTop: 12 }}
+                style={{ minHeight: 100, height: 100, paddingTop: 12 }}
               />
             </FormField>
+            {erro ? <Text style={{ color: theme.error, fontWeight: '700' }}>{erro}</Text> : null}
             <PrimaryButton
-              label={createMutation.isPending ? 'Salvando…' : 'Registrar conversa'}
-              loading={createMutation.isPending}
-              onPress={() => createMutation.mutate()}
+              label={editando ? 'Salvar alterações' : 'Registrar conversa'}
+              loading={salvar.isPending}
+              onPress={() => salvar.mutate()}
             />
-            {createMutation.error ? (
-              <Text style={{ color: theme.error, fontWeight: '700' }}>{(createMutation.error as Error).message}</Text>
-            ) : null}
-          </ScreenCard>
+          </View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
 
-          <ScreenCard style={{ gap: 10 }}>
-            <View style={styles.filtroRow}>
-              <SectionTitle>Filtrar histórico</SectionTitle>
-              {filtroCliente ? (
-                <SecondaryButton
-                  label="Ver todos"
-                  onPress={() => setFiltroCliente(null)}
-                  style={{ paddingHorizontal: 12, minHeight: 36 }}
-                />
-              ) : null}
-            </View>
-            <ClienteSearchPicker
-              todosClientes={todosClientes}
-              clientesPadrao={clientesComHistorico}
-              value={filtroCliente}
-              onChange={setFiltroCliente}
-              loading={loadingClientes}
-              placeholderBusca="Buscar cliente para filtrar o histórico…"
-              mensagemListaVazia="Nenhum cliente com esse nome."
+export default function ConversasScreen() {
+  const { theme } = useTheme();
+  const { adminProfile, canAccessScreen } = useAdminAuth();
+  const qc = useQueryClient();
+  const { cliente_id: clienteIdParam } = useLocalSearchParams<{ cliente_id?: string }>();
+  const clienteIdInicial = `${clienteIdParam ?? ''}`.trim();
+  const clientePreSelecionadoRef = useRef<string | null>(null);
+
+  const [formAberto, setFormAberto] = useState(false);
+  const [conversaEditando, setConversaEditando] = useState<ClienteConversaComCliente | null>(null);
+  const [clienteInicial, setClienteInicial] = useState<ClienteAzoupRow | null>(null);
+  const [filtroClientes, setFiltroClientes] = useState<ClienteAzoupRow[]>([]);
+  const [confirmarId, setConfirmarId] = useState<string | null>(null);
+  const [erroLista, setErroLista] = useState<string | null>(null);
+
+  const clientesQ = useQuery({
+    queryKey: ['clientes_selecao_conversas'],
+    queryFn: listarClientesParaSelecao,
+    enabled: canAccessScreen('conversas'),
+  });
+
+  const filtroIds = filtroClientes.map((c) => c.id).sort();
+  const conversasQ = useQuery({
+    queryKey: ['admin_cliente_conversas', 'lista', filtroIds.join(',')],
+    queryFn: () => listarConversasClientes({ clienteIds: filtroIds }),
+    enabled: canAccessScreen('conversas'),
+  });
+
+  const todosClientes = clientesQ.data ?? [];
+
+  useEffect(() => {
+    if (!clienteIdInicial || !todosClientes.length) return;
+    if (clientePreSelecionadoRef.current === clienteIdInicial) return;
+    const encontrado = todosClientes.find((c) => c.id === clienteIdInicial);
+    if (!encontrado) return;
+    clientePreSelecionadoRef.current = clienteIdInicial;
+    setFiltroClientes([encontrado]);
+    setClienteInicial(encontrado);
+    setConversaEditando(null);
+    setFormAberto(true);
+  }, [clienteIdInicial, todosClientes]);
+
+  function invalidar() {
+    void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
+    void qc.invalidateQueries({ queryKey: ['clientes_com_conversas'] });
+    void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+  }
+
+  const excluir = useMutation({
+    mutationFn: excluirConversaCliente,
+    onSuccess: () => {
+      setErroLista(null);
+      setConfirmarId(null);
+      invalidar();
+    },
+    onError: (e) => setErroLista(e instanceof Error ? e.message : 'Erro ao excluir conversa'),
+  });
+
+  if (!canAccessScreen('conversas')) {
+    return (
+      <View style={{ flex: 1, padding: 16, backgroundColor: theme.background }}>
+        <Text style={{ color: theme.warning, fontWeight: '800' }}>Seu perfil não tem acesso a Conversas.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ flex: 1, backgroundColor: theme.background }}>
+      <FlatList
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
+        data={conversasQ.data ?? []}
+        keyExtractor={(item) => item.id}
+        refreshing={conversasQ.isRefetching}
+        onRefresh={() => conversasQ.refetch()}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={
+          <View style={{ gap: 12 }}>
+            <PageHeader
+              title="Histórico de conversas"
+              subtitle="Filtre por um ou mais clientes. O registro novo abre em uma janela."
+              trailing={
+                <Pressable
+                  onPress={() => {
+                    setConversaEditando(null);
+                    setClienteInicial(null);
+                    setFormAberto(true);
+                  }}
+                  style={({ pressed }) => [
+                    styles.novaBtn,
+                    { backgroundColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 },
+                  ]}
+                >
+                  <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 13 }}>Nova conversa</Text>
+                </Pressable>
+              }
             />
-            {filtroCliente ? (
+
+            <ScreenCard style={{ gap: 10 }}>
+              <SectionTitle>Filtrar clientes</SectionTitle>
+              <ClienteMultiSelect
+                clientes={todosClientes}
+                selecionados={filtroClientes}
+                onChange={setFiltroClientes}
+                loading={clientesQ.isLoading}
+              />
               <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-                Exibindo conversas de: <Text style={{ fontWeight: '700' }}>{rotuloCliente(filtroCliente)}</Text>
+                {filtroClientes.length === 0
+                  ? 'Exibindo conversas de todos os clientes.'
+                  : `Exibindo conversas de ${filtroClientes.length} cliente${filtroClientes.length === 1 ? '' : 's'}.`}
               </Text>
-            ) : (
-              <Text style={{ color: theme.textMuted, fontSize: 13 }}>Exibindo conversas de todos os clientes.</Text>
-            )}
-          </ScreenCard>
+            </ScreenCard>
 
-          <SectionTitle>Registros</SectionTitle>
-        </View>
-      }
-      ListEmptyComponent={
-        conversasQ.isLoading ? (
-          <Text style={{ color: theme.textMuted }}>Carregando histórico…</Text>
-        ) : conversasQ.error ? (
-          <Text style={{ color: theme.error }}>{(conversasQ.error as Error).message}</Text>
-        ) : (
-          <Text style={{ color: theme.textMuted }}>Nenhuma conversa registrada ainda.</Text>
-        )
-      }
-      renderItem={({ item }) => <ConversaClienteCard conversa={item} />}
-    />
+            {erroLista ? <Text style={{ color: theme.error, fontWeight: '700' }}>{erroLista}</Text> : null}
+            <SectionTitle>Registros</SectionTitle>
+          </View>
+        }
+        ListEmptyComponent={
+          conversasQ.isLoading ? (
+            <Text style={{ color: theme.textMuted }}>Carregando histórico…</Text>
+          ) : conversasQ.error ? (
+            <Text style={{ color: theme.error }}>{(conversasQ.error as Error).message}</Text>
+          ) : (
+            <Text style={{ color: theme.textMuted }}>Nenhuma conversa registrada ainda.</Text>
+          )
+        }
+        renderItem={({ item }) => (
+          <ConversaClienteCard
+            conversa={item}
+            acoes={
+              confirmarId === item.id ? (
+                <>
+                  <Text style={{ color: theme.error, fontWeight: '700', fontSize: 12 }}>Excluir esta conversa?</Text>
+                  <Pressable onPress={() => excluir.mutate(item.id)} hitSlop={6}>
+                    <Text style={{ color: theme.error, fontWeight: '800', fontSize: 12 }}>Excluir</Text>
+                  </Pressable>
+                  <Pressable onPress={() => setConfirmarId(null)} hitSlop={6}>
+                    <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: 12 }}>Cancelar</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Pressable
+                    onPress={() => {
+                      setErroLista(null);
+                      setConfirmarId(null);
+                      setConversaEditando(item);
+                      setClienteInicial(null);
+                      setFormAberto(true);
+                    }}
+                    hitSlop={6}
+                  >
+                    <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Editar</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      setErroLista(null);
+                      setConfirmarId(item.id);
+                    }}
+                    hitSlop={6}
+                  >
+                    <Text style={{ color: theme.error, fontWeight: '800', fontSize: 12 }}>Excluir</Text>
+                  </Pressable>
+                </>
+              )
+            }
+          />
+        )}
+      />
+
+      <ConversaFormModal
+        visible={formAberto}
+        conversa={conversaEditando}
+        clienteInicial={clienteInicial}
+        todosClientes={todosClientes}
+        loadingClientes={clientesQ.isLoading}
+        adminEmail={adminProfile?.email}
+        onClose={() => {
+          setFormAberto(false);
+          setConversaEditando(null);
+        }}
+        onSaved={invalidar}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  filtroRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  novaBtn: { minHeight: 36, borderRadius: 8, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalCard: { width: '100%', borderRadius: 16, borderWidth: 1, padding: 16, gap: 12 },
 });

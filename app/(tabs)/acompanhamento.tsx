@@ -15,11 +15,14 @@ import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
-import { criarConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
+import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
 import {
+  atualizarReuniaoCliente,
+  excluirReuniaoCliente,
   listarReunioesDoCliente,
   resumirReunioesPorCliente,
   type ResumoReunioesCliente,
+  type ReuniaoClienteRow,
 } from '@/src/services/repos/reunioes-repo';
 import { moverClienteKanban, salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
 import {
@@ -41,6 +44,7 @@ import {
 } from '@/src/utils/kanban-drag';
 import { agoraHorarioLocal, hojeIsoLocal } from '@/src/utils/conversa-datetime';
 import { dataCalendarioBrasil, formatConversaQuando, formatDateTimeBR, formatYmdBR } from '@/src/utils/format';
+import type { AdminClienteConversaRow } from '@/src/types/azoup';
 import { digitsOnlyPhone } from '@/src/utils/whatsapp';
 
 const COL_WIDTH = 300;
@@ -306,6 +310,135 @@ function MoverModal({
   );
 }
 
+function AcoesRegistro({
+  confirmar,
+  onEditar,
+  onPedirExclusao,
+  onCancelarExclusao,
+  onConfirmarExclusao,
+}: {
+  confirmar: boolean;
+  onEditar: () => void;
+  onPedirExclusao: () => void;
+  onCancelarExclusao: () => void;
+  onConfirmarExclusao: () => void;
+}) {
+  const { theme } = useTheme();
+  if (confirmar) {
+    return (
+      <View style={{ gap: 6, alignItems: 'flex-end' }}>
+        <Text style={{ color: theme.error, fontSize: 12, fontWeight: '700' }}>Excluir este registro?</Text>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <Pressable onPress={onConfirmarExclusao} hitSlop={6}>
+            <Text style={{ color: theme.error, fontWeight: '800', fontSize: 12 }}>Excluir</Text>
+          </Pressable>
+          <Pressable onPress={onCancelarExclusao} hitSlop={6}>
+            <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: 12 }}>Cancelar</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+  return (
+    <View style={{ flexDirection: 'row', gap: 12 }}>
+      <Pressable onPress={onEditar} hitSlop={6}>
+        <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Editar</Text>
+      </Pressable>
+      <Pressable onPress={onPedirExclusao} hitSlop={6}>
+        <Text style={{ color: theme.error, fontWeight: '800', fontSize: 12 }}>Excluir</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function EditarReuniaoBloco({
+  reuniao,
+  saving,
+  onCancelar,
+  onSalvar,
+}: {
+  reuniao: ReuniaoClienteRow;
+  saving: boolean;
+  onCancelar: () => void;
+  onSalvar: (valor: { pendencia: string; dataRetorno: string; assuntos: string; proximaAcao: string }) => void;
+}) {
+  const { theme } = useTheme();
+  const [pendencia, setPendencia] = useState(reuniao.pendencia ?? '');
+  const [dataRetorno, setDataRetorno] = useState(`${reuniao.data_retorno ?? ''}`.slice(0, 10));
+  const [assuntos, setAssuntos] = useState(reuniao.assuntos ?? '');
+  const [proximaAcao, setProximaAcao] = useState(reuniao.proxima_acao ?? '');
+
+  return (
+    <View style={{ gap: 8, marginTop: 8 }}>
+      <FormField label="Pendência">
+        <FormInput value={pendencia} onChangeText={setPendencia} multiline style={styles.areaHistorico} />
+      </FormField>
+      <FormField label="Data do retorno">
+        <FormDateInput value={dataRetorno} onChange={setDataRetorno} />
+      </FormField>
+      <FormField label="Assuntos tratados">
+        <FormInput value={assuntos} onChangeText={setAssuntos} multiline style={styles.areaHistorico} />
+      </FormField>
+      <FormField label="Próxima ação">
+        <FormInput value={proximaAcao} onChangeText={setProximaAcao} multiline style={styles.areaHistorico} />
+      </FormField>
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <PrimaryButton
+          label="Salvar"
+          loading={saving}
+          onPress={() => onSalvar({ pendencia, dataRetorno, assuntos, proximaAcao })}
+          style={{ flex: 1 }}
+        />
+        <Pressable onPress={onCancelar} style={styles.cancelarHistorico}>
+          <Text style={{ color: theme.textMuted, fontWeight: '800' }}>Cancelar</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function EditarConversaBloco({
+  conversa,
+  saving,
+  onCancelar,
+  onSalvar,
+}: {
+  conversa: AdminClienteConversaRow;
+  saving: boolean;
+  onCancelar: () => void;
+  onSalvar: (valor: { dataConversa: string; horaConversa: string; descricao: string }) => void;
+}) {
+  const { theme } = useTheme();
+  const [dataConversa, setDataConversa] = useState(`${conversa.data_conversa ?? ''}`.slice(0, 10));
+  const [horaConversa, setHoraConversa] = useState(`${conversa.hora_conversa ?? ''}`.slice(0, 5));
+  const [descricao, setDescricao] = useState(conversa.descricao ?? '');
+
+  return (
+    <View style={{ gap: 8, marginTop: 8 }}>
+      <FormField label="Data">
+        <FormDateInput value={dataConversa} onChange={setDataConversa} />
+      </FormField>
+      <FormField label="Horário">
+        <FormTimeInput value={horaConversa} onChange={setHoraConversa} />
+      </FormField>
+      <FormField label="O que foi conversado">
+        <FormInput value={descricao} onChangeText={setDescricao} multiline style={styles.areaHistorico} />
+      </FormField>
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <PrimaryButton
+          label="Salvar"
+          loading={saving}
+          onPress={() => onSalvar({ dataConversa, horaConversa, descricao })}
+          style={{ flex: 1 }}
+        />
+        <Pressable onPress={onCancelar} style={styles.cancelarHistorico}>
+          <Text style={{ color: theme.textMuted, fontWeight: '800' }}>Cancelar</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function HistoricoClienteModal({
   cliente,
   visible,
@@ -316,6 +449,10 @@ function HistoricoClienteModal({
   onClose: () => void;
 }) {
   const { theme } = useTheme();
+  const qc = useQueryClient();
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [confirmarId, setConfirmarId] = useState<string | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
   const telefone = cliente?.telefone?.trim() || '';
   const celular = cliente?.celular?.trim() || '';
   const contato = [telefone, celular && celular !== telefone ? celular : ''].filter(Boolean).join(' · ') || '—';
@@ -332,6 +469,64 @@ function HistoricoClienteModal({
     queryFn: () => listarConversasClientes({ clienteId: cliente!.id, limit: 50 }),
     enabled: visible && Boolean(cliente?.id),
   });
+
+  useEffect(() => {
+    if (visible) return;
+    setEditandoId(null);
+    setConfirmarId(null);
+    setErro(null);
+  }, [visible]);
+
+  function invalidarHistorico() {
+    void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
+    void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
+    void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
+    void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+  }
+
+  const salvarReuniao = useMutation({
+    mutationFn: atualizarReuniaoCliente,
+    onSuccess: () => {
+      setErro(null);
+      setEditandoId(null);
+      invalidarHistorico();
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao salvar reunião'),
+  });
+
+  const excluirReuniao = useMutation({
+    mutationFn: excluirReuniaoCliente,
+    onSuccess: () => {
+      setErro(null);
+      setConfirmarId(null);
+      setEditandoId(null);
+      invalidarHistorico();
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao excluir reunião'),
+  });
+
+  const salvarConversa = useMutation({
+    mutationFn: atualizarConversaCliente,
+    onSuccess: () => {
+      setErro(null);
+      setEditandoId(null);
+      invalidarHistorico();
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao salvar conversa'),
+  });
+
+  const excluirConversa = useMutation({
+    mutationFn: excluirConversaCliente,
+    onSuccess: () => {
+      setErro(null);
+      setConfirmarId(null);
+      setEditandoId(null);
+      invalidarHistorico();
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao excluir conversa'),
+  });
+
+  const ocupado = salvarReuniao.isPending || excluirReuniao.isPending || salvarConversa.isPending || excluirConversa.isPending;
 
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
@@ -375,14 +570,54 @@ function HistoricoClienteModal({
               ) : (
                 (reunioesQ.data ?? []).map((reuniao) => (
                   <View key={reuniao.id} style={[styles.historicoItem, { borderColor: theme.border }]}>
-                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>{formatDateTimeBR(reuniao.created_at)}</Text>
-                    <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 4 }}>{reuniao.pendencia}</Text>
-                    <Text style={{ color: theme.text, fontSize: 13, marginTop: 2 }}>
-                      Retorno: {formatYmdBR(reuniao.data_retorno)}
-                    </Text>
-                    {reuniao.assuntos?.trim() ? (
-                      <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 2 }}>{reuniao.assuntos}</Text>
-                    ) : null}
+                    <View style={styles.rowBetween}>
+                      <Text style={{ color: theme.textMuted, fontSize: 12, flex: 1 }}>
+                        {formatDateTimeBR(reuniao.created_at)}
+                      </Text>
+                      {editandoId === reuniao.id ? null : (
+                        <AcoesRegistro
+                          confirmar={confirmarId === reuniao.id}
+                          onEditar={() => {
+                            setErro(null);
+                            setConfirmarId(null);
+                            setEditandoId(reuniao.id);
+                          }}
+                          onPedirExclusao={() => {
+                            setErro(null);
+                            setEditandoId(null);
+                            setConfirmarId(reuniao.id);
+                          }}
+                          onCancelarExclusao={() => setConfirmarId(null)}
+                          onConfirmarExclusao={() => excluirReuniao.mutate(reuniao.id)}
+                        />
+                      )}
+                    </View>
+                    {editandoId === reuniao.id ? (
+                      <EditarReuniaoBloco
+                        reuniao={reuniao}
+                        saving={salvarReuniao.isPending}
+                        onCancelar={() => setEditandoId(null)}
+                        onSalvar={(valor) =>
+                          salvarReuniao.mutate({
+                            id: reuniao.id,
+                            pendencia: valor.pendencia,
+                            dataRetorno: valor.dataRetorno,
+                            assuntos: valor.assuntos,
+                            proximaAcao: valor.proximaAcao,
+                          })
+                        }
+                      />
+                    ) : (
+                      <>
+                        <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 4 }}>{reuniao.pendencia}</Text>
+                        <Text style={{ color: theme.text, fontSize: 13, marginTop: 2 }}>
+                          Retorno: {formatYmdBR(reuniao.data_retorno)}
+                        </Text>
+                        {reuniao.assuntos?.trim() ? (
+                          <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 2 }}>{reuniao.assuntos}</Text>
+                        ) : null}
+                      </>
+                    )}
                   </View>
                 ))
               )}
@@ -399,15 +634,54 @@ function HistoricoClienteModal({
               ) : (
                 (conversasQ.data ?? []).map((conversa) => (
                   <View key={conversa.id} style={[styles.historicoItem, { borderColor: theme.border }]}>
-                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                      {formatConversaQuando(conversa.data_conversa, conversa.hora_conversa)}
-                    </Text>
-                    <Text style={{ color: theme.text, fontSize: 14, marginTop: 4 }}>{conversa.descricao}</Text>
+                    <View style={styles.rowBetween}>
+                      <Text style={{ color: theme.textMuted, fontSize: 12, flex: 1 }}>
+                        {formatConversaQuando(conversa.data_conversa, conversa.hora_conversa)}
+                      </Text>
+                      {editandoId === conversa.id ? null : (
+                        <AcoesRegistro
+                          confirmar={confirmarId === conversa.id}
+                          onEditar={() => {
+                            setErro(null);
+                            setConfirmarId(null);
+                            setEditandoId(conversa.id);
+                          }}
+                          onPedirExclusao={() => {
+                            setErro(null);
+                            setEditandoId(null);
+                            setConfirmarId(conversa.id);
+                          }}
+                          onCancelarExclusao={() => setConfirmarId(null)}
+                          onConfirmarExclusao={() => excluirConversa.mutate(conversa.id)}
+                        />
+                      )}
+                    </View>
+                    {editandoId === conversa.id ? (
+                      <EditarConversaBloco
+                        conversa={conversa}
+                        saving={salvarConversa.isPending}
+                        onCancelar={() => setEditandoId(null)}
+                        onSalvar={(valor) =>
+                          salvarConversa.mutate({
+                            id: conversa.id,
+                            dataConversa: valor.dataConversa,
+                            horaConversa: valor.horaConversa,
+                            descricao: valor.descricao,
+                          })
+                        }
+                      />
+                    ) : (
+                      <Text style={{ color: theme.text, fontSize: 14, marginTop: 4 }}>{conversa.descricao}</Text>
+                    )}
                   </View>
                 ))
               )}
             </View>
           </ScrollView>
+          {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
+          {ocupado && !salvarReuniao.isPending && !salvarConversa.isPending ? (
+            <ActivityIndicator color={theme.cadastroAction} />
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -978,6 +1252,8 @@ const styles = StyleSheet.create({
   conversaCard: { width: '100%', maxWidth: 440, borderRadius: 16, borderWidth: 1, padding: 16, gap: 12 },
   historicoCard: { width: '100%', maxWidth: 520, borderRadius: 16, borderWidth: 1, padding: 16, gap: 12 },
   historicoItem: { borderWidth: 1, borderRadius: 10, padding: 10 },
+  areaHistorico: { minHeight: 72, height: 72, textAlignVertical: 'top', paddingTop: 8 },
+  cancelarHistorico: { minHeight: 40, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   clienteFixo: { minHeight: 44, borderWidth: 1, borderRadius: 8, justifyContent: 'center', paddingHorizontal: 12 },
   moverCard: { width: '100%', maxWidth: 420, borderRadius: 12, borderWidth: 1, padding: 16, gap: 8 },
   moverOpt: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10 },

@@ -97,6 +97,8 @@ alter table public.admin_cliente_conversas enable row level security;
 
 drop policy if exists painel_admin_conversas_select on public.admin_cliente_conversas;
 drop policy if exists painel_admin_conversas_insert on public.admin_cliente_conversas;
+drop policy if exists painel_admin_conversas_update on public.admin_cliente_conversas;
+drop policy if exists painel_admin_conversas_delete on public.admin_cliente_conversas;
 
 create policy painel_admin_conversas_select
 on public.admin_cliente_conversas
@@ -109,6 +111,19 @@ on public.admin_cliente_conversas
 for insert
 to authenticated
 with check (public.painel_admin_ativo());
+
+create policy painel_admin_conversas_update
+on public.admin_cliente_conversas
+for update
+to authenticated
+using (public.painel_admin_ativo())
+with check (public.painel_admin_ativo());
+
+create policy painel_admin_conversas_delete
+on public.admin_cliente_conversas
+for delete
+to authenticated
+using (public.painel_admin_ativo());
 
 -- ---------------------------------------------------------------------------
 -- admin_coupons (cupons criados pelo painel)
@@ -326,6 +341,9 @@ create table if not exists public.admin_cliente_reunioes (
   created_at timestamptz not null default now()
 );
 
+alter table public.admin_cliente_reunioes
+  add column if not exists avulsa boolean not null default false;
+
 create index if not exists idx_admin_cliente_reunioes_cliente
   on public.admin_cliente_reunioes (cliente_id, data_retorno);
 
@@ -334,6 +352,7 @@ alter table public.admin_cliente_reunioes enable row level security;
 drop policy if exists painel_admin_reunioes_select on public.admin_cliente_reunioes;
 drop policy if exists painel_admin_reunioes_insert on public.admin_cliente_reunioes;
 drop policy if exists painel_admin_reunioes_update on public.admin_cliente_reunioes;
+drop policy if exists painel_admin_reunioes_delete on public.admin_cliente_reunioes;
 
 create policy painel_admin_reunioes_select
 on public.admin_cliente_reunioes
@@ -353,6 +372,12 @@ for update
 to authenticated
 using (public.painel_admin_ativo())
 with check (public.painel_admin_ativo());
+
+create policy painel_admin_reunioes_delete
+on public.admin_cliente_reunioes
+for delete
+to authenticated
+using (public.painel_admin_ativo());
 
 drop policy if exists painel_admin_usuarios_select on public.usuarios;
 create policy painel_admin_usuarios_select

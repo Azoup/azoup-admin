@@ -17,6 +17,12 @@ create table if not exists public.admin_cliente_reunioes (
   created_at timestamptz not null default now()
 );
 
+alter table public.admin_cliente_reunioes
+  add column if not exists avulsa boolean not null default false;
+
+comment on column public.admin_cliente_reunioes.avulsa is
+  'true = cadastrada direto na tela de pendências; não entra como última reunião.';
+
 create index if not exists idx_admin_cliente_reunioes_cliente
   on public.admin_cliente_reunioes (cliente_id, data_retorno);
 
@@ -31,6 +37,7 @@ alter table public.admin_cliente_reunioes enable row level security;
 drop policy if exists painel_admin_reunioes_select on public.admin_cliente_reunioes;
 drop policy if exists painel_admin_reunioes_insert on public.admin_cliente_reunioes;
 drop policy if exists painel_admin_reunioes_update on public.admin_cliente_reunioes;
+drop policy if exists painel_admin_reunioes_delete on public.admin_cliente_reunioes;
 
 create policy painel_admin_reunioes_select
 on public.admin_cliente_reunioes
@@ -50,6 +57,12 @@ for update
 to authenticated
 using (public.painel_admin_ativo())
 with check (public.painel_admin_ativo());
+
+create policy painel_admin_reunioes_delete
+on public.admin_cliente_reunioes
+for delete
+to authenticated
+using (public.painel_admin_ativo());
 
 -- Admin do painel lê os usuários do cliente para a lista de participantes.
 drop policy if exists painel_admin_usuarios_select on public.usuarios;

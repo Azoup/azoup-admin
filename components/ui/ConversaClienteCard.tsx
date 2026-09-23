@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
@@ -12,9 +12,10 @@ type Props = {
   conversa: ClienteConversaComCliente;
   /** Na ficha do cliente o nome já está no cabeçalho — só data e texto. */
   modo?: 'lista' | 'cliente';
+  acoes?: ReactNode;
 };
 
-export function ConversaClienteCard({ conversa, modo = 'lista' }: Props) {
+export function ConversaClienteCard({ conversa, modo = 'lista', acoes }: Props) {
   const { theme } = useTheme();
   const styles = useMemo(() => getStyles(), []);
 
@@ -37,6 +38,7 @@ export function ConversaClienteCard({ conversa, modo = 'lista' }: Props) {
         Registrado por {conversa.admin_email ?? 'administrador'}
         {conversa.created_at ? ` · ${formatDateBR(conversa.created_at)}` : ''}
       </Text>
+      {acoes ? <View style={styles.acoes}>{acoes}</View> : null}
     </ScreenCard>
   );
 }
@@ -45,5 +47,6 @@ function getStyles() {
   return StyleSheet.create({
     card: { marginBottom: 10, gap: 8 },
     header: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+    acoes: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 14, marginTop: 4 },
   });
 }

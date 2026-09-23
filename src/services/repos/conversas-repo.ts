@@ -51,6 +51,7 @@ export async function listarClientesComConversas(): Promise<ClienteAzoupRow[]> {
 
 export async function listarConversasClientes(params?: {
   clienteId?: string | null;
+  clienteIds?: string[] | null;
   limit?: number;
 }): Promise<ClienteConversaComCliente[]> {
   let query = supabase
@@ -60,9 +61,10 @@ export async function listarConversasClientes(params?: {
     .order('hora_conversa', { ascending: false, nullsFirst: false })
     .limit(params?.limit ?? 200);
 
-  if (params?.clienteId) {
-    query = query.eq('cliente_id', params.clienteId);
-  }
+  const ids = (params?.clienteIds ?? []).map((id) => id.trim()).filter(Boolean);
+  if (ids.length === 1) query = query.eq('cliente_id', ids[0]);
+  else if (ids.length > 1) query = query.in('cliente_id', ids);
+  else if (params?.clienteId) query = query.eq('cliente_id', params.clienteId);
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
@@ -108,6 +110,47 @@ export async function criarConversaCliente(params: {
 
   if (error) throw new Error(error.message);
   return data as AdminClienteConversaRow;
+}
+
+function erroHistorico(message: string, tabela: string): string {
+  if (/row-level security|permission denied|policy|0 rows|PGRST116|coerce the result/i.test(message)) {
+    return `Execute de novo supabase/sql/${tabela}.sql no Supabase para liberar editar e excluir.`;
+  }
+  return message;
+}
+
+export async function atualizarConversaCliente(params: {
+  id: string;
+  dataConversa: string;
+  horaConversa?: string | null;
+  descricao: string;
+}): Promise<void> {
+  if (!params.id) throw new Error('Conversa inválida.');
+  const descricao = params.descricao.trim();
+  if (!descricao) throw new Error('Descreva o que foi conversado com o cliente.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(params.dataConversa.trim())) throw new Error('Informe a data da conversa.');
+  const hora = params.horaConversa != null && params.horaConversa.trim() ? normalizarHorarioInput(params.horaConversa) : null;
+  if (params.horaConversa?.trim() && !hora) throw new Error('Horário inválido. Use o formato HH:MM (ex.: 14:30).');
+
+  const { data, error } = await supabase
+    .from('admin_cliente_conversas')
+    .update({
+      data_conversa: params.dataConversa.trim(),
+      hora_conversa: hora,
+      descricao,
+    } as never)
+    .eq('id', params.id)
+    .select('id')
+    .single();
+
+  if (error) throw new Error(erroHistorico(error.message, 'admin_cliente_conversas'));
+  if (!data) throw new Error('Não foi possível atualizar a conversa.');
+}
+
+export async function excluirConversaCliente(id: string): Promise<void> {
+  if (!id) throw new Error('Conversa inválida.');
+  const { error } = await supabase.from('admin_cliente_conversas').delete().eq('id', id);
+  if (error) throw new Error(erroHistorico(error.message, 'admin_cliente_conversas'));
 }
 
 /** Data da conversa mais recente de cada cliente — "Último contato" no card. */
