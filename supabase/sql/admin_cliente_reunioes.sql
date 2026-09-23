@@ -32,6 +32,11 @@ create index if not exists idx_admin_cliente_reunioes_retorno
 comment on table public.admin_cliente_reunioes is
   'Reunião do acompanhamento e card de pendência. Prazo = data_retorno.';
 
+alter table public.admin_users
+  add column if not exists telas_acesso jsonb not null default '[]'::jsonb;
+
+grant select, insert, update, delete on table public.admin_cliente_reunioes to authenticated;
+
 create or replace function public.painel_admin_pode_excluir()
 returns boolean
 language sql
