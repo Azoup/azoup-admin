@@ -30,6 +30,11 @@ export function podeAcessarTelaAdmin(
   return true;
 }
 
+export function podeExcluirRegistros(profile: AdminUserRow | null, papel: AdminPapel | null): boolean {
+  if (papel === 'owner') return true;
+  return normalizarTelasAcesso(profile?.telas_acesso).includes('excluir');
+}
+
 export function rotularTelasAcesso(raw: unknown, papel?: AdminPapel | null): string {
   const keys = normalizarTelasAcesso(raw);
   const efetivas = keys.length > 0 ? keys : papel ? telasPadraoPorPapel(papel) : [];

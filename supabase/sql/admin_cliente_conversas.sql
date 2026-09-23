@@ -40,6 +40,28 @@ $$;
 revoke all on function public.painel_admin_ativo(text[]) from public;
 grant execute on function public.painel_admin_ativo(text[]) to authenticated;
 
+create or replace function public.painel_admin_pode_excluir()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.admin_users au
+    where lower(au.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+      and coalesce(au.active, true) = true
+      and (
+        au.role = 'owner'
+        or coalesce(au.telas_acesso, '[]'::jsonb) ? 'excluir'
+      )
+  );
+$$;
+
+revoke all on function public.painel_admin_pode_excluir() from public;
+grant execute on function public.painel_admin_pode_excluir() to authenticated;
+
 alter table public.admin_cliente_conversas enable row level security;
 
 drop policy if exists painel_admin_conversas_select on public.admin_cliente_conversas;
@@ -70,4 +92,4 @@ create policy painel_admin_conversas_delete
 on public.admin_cliente_conversas
 for delete
 to authenticated
-using (public.painel_admin_ativo());
+using (public.painel_admin_pode_excluir());

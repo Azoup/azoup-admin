@@ -6,7 +6,7 @@ import { isInvalidRefreshError } from '@/src/lib/auth-storage';
 import { clearAuthSession, supabase } from '@/src/lib/supabase';
 import { obterAdminProfileViaFunction } from '@/src/services/stripe-admin-api';
 import type { AdminPapel, AdminUserRow } from '@/src/types/azoup';
-import { podeAcessarTelaAdmin, telasEfetivasAdmin } from '@/src/utils/admin-permissions';
+import { podeAcessarTelaAdmin, podeExcluirRegistros, telasEfetivasAdmin } from '@/src/utils/admin-permissions';
 
 type AdminAuthState = {
   session: Session | null;
@@ -21,6 +21,7 @@ type AdminAuthState = {
   canManageBilling: boolean;
   canManageAdmins: boolean;
   canViewAudit: boolean;
+  canDeleteRecords: boolean;
   telasPermitidas: AdminScreenKey[];
   canAccessScreen: (tela: AdminScreenKey) => boolean;
 };
@@ -37,6 +38,7 @@ function derivePermissions(papel: AdminPapel | null, profile: AdminUserRow | nul
     canManageBilling: canScreen('billing') && (papel === 'owner' || papel === 'manager'),
     canManageAdmins: canScreen('admins') && papel === 'owner',
     canViewAudit: canScreen('audit'),
+    canDeleteRecords: podeExcluirRegistros(profile, papel),
     telasPermitidas: telasEfetivasAdmin(profile, papel),
     canAccessScreen: canScreen,
   };

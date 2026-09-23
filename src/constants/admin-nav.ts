@@ -22,7 +22,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroupDef[] = [
   { id: 'config', title: 'Configurações' },
 ];
 
-export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.map((screen) => {
+export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.filter((screen) => !screen.permissao).map((screen) => {
   const href =
     screen.key === 'dashboard'
       ? '/(tabs)'

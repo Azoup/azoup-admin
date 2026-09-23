@@ -161,7 +161,7 @@ function ConversaFormModal({
 
 export default function ConversasScreen() {
   const { theme } = useTheme();
-  const { adminProfile, canAccessScreen } = useAdminAuth();
+  const { adminProfile, canAccessScreen, canDeleteRecords } = useAdminAuth();
   const qc = useQueryClient();
   const { cliente_id: clienteIdParam } = useLocalSearchParams<{ cliente_id?: string }>();
   const clienteIdInicial = `${clienteIdParam ?? ''}`.trim();
@@ -289,9 +289,16 @@ export default function ConversasScreen() {
           <ConversaClienteCard
             conversa={item}
             acoes={
-              confirmarId === item.id ? (
+              canDeleteRecords && confirmarId === item.id ? (
                 <>
-                  <Pressable onPress={() => excluir.mutate(item.id)} hitSlop={8} accessibilityLabel="Confirmar exclusão">
+                  <Pressable
+                    onPress={() => {
+                      if (!canDeleteRecords) return;
+                      excluir.mutate(item.id);
+                    }}
+                    hitSlop={8}
+                    accessibilityLabel="Confirmar exclusão"
+                  >
                     <FontAwesome name="trash" size={15} color={theme.error} />
                   </Pressable>
                   <Pressable onPress={() => setConfirmarId(null)} hitSlop={8} accessibilityLabel="Cancelar">
@@ -313,16 +320,18 @@ export default function ConversasScreen() {
                   >
                     <FontAwesome name="pencil" size={15} color={theme.cadastroAction} />
                   </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      setErroLista(null);
-                      setConfirmarId(item.id);
-                    }}
-                    hitSlop={8}
-                    accessibilityLabel="Excluir"
-                  >
-                    <FontAwesome name="trash" size={15} color={theme.error} />
-                  </Pressable>
+                  {canDeleteRecords ? (
+                    <Pressable
+                      onPress={() => {
+                        setErroLista(null);
+                        setConfirmarId(item.id);
+                      }}
+                      hitSlop={8}
+                      accessibilityLabel="Excluir"
+                    >
+                      <FontAwesome name="trash" size={15} color={theme.error} />
+                    </Pressable>
+                  ) : null}
                 </>
               )
             }

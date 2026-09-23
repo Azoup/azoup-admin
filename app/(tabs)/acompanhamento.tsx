@@ -312,19 +312,21 @@ function MoverModal({
 
 function AcoesRegistro({
   confirmar,
+  podeExcluir,
   onEditar,
   onPedirExclusao,
   onCancelarExclusao,
   onConfirmarExclusao,
 }: {
   confirmar: boolean;
+  podeExcluir: boolean;
   onEditar: () => void;
   onPedirExclusao: () => void;
   onCancelarExclusao: () => void;
   onConfirmarExclusao: () => void;
 }) {
   const { theme } = useTheme();
-  if (confirmar) {
+  if (podeExcluir && confirmar) {
     return (
       <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
         <Pressable onPress={onConfirmarExclusao} hitSlop={8} accessibilityLabel="Confirmar exclusão">
@@ -341,9 +343,11 @@ function AcoesRegistro({
       <Pressable onPress={onEditar} hitSlop={8} accessibilityLabel="Editar">
         <FontAwesome name="pencil" size={15} color={theme.cadastroAction} />
       </Pressable>
-      <Pressable onPress={onPedirExclusao} hitSlop={8} accessibilityLabel="Excluir">
-        <FontAwesome name="trash" size={15} color={theme.error} />
-      </Pressable>
+      {podeExcluir ? (
+        <Pressable onPress={onPedirExclusao} hitSlop={8} accessibilityLabel="Excluir">
+          <FontAwesome name="trash" size={15} color={theme.error} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -446,6 +450,7 @@ function HistoricoClienteModal({
   onClose: () => void;
 }) {
   const { theme } = useTheme();
+  const { canDeleteRecords } = useAdminAuth();
   const qc = useQueryClient();
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
@@ -574,6 +579,7 @@ function HistoricoClienteModal({
                       {editandoId === reuniao.id ? null : (
                         <AcoesRegistro
                           confirmar={confirmarId === reuniao.id}
+                          podeExcluir={canDeleteRecords}
                           onEditar={() => {
                             setErro(null);
                             setConfirmarId(null);
@@ -585,7 +591,10 @@ function HistoricoClienteModal({
                             setConfirmarId(reuniao.id);
                           }}
                           onCancelarExclusao={() => setConfirmarId(null)}
-                          onConfirmarExclusao={() => excluirReuniao.mutate(reuniao.id)}
+                          onConfirmarExclusao={() => {
+                            if (!canDeleteRecords) return;
+                            excluirReuniao.mutate(reuniao.id);
+                          }}
                         />
                       )}
                     </View>
@@ -638,6 +647,7 @@ function HistoricoClienteModal({
                       {editandoId === conversa.id ? null : (
                         <AcoesRegistro
                           confirmar={confirmarId === conversa.id}
+                          podeExcluir={canDeleteRecords}
                           onEditar={() => {
                             setErro(null);
                             setConfirmarId(null);
@@ -649,7 +659,10 @@ function HistoricoClienteModal({
                             setConfirmarId(conversa.id);
                           }}
                           onCancelarExclusao={() => setConfirmarId(null)}
-                          onConfirmarExclusao={() => excluirConversa.mutate(conversa.id)}
+                          onConfirmarExclusao={() => {
+                            if (!canDeleteRecords) return;
+                            excluirConversa.mutate(conversa.id);
+                          }}
                         />
                       )}
                     </View>

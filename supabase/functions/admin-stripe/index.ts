@@ -7,7 +7,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const ADMIN_SCREEN_KEYS = ['dashboard', 'clients', 'conversas', 'billing', 'audit', 'admins', 'marketing', 'config_suporte', 'metodo360', 'acompanhamento', 'pendencias'] as const;
+const ADMIN_SCREEN_KEYS = ['dashboard', 'clients', 'conversas', 'billing', 'audit', 'admins', 'marketing', 'config_suporte', 'metodo360', 'acompanhamento', 'pendencias', 'excluir'] as const;
 
 function normalizarTelasAcesso(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];

@@ -12,13 +12,16 @@ export type AdminScreenKey =
   | 'config_suporte'
   | 'metodo360'
   | 'acompanhamento'
-  | 'pendencias';
+  | 'pendencias'
+  | 'excluir';
 
 export type AdminScreenDef = {
   key: AdminScreenKey;
   label: string;
   /** Somente perfil owner pode receber esta tela. */
   ownerOnly?: boolean;
+  /** Permissão gravada no usuário, sem item no menu. */
+  permissao?: boolean;
 };
 
 export const ADMIN_SCREENS: readonly AdminScreenDef[] = [
@@ -33,6 +36,7 @@ export const ADMIN_SCREENS: readonly AdminScreenDef[] = [
   { key: 'config_suporte', label: 'Config. Suporte' },
   { key: 'metodo360', label: 'Método 360' },
   { key: 'admins', label: 'Acessos', ownerOnly: true },
+  { key: 'excluir', label: 'Excluir registros', permissao: true },
 ] as const;
 
 export const ADMIN_SCREEN_KEYS = ADMIN_SCREENS.map((s) => s.key);
