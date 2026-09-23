@@ -11,7 +11,8 @@ export type AdminScreenKey =
   | 'marketing'
   | 'config_suporte'
   | 'metodo360'
-  | 'acompanhamento';
+  | 'acompanhamento'
+  | 'pendencias';
 
 export type AdminScreenDef = {
   key: AdminScreenKey;
@@ -24,6 +25,7 @@ export const ADMIN_SCREENS: readonly AdminScreenDef[] = [
   { key: 'dashboard', label: 'Painel' },
   { key: 'clients', label: 'Clientes' },
   { key: 'acompanhamento', label: 'Acompanhamento' },
+  { key: 'pendencias', label: 'Pendências' },
   { key: 'conversas', label: 'Conversas' },
   { key: 'billing', label: 'Cobrança' },
   { key: 'audit', label: 'Auditoria' },
@@ -44,6 +46,7 @@ export function telasPadraoPorPapel(papel: AdminPapel): AdminScreenKey[] {
         'dashboard',
         'clients',
         'acompanhamento',
+        'pendencias',
         'conversas',
         'billing',
         'audit',
@@ -52,7 +55,7 @@ export function telasPadraoPorPapel(papel: AdminPapel): AdminScreenKey[] {
         'metodo360',
       ];
     case 'viewer':
-      return ['dashboard', 'clients', 'acompanhamento', 'conversas', 'audit', 'marketing'];
+      return ['dashboard', 'clients', 'acompanhamento', 'pendencias', 'conversas', 'audit', 'marketing'];
     default:
       return ['dashboard'];
   }

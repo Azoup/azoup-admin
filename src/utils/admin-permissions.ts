@@ -24,6 +24,7 @@ export function podeAcessarTelaAdmin(
   papel: AdminPapel | null,
 ): boolean {
   const def = telasEfetivasAdmin(profile, papel);
+  if (tela === 'pendencias' && def.includes('acompanhamento')) return true;
   if (!def.includes(tela)) return false;
   if (tela === 'admins') return papel === 'owner';
   return true;

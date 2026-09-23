@@ -32,7 +32,9 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.map((screen) => {
           ? '/(tabs)/metodo360'
           : screen.key === 'acompanhamento'
             ? '/(tabs)/acompanhamento'
-            : `/(tabs)/${screen.key}`;
+            : screen.key === 'pendencias'
+              ? '/(tabs)/pendencias'
+              : `/(tabs)/${screen.key}`;
 
   const icon: ComponentProps<typeof FontAwesome>['name'] =
     screen.key === 'dashboard'
@@ -41,7 +43,9 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.map((screen) => {
         ? 'users'
         : screen.key === 'acompanhamento'
           ? 'heartbeat'
-          : screen.key === 'conversas'
+          : screen.key === 'pendencias'
+            ? 'tasks'
+            : screen.key === 'conversas'
             ? 'comments'
             : screen.key === 'billing'
               ? 'credit-card'
@@ -59,6 +63,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.map((screen) => {
     screen.key === 'dashboard' ||
     screen.key === 'clients' ||
     screen.key === 'acompanhamento' ||
+    screen.key === 'pendencias' ||
     screen.key === 'conversas'
       ? 'visao'
       : screen.key === 'billing' || screen.key === 'marketing' || screen.key === 'audit'

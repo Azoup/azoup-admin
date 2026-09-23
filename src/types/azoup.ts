@@ -273,6 +273,11 @@ export interface AdminAcompanhamentoKanbanRow {
   ordem?: number | null;
   admin_email?: string | null;
   updated_at?: string | null;
+  ultima_reuniao?: string | null;
+  proxima_reuniao?: string | null;
+  pendencias_abertas?: number | null;
+  ultima_dificuldade?: string | null;
+  proxima_acao?: string | null;
 }
 
 export interface AdminClienteCongelamentoRow {

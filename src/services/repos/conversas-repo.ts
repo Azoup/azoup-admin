@@ -110,6 +110,30 @@ export async function criarConversaCliente(params: {
   return data as AdminClienteConversaRow;
 }
 
+/** Data da conversa mais recente de cada cliente — "Último contato" no card. */
+export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (!clienteIds.length) return map;
+
+  const CHUNK = 200;
+  for (let i = 0; i < clienteIds.length; i += CHUNK) {
+    const chunk = clienteIds.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from('admin_cliente_conversas')
+      .select('cliente_id,data_conversa,hora_conversa')
+      .in('cliente_id', chunk)
+      .order('data_conversa', { ascending: false })
+      .order('hora_conversa', { ascending: false, nullsFirst: false });
+
+    if (error) throw new Error(error.message);
+    for (const row of (data ?? []) as Pick<AdminClienteConversaRow, 'cliente_id' | 'data_conversa'>[]) {
+      if (!row.cliente_id || map.has(row.cliente_id) || !row.data_conversa) continue;
+      map.set(row.cliente_id, row.data_conversa);
+    }
+  }
+  return map;
+}
+
 export function rotuloClienteConversa(row: ClienteConversaComCliente): string {
   if (row.cliente) return rotuloCliente(row.cliente);
   return `Cliente ${row.cliente_id.slice(0, 8)}`;

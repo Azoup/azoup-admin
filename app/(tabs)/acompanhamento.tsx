@@ -1,54 +1,56 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Linking,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
+import { FormTimeInput } from '@/components/ui/FormTimeInput';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import { RegistrarReuniaoModal } from '@/components/ui/RegistrarReuniaoModal';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
-import { moverClienteKanban } from '@/src/services/repos/kanban-acompanhamento-repo';
+import { criarConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
 import {
-  contarObservacoesAcompanhamento,
-  criarObservacaoAcompanhamento,
-  listarObservacoesAcompanhamento,
-} from '@/src/services/repos/observacoes-acompanhamento-repo';
-import type { AdminAcompanhamentoObservacaoRow } from '@/src/types/azoup';
+  listarReunioesDoCliente,
+  resumirReunioesPorCliente,
+  type ResumoReunioesCliente,
+} from '@/src/services/repos/reunioes-repo';
+import { moverClienteKanban, salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
 import {
   ACOMPANHAMENTO_COLUNAS,
+  agrupamentoAcompanhamentoVazio,
+  iniciaisNome,
+  rotuloTempoCadastro,
   type AcompanhamentoCliente,
   type AcompanhamentoColuna,
 } from '@/src/utils/acompanhamento';
-import { formatBRLFromReais, formatDateBR, formatDateTimeBR, formatYmdBR } from '@/src/utils/format';
-import { digitsOnlyPhone, resolveClienteWhatsAppUrl } from '@/src/utils/whatsapp';
+import { agoraHorarioLocal, hojeIsoLocal } from '@/src/utils/conversa-datetime';
+import { dataCalendarioBrasil, formatConversaQuando, formatDateTimeBR, formatYmdBR } from '@/src/utils/format';
+import { digitsOnlyPhone } from '@/src/utils/whatsapp';
 
-const WHATSAPP_GREEN = '#25D366';
-const COL_WIDTH = 280;
+const COL_WIDTH = 300;
 const DRAG_MIME = 'application/x-acompanhamento-cliente';
+const AVATAR = '#FF7A1A';
+const PENDENCIA = '#FF7A1A';
 
-function corColuna(key: AcompanhamentoColuna, theme: ReturnType<typeof useTheme>['theme']) {
-  if (key === 'fila_espera') return theme.textMuted;
-  if (key === 'urgentes') return theme.error;
-  if (key === 'precisa_ajuda') return theme.warning;
-  if (key === 'pode_esperar') return theme.cadastroAction;
-  return theme.success;
+type Board = Awaited<ReturnType<typeof carregarAcompanhamentoClientes>>;
+
+function recomporBoard(clientes: AcompanhamentoCliente[]): Board {
+  const porColuna = agrupamentoAcompanhamentoVazio();
+  for (const c of clientes) {
+    const destino = porColuna[c.coluna] ? c.coluna : 'fila_espera';
+    porColuna[destino].push({ ...c, coluna: destino, etiqueta: destino });
+  }
+  return { clientes, porColuna, porEtiqueta: porColuna };
 }
 
-function matchBuscaAcompanhamento(item: AcompanhamentoCliente, busca: string): boolean {
+function matchBusca(item: AcompanhamentoCliente, busca: string): boolean {
   const q = busca.trim().toLowerCase();
   if (!q) return true;
   const qDigits = digitsOnlyPhone(q);
@@ -58,24 +60,18 @@ function matchBuscaAcompanhamento(item: AcompanhamentoCliente, busca: string): b
     .toLowerCase();
   if (texto.includes(q)) return true;
   if (qDigits.length >= 3) {
-    const digits = digitsOnlyPhone(
-      `${item.telefone ?? ''}${item.celular ?? ''}${item.empresa_cnpj ?? ''}`,
-    );
+    const digits = digitsOnlyPhone(`${item.telefone ?? ''}${item.celular ?? ''}${item.empresa_cnpj ?? ''}`);
     if (digits.includes(qDigits)) return true;
   }
   return false;
 }
 
-function MetaLinha({ label, value }: { label: string; value: string }) {
-  const { theme } = useTheme();
-  return (
-    <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-      {label}: <Text style={{ color: theme.text, fontWeight: '700' }}>{value}</Text>
-    </Text>
-  );
+function dataOuTraco(ymd?: string | null): string {
+  const texto = formatYmdBR(ymd);
+  return texto === '—' ? '—' : texto;
 }
 
-function ObservacoesModal({
+function ConversaModal({
   cliente,
   visible,
   onClose,
@@ -87,103 +83,161 @@ function ObservacoesModal({
   onSaved: () => void;
 }) {
   const { theme } = useTheme();
-  const { session } = useAdminAuth();
-  const [texto, setTexto] = useState('');
+  const { adminProfile, session } = useAdminAuth();
+  const [dataConversa, setDataConversa] = useState(hojeIsoLocal);
+  const [horaConversa, setHoraConversa] = useState(agoraHorarioLocal);
+  const [descricao, setDescricao] = useState('');
   const [erro, setErro] = useState<string | null>(null);
 
-  const obsQuery = useQuery({
-    queryKey: ['acompanhamento_observacoes', cliente?.id],
-    queryFn: () => listarObservacoesAcompanhamento(cliente!.id),
-    enabled: visible && Boolean(cliente?.id),
-  });
+  useEffect(() => {
+    if (!visible) return;
+    setDataConversa(hojeIsoLocal());
+    setHoraConversa(agoraHorarioLocal());
+    setDescricao('');
+    setErro(null);
+  }, [visible, cliente?.id]);
 
   const salvarMutation = useMutation({
     mutationFn: async () => {
       if (!cliente) throw new Error('Cliente inválido.');
-      return criarObservacaoAcompanhamento({
+      return criarConversaCliente({
         clienteId: cliente.id,
-        observacao: texto,
-        adminEmail: session?.user?.email ?? null,
+        dataConversa,
+        horaConversa,
+        descricao,
+        adminEmail: adminProfile?.email ?? session?.user?.email ?? null,
       });
     },
-    onSuccess: async () => {
-      setTexto('');
+    onSuccess: () => {
+      setDescricao('');
       setErro(null);
-      await obsQuery.refetch();
       onSaved();
+      onClose();
     },
-    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao salvar observação'),
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao registrar conversa'),
   });
 
-  useEffect(() => {
-    if (!visible) {
-      setTexto('');
-      setErro(null);
-    }
-  }, [visible]);
-
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
-        <View style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[styles.conversaCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <View style={styles.rowBetween}>
-            <Text style={{ fontWeight: '800', fontSize: 17, color: theme.headerText, flex: 1 }}>
-              Observações · {cliente?.nome ?? 'Cliente'}
-            </Text>
+            <SectionTitle>Novo registro</SectionTitle>
             <Pressable onPress={onClose} hitSlop={10}>
-              <FontAwesome name="times" size={18} color={theme.textMuted} />
+              <FontAwesome name="times" size={16} color={theme.textMuted} />
             </Pressable>
           </View>
 
-          <FormField label="Nova observação">
+          <FormField label="Cliente">
+            <View style={[styles.clienteFixo, { borderColor: theme.borderInput, backgroundColor: theme.inputBg }]}>
+              <Text style={{ color: theme.text, fontSize: 15 }} numberOfLines={1}>
+                {cliente?.empresa_nome?.trim() || cliente?.nome || '—'}
+              </Text>
+            </View>
+          </FormField>
+
+          <FormField label="Data da conversa" required>
+            <FormDateInput value={dataConversa} onChange={setDataConversa} />
+          </FormField>
+
+          <FormField label="Horário" required>
+            <FormTimeInput value={horaConversa} onChange={setHoraConversa} />
+          </FormField>
+
+          <FormField label="O que foi conversado" required>
             <FormInput
-              value={texto}
-              onChangeText={setTexto}
-              placeholder="Digite a observação…"
+              value={descricao}
+              onChangeText={setDescricao}
+              placeholder="Descreva o assunto, combinados, pendências..."
               multiline
-              style={{ minHeight: 72, textAlignVertical: 'top' }}
+              style={{ minHeight: 96, textAlignVertical: 'top' }}
             />
           </FormField>
 
           {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
 
           <PrimaryButton
-            label="Adicionar observação"
+            label="REGISTRAR CONVERSA"
             loading={salvarMutation.isPending}
             onPress={() => {
               setErro(null);
               salvarMutation.mutate();
             }}
           />
-
-          <SectionTitle>Histórico</SectionTitle>
-
-          <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ gap: 8, paddingBottom: 8 }}>
-            {obsQuery.isLoading ? (
-              <ActivityIndicator color={theme.cadastroAction} />
-            ) : obsQuery.error ? (
-              <Text style={{ color: theme.error }}>
-                {(obsQuery.error as Error).message.includes('admin_acompanhamento_observacoes')
-                  ? 'Execute supabase/sql/admin_acompanhamento_observacoes.sql no Supabase.'
-                  : (obsQuery.error as Error).message}
-              </Text>
-            ) : (obsQuery.data ?? []).length === 0 ? (
-              <Text style={{ color: theme.textMuted }}>Nenhuma observação ainda.</Text>
-            ) : (
-              (obsQuery.data as AdminAcompanhamentoObservacaoRow[]).map((obs) => (
-                <View
-                  key={obs.id}
-                  style={[styles.obsItem, { borderColor: theme.border, backgroundColor: theme.surfaceMuted }]}
-                >
-                  <Text style={{ color: theme.text, fontSize: 14 }}>{obs.observacao}</Text>
-                  <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
-                    {obs.admin_email ?? 'admin'} · {formatDateTimeBR(obs.created_at)}
-                  </Text>
-                </View>
-              ))
-            )}
-          </ScrollView>
         </View>
+      </View>
+    </Modal>
+  );
+}
+
+function FichaModal({
+  cliente,
+  visible,
+  onClose,
+  saving,
+  erro,
+  onSalvar,
+}: {
+  cliente: AcompanhamentoCliente | null;
+  visible: boolean;
+  onClose: () => void;
+  saving: boolean;
+  erro: string | null;
+  onSalvar: (ficha: {
+    proximaReuniao: string;
+    ultimaDificuldade: string;
+    proximaAcao: string;
+  }) => void;
+}) {
+  const { theme } = useTheme();
+  const [proximaReuniao, setProximaReuniao] = useState('');
+  const [dificuldade, setDificuldade] = useState('');
+  const [proximaAcao, setProximaAcao] = useState('');
+
+  useEffect(() => {
+    if (!visible || !cliente) return;
+    setProximaReuniao(`${cliente.proxima_reuniao ?? ''}`.slice(0, 10));
+    setDificuldade(cliente.ultima_dificuldade ?? '');
+    setProximaAcao(cliente.proxima_acao ?? '');
+  }, [visible, cliente]);
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <ScrollView
+          style={{ width: '100%', maxWidth: 440, maxHeight: '90%' }}
+          contentContainerStyle={{ flexGrow: 0 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={[styles.moverCard, { backgroundColor: theme.surface, borderColor: theme.border, maxWidth: 440 }]}>
+            <Text style={{ fontWeight: '800', fontSize: 16, color: theme.headerText }}>
+              Ficha · {cliente?.nome ?? 'Cliente'}
+            </Text>
+            <FormField label="Próxima reunião">
+              <FormDateInput value={proximaReuniao} onChange={setProximaReuniao} />
+            </FormField>
+            <FormField label="Última dificuldade">
+              <FormInput value={dificuldade} onChangeText={setDificuldade} placeholder="Ex.: Dúvida no cadastro de produtos" />
+            </FormField>
+            <FormField label="Próxima ação">
+              <FormInput value={proximaAcao} onChangeText={setProximaAcao} placeholder="Ex.: Confirmar uso do módulo de PDV" />
+            </FormField>
+            {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
+            <PrimaryButton
+              label="Salvar ficha"
+              loading={saving}
+              onPress={() =>
+                onSalvar({
+                  proximaReuniao,
+                  ultimaDificuldade: dificuldade,
+                  proximaAcao,
+                })
+              }
+            />
+          </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -205,38 +259,146 @@ function MoverModal({
   const { theme } = useTheme();
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
-      <View style={[styles.modalOverlay, { justifyContent: 'center' }]}>
+      <View style={styles.modalOverlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={[styles.moverCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <Text style={{ fontWeight: '800', fontSize: 16, color: theme.headerText }}>
             Mover · {cliente?.nome ?? 'Cliente'}
           </Text>
-          <Text style={{ color: theme.textMuted, fontSize: 13 }}>Escolha a coluna de destino</Text>
-          {ACOMPANHAMENTO_COLUNAS.map((col) => {
-            const ativa = cliente?.coluna === col.key;
-            const cor = corColuna(col.key, theme);
-            return (
-              <Pressable
-                key={col.key}
-                disabled={moving || ativa}
-                onPress={() => onMover(col.key)}
-                style={({ pressed }) => [
-                  styles.moverOpt,
-                  {
-                    borderColor: cor,
-                    backgroundColor: ativa ? `${cor}22` : theme.surfaceMuted,
-                    opacity: moving ? 0.6 : pressed ? 0.85 : 1,
-                  },
-                ]}
-              >
-                <Text style={{ color: theme.headerText, fontWeight: '700' }}>
-                  {col.label}
-                  {ativa ? ' (atual)' : ''}
-                </Text>
-              </Pressable>
-            );
-          })}
+          <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ gap: 8 }}>
+            {ACOMPANHAMENTO_COLUNAS.map((col) => {
+              const ativa = cliente?.coluna === col.key;
+              return (
+                <Pressable
+                  key={col.key}
+                  disabled={moving || ativa}
+                  onPress={() => onMover(col.key)}
+                  style={({ pressed }) => [
+                    styles.moverOpt,
+                    {
+                      borderColor: col.cor,
+                      backgroundColor: ativa ? `${col.cor}22` : theme.surfaceMuted,
+                      opacity: moving ? 0.6 : pressed ? 0.85 : 1,
+                    },
+                  ]}
+                >
+                  <Text style={{ color: theme.headerText, fontWeight: '700' }}>
+                    {col.label}
+                    {ativa ? ' (atual)' : ''}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
           {moving ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function HistoricoClienteModal({
+  cliente,
+  visible,
+  onClose,
+}: {
+  cliente: AcompanhamentoCliente | null;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const { theme } = useTheme();
+  const telefone = cliente?.telefone?.trim() || '';
+  const celular = cliente?.celular?.trim() || '';
+  const contato = [telefone, celular && celular !== telefone ? celular : ''].filter(Boolean).join(' · ') || '—';
+  const cadastroEm = formatYmdBR(dataCalendarioBrasil(cliente?.created_at));
+
+  const reunioesQ = useQuery({
+    queryKey: ['admin_cliente_reunioes', cliente?.id, 'historico'],
+    queryFn: () => listarReunioesDoCliente(cliente!.id),
+    enabled: visible && Boolean(cliente?.id),
+  });
+
+  const conversasQ = useQuery({
+    queryKey: ['admin_cliente_conversas', cliente?.id, 'historico'],
+    queryFn: () => listarConversasClientes({ clienteId: cliente!.id, limit: 50 }),
+    enabled: visible && Boolean(cliente?.id),
+  });
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[styles.historicoCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={styles.rowBetween}>
+            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 18, flex: 1 }} numberOfLines={2}>
+              {cliente?.nome ?? 'Cliente'}
+            </Text>
+            <Pressable onPress={onClose} hitSlop={10}>
+              <FontAwesome name="times" size={16} color={theme.textMuted} />
+            </Pressable>
+          </View>
+
+          <ScrollView style={{ maxHeight: 560 }} contentContainerStyle={{ gap: 14, paddingBottom: 8 }}>
+            <View style={{ gap: 4 }}>
+              <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>CADASTRO</Text>
+              <Text style={{ color: theme.text, fontSize: 14 }}>
+                Nome: <Text style={{ fontWeight: '800' }}>{cliente?.nome ?? '—'}</Text>
+              </Text>
+              <Text style={{ color: theme.text, fontSize: 14 }}>
+                Telefone: <Text style={{ fontWeight: '800' }}>{contato}</Text>
+              </Text>
+              <Text style={{ color: theme.text, fontSize: 14 }}>
+                Empresa: <Text style={{ fontWeight: '800' }}>{cliente?.empresa_nome?.trim() || '—'}</Text>
+              </Text>
+              <Text style={{ color: theme.text, fontSize: 14 }}>
+                Desde {cadastroEm} · {rotuloTempoCadastro(cliente?.created_at)}
+              </Text>
+            </View>
+
+            <View style={{ gap: 8 }}>
+              <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>REUNIÕES</Text>
+              {reunioesQ.isLoading ? (
+                <ActivityIndicator color={theme.cadastroAction} />
+              ) : reunioesQ.error ? (
+                <Text style={{ color: theme.error }}>{(reunioesQ.error as Error).message}</Text>
+              ) : (reunioesQ.data ?? []).length === 0 ? (
+                <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhuma reunião registrada.</Text>
+              ) : (
+                (reunioesQ.data ?? []).map((reuniao) => (
+                  <View key={reuniao.id} style={[styles.historicoItem, { borderColor: theme.border }]}>
+                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>{formatDateTimeBR(reuniao.created_at)}</Text>
+                    <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 4 }}>{reuniao.pendencia}</Text>
+                    <Text style={{ color: theme.text, fontSize: 13, marginTop: 2 }}>
+                      Retorno: {formatYmdBR(reuniao.data_retorno)}
+                    </Text>
+                    {reuniao.assuntos?.trim() ? (
+                      <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 2 }}>{reuniao.assuntos}</Text>
+                    ) : null}
+                  </View>
+                ))
+              )}
+            </View>
+
+            <View style={{ gap: 8 }}>
+              <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>CONVERSAS</Text>
+              {conversasQ.isLoading ? (
+                <ActivityIndicator color={theme.cadastroAction} />
+              ) : conversasQ.error ? (
+                <Text style={{ color: theme.error }}>{(conversasQ.error as Error).message}</Text>
+              ) : (conversasQ.data ?? []).length === 0 ? (
+                <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhuma conversa registrada.</Text>
+              ) : (
+                (conversasQ.data ?? []).map((conversa) => (
+                  <View key={conversa.id} style={[styles.historicoItem, { borderColor: theme.border }]}>
+                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                      {formatConversaQuando(conversa.data_conversa, conversa.hora_conversa)}
+                    </Text>
+                    <Text style={{ color: theme.text, fontSize: 14, marginTop: 4 }}>{conversa.descricao}</Text>
+                  </View>
+                ))
+              )}
+            </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -245,22 +407,28 @@ function MoverModal({
 
 function KanbanCard({
   item,
-  expandido,
-  onToggle,
-  qtdObservacoes,
-  onAbrirObservacoes,
+  ultimoContato,
+  pendenciasAbertas,
+  ultimaReuniao,
+  onAbrir,
+  onRegistrarConversa,
+  onRegistrarReuniao,
+  onEditarFicha,
   onAbrirMover,
 }: {
   item: AcompanhamentoCliente;
-  expandido: boolean;
-  onToggle: () => void;
-  qtdObservacoes: number;
-  onAbrirObservacoes: () => void;
+  ultimoContato?: string | null;
+  pendenciasAbertas: number;
+  ultimaReuniao?: string | null;
+  onAbrir: () => void;
+  onRegistrarConversa: () => void;
+  onRegistrarReuniao: () => void;
+  onEditarFicha: () => void;
   onAbrirMover: () => void;
 }) {
   const { theme } = useTheme();
-  const contato = item.celular ?? item.telefone ?? '—';
-  const whatsappUrl = resolveClienteWhatsAppUrl(item.celular, item.telefone);
+  const empresa = `${item.empresa_nome ?? ''}`.trim();
+  const pendencias = pendenciasAbertas;
 
   const webDragProps =
     Platform.OS === 'web'
@@ -286,94 +454,74 @@ function KanbanCard({
         } as object,
       ]}
     >
-      <Pressable onPress={onToggle} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1, gap: 3 })}>
-        <View style={styles.rowBetween}>
-          <Text style={{ fontWeight: '800', fontSize: 14, color: theme.headerText, flex: 1 }} numberOfLines={2}>
+      <Pressable onPress={onAbrir} style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1, gap: 10 })}>
+      <View style={styles.cardTopo}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarTexto}>{iniciaisNome(item.nome)}</Text>
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ fontWeight: '800', fontSize: 15, color: theme.headerText }} numberOfLines={2}>
             {item.nome}
           </Text>
-          <FontAwesome name={expandido ? 'chevron-up' : 'chevron-down'} size={12} color={theme.textMuted} />
-        </View>
-        <Text style={{ color: theme.textMuted, fontSize: 12 }} numberOfLines={1}>
-          {item.empresa_nome ?? '—'}
-        </Text>
-        <Text style={{ color: theme.textMuted, fontSize: 11 }}>
-          P {item.produtos} · V {item.vendas} · OP {item.ordens_producao}
-        </Text>
-      </Pressable>
-
-      <View style={styles.cardActions}>
-        <Pressable
-          onPress={onAbrirObservacoes}
-          style={({ pressed }) => [
-            styles.miniBtn,
-            { borderColor: theme.border, backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.85 : 1 },
-          ]}
-        >
-          <FontAwesome name="comment" size={12} color={theme.cadastroAction} />
-          <Text style={{ color: theme.headerText, fontWeight: '700', fontSize: 11 }}>
-            Obs{qtdObservacoes > 0 ? ` (${qtdObservacoes})` : ''}
+          <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+            {empresa ? empresa.toUpperCase() : '—'}
           </Text>
-        </Pressable>
-        <Pressable
-          onPress={onAbrirMover}
-          style={({ pressed }) => [
-            styles.miniBtn,
-            { borderColor: theme.border, backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.85 : 1 },
-          ]}
-        >
-          <FontAwesome name="arrows" size={12} color={theme.cadastroAction} />
-          <Text style={{ color: theme.headerText, fontWeight: '700', fontSize: 11 }}>Mover</Text>
-        </Pressable>
+          <Text style={{ color: theme.cadastroAction, fontSize: 11, fontWeight: '700', marginTop: 2 }}>
+            {rotuloTempoCadastro(item.created_at)}
+          </Text>
+        </View>
       </View>
 
-      {expandido ? (
-        <View style={[styles.detalhe, { borderTopColor: theme.border }]}>
-          <MetaLinha label="Contato" value={contato} />
-          <MetaLinha label="CNPJ" value={item.empresa_cnpj ?? '—'} />
-          <MetaLinha label="Clientes" value={String(item.clientes_cadastrados)} />
-          <MetaLinha label="Fornecedores" value={String(item.fornecedores_cadastrados)} />
-          <MetaLinha label="Tempo" value={`${item.dias_usando} dias`} />
-          <MetaLinha label="Plano" value={item.plano_nome ?? '—'} />
-          <MetaLinha
-            label="Valor"
-            value={item.valor_mensal_atual != null ? formatBRLFromReais(item.valor_mensal_atual) : '—'}
-          />
-          <MetaLinha
-            label="Renovação"
-            value={
-              formatYmdBR(item.data_renovacao) !== '—'
-                ? formatYmdBR(item.data_renovacao)
-                : formatDateBR(item.data_renovacao)
-            }
-          />
-          {item.dias_trial_restantes != null ? (
-            <MetaLinha
-              label="Trial"
-              value={
-                item.dias_trial_restantes < 0
-                  ? 'Expirado'
-                  : `${item.dias_trial_restantes} dia(s)`
-              }
-            />
-          ) : null}
-          {whatsappUrl ? (
-            <Pressable
-              onPress={() => void Linking.openURL(whatsappUrl)}
-              style={({ pressed }) => [
-                styles.whatsappBtn,
-                {
-                  backgroundColor: `${WHATSAPP_GREEN}18`,
-                  borderColor: WHATSAPP_GREEN,
-                  opacity: pressed ? 0.85 : 1,
-                },
-              ]}
-            >
-              <FontAwesome name="whatsapp" size={14} color={WHATSAPP_GREEN} />
-              <Text style={{ color: WHATSAPP_GREEN, fontWeight: '800', fontSize: 12 }}>WhatsApp</Text>
-            </Pressable>
-          ) : null}
+      <View style={styles.datasRow}>
+        <View style={{ flex: 1, gap: 8 }}>
+          <View>
+            <Text style={[styles.metaLabel, { color: theme.textMuted }]}>Último contato</Text>
+            <Text style={[styles.metaValor, { color: theme.headerText }]}>{dataOuTraco(ultimoContato)}</Text>
+          </View>
+          <View>
+            <Text style={[styles.metaLabel, { color: theme.textMuted }]}>Última reunião</Text>
+            <Text style={[styles.metaValor, { color: theme.headerText }]}>{dataOuTraco(ultimaReuniao)}</Text>
+          </View>
+          <View>
+            <Text style={[styles.metaLabel, { color: theme.textMuted }]}>Próxima reunião</Text>
+            <Text style={[styles.metaValor, { color: theme.headerText }]}>{dataOuTraco(item.proxima_reuniao)}</Text>
+          </View>
         </View>
-      ) : null}
+        <View style={styles.pendenciasBox}>
+          <Text style={[styles.pendenciasLabel, { color: theme.textMuted }]}>PENDÊNCIAS EM ABERTO</Text>
+          <Text style={[styles.pendenciasNumero, { color: pendencias > 0 ? PENDENCIA : theme.textMuted }]}>{pendencias}</Text>
+        </View>
+      </View>
+
+      <View style={[styles.fichaBloco, { borderTopColor: theme.border }]}>
+        <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>ÚLTIMA DIFICULDADE</Text>
+        <Text style={{ color: theme.text, fontSize: 13, marginTop: 3 }}>{item.ultima_dificuldade?.trim() || '—'}</Text>
+        <Text style={[styles.secaoLabel, { color: theme.textMuted, marginTop: 10 }]}>PRÓXIMA AÇÃO</Text>
+        <Text style={{ color: theme.text, fontSize: 13, marginTop: 3 }}>{item.proxima_acao?.trim() || '—'}</Text>
+      </View>
+      </Pressable>
+      <Pressable onPress={onEditarFicha} hitSlop={6}>
+        <Text style={{ color: theme.cadastroAction, fontWeight: '700', fontSize: 12 }}>Editar ficha</Text>
+      </Pressable>
+
+      <Pressable
+        onPress={onRegistrarConversa}
+        style={({ pressed }) => [styles.registrarBtn, { backgroundColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 }]}
+      >
+        <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 12 }}>Registrar conversa</Text>
+      </Pressable>
+      <Pressable
+        onPress={onRegistrarReuniao}
+        style={({ pressed }) => [
+          styles.registrarBtn,
+          { borderWidth: 1, borderColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 },
+        ]}
+      >
+        <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Registrar reunião</Text>
+      </Pressable>
+      <Pressable onPress={onAbrirMover} hitSlop={6}>
+        <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'center' }}>Mover de coluna</Text>
+      </Pressable>
     </View>
   );
 }
@@ -381,30 +529,33 @@ function KanbanCard({
 function KanbanColumn({
   coluna,
   clientes,
+  ultimosContatos,
   dropOver,
-  expandidoId,
-  obsCounts,
-  onToggleExpand,
-  onAbrirObservacoes,
+  onAbrir,
+  onRegistrarConversa,
+  onRegistrarReuniao,
+  onEditarFicha,
   onAbrirMover,
   onDragEnter,
   onDragLeave,
   onDropCliente,
+  resumoReunioes,
 }: {
   coluna: (typeof ACOMPANHAMENTO_COLUNAS)[number];
   clientes: AcompanhamentoCliente[];
+  ultimosContatos: Map<string, string>;
+  resumoReunioes: Map<string, ResumoReunioesCliente>;
   dropOver: boolean;
-  expandidoId: string | null;
-  obsCounts: Map<string, number>;
-  onToggleExpand: (id: string) => void;
-  onAbrirObservacoes: (c: AcompanhamentoCliente) => void;
+  onAbrir: (c: AcompanhamentoCliente) => void;
+  onRegistrarConversa: (c: AcompanhamentoCliente) => void;
+  onRegistrarReuniao: (c: AcompanhamentoCliente) => void;
+  onEditarFicha: (c: AcompanhamentoCliente) => void;
   onAbrirMover: (c: AcompanhamentoCliente) => void;
   onDragEnter: () => void;
   onDragLeave: () => void;
   onDropCliente: (clienteId: string) => void;
 }) {
   const { theme } = useTheme();
-  const cor = corColuna(coluna.key, theme);
 
   const webDropProps =
     Platform.OS === 'web'
@@ -418,13 +569,9 @@ function KanbanColumn({
             onDragEnter();
           },
           onDragLeave: () => onDragLeave(),
-          onDrop: (e: {
-            preventDefault?: () => void;
-            dataTransfer?: { getData: (t: string) => string };
-          }) => {
+          onDrop: (e: { preventDefault?: () => void; dataTransfer?: { getData: (t: string) => string } }) => {
             e.preventDefault?.();
-            const id =
-              e.dataTransfer?.getData(DRAG_MIME) || e.dataTransfer?.getData('text/plain') || '';
+            const id = e.dataTransfer?.getData(DRAG_MIME) || e.dataTransfer?.getData('text/plain') || '';
             if (id) onDropCliente(id);
             onDragLeave();
           },
@@ -438,40 +585,31 @@ function KanbanColumn({
         styles.column,
         {
           backgroundColor: theme.surfaceMuted,
-          borderColor: dropOver ? cor : theme.border,
+          borderColor: dropOver ? coluna.cor : theme.border,
           borderWidth: dropOver ? 2 : 1,
         },
       ]}
     >
-      <View style={[styles.columnHeader, { borderBottomColor: theme.border }]}>
-        <View style={[styles.dot, { backgroundColor: cor }]} />
-        <Text style={{ fontWeight: '800', color: theme.headerText, flex: 1 }} numberOfLines={1}>
-          {coluna.label}
-        </Text>
-        <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: 12 }}>{clientes.length}</Text>
+      <View style={styles.columnHeader}>
+        <View style={[styles.dot, { backgroundColor: coluna.cor }]} />
+        <Text style={[styles.columnTitle, { color: theme.headerText }]}>{coluna.label}</Text>
+        <Text style={[styles.columnCount, { color: coluna.cor }]}>{clientes.length}</Text>
       </View>
-      <Text style={{ color: theme.textMuted, fontSize: 11, paddingHorizontal: 10, paddingBottom: 6 }}>
-        {coluna.descricao}
-      </Text>
-
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 8, gap: 8, paddingBottom: 16 }}
-        nestedScrollEnabled
-      >
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 16 }} nestedScrollEnabled>
         {clientes.length === 0 ? (
-          <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center', marginTop: 12 }}>
-            Arraste um cliente para cá
-          </Text>
+          <View style={[styles.vazio, { backgroundColor: theme.background }]} />
         ) : (
           clientes.map((item) => (
             <KanbanCard
               key={item.id}
               item={item}
-              expandido={expandidoId === item.id}
-              onToggle={() => onToggleExpand(item.id)}
-              qtdObservacoes={obsCounts.get(item.id) ?? 0}
-              onAbrirObservacoes={() => onAbrirObservacoes(item)}
+              ultimoContato={ultimosContatos.get(item.id) ?? null}
+              pendenciasAbertas={resumoReunioes.get(item.id)?.abertas ?? 0}
+              ultimaReuniao={resumoReunioes.get(item.id)?.ultimaCriacao ?? null}
+              onAbrir={() => onAbrir(item)}
+              onRegistrarConversa={() => onRegistrarConversa(item)}
+              onRegistrarReuniao={() => onRegistrarReuniao(item)}
+              onEditarFicha={() => onEditarFicha(item)}
               onAbrirMover={() => onAbrirMover(item)}
             />
           ))
@@ -483,14 +621,17 @@ function KanbanColumn({
 
 export default function AcompanhamentoScreen() {
   const { theme } = useTheme();
-  const { canAccessScreen, session } = useAdminAuth();
+  const { canAccessScreen, session, adminProfile } = useAdminAuth();
   const qc = useQueryClient();
   const [busca, setBusca] = useState('');
-  const [expandidoId, setExpandidoId] = useState<string | null>(null);
-  const [clienteObs, setClienteObs] = useState<AcompanhamentoCliente | null>(null);
+  const [clienteHistorico, setClienteHistorico] = useState<AcompanhamentoCliente | null>(null);
+  const [clienteConversa, setClienteConversa] = useState<AcompanhamentoCliente | null>(null);
+  const [clienteReuniao, setClienteReuniao] = useState<AcompanhamentoCliente | null>(null);
+  const [clienteFicha, setClienteFicha] = useState<AcompanhamentoCliente | null>(null);
   const [clienteMover, setClienteMover] = useState<AcompanhamentoCliente | null>(null);
   const [dropOverColuna, setDropOverColuna] = useState<AcompanhamentoColuna | null>(null);
   const [erroMove, setErroMove] = useState<string | null>(null);
+  const [erroFicha, setErroFicha] = useState<string | null>(null);
 
   const q = useQuery({
     queryKey: ['acompanhamento_clientes'],
@@ -500,78 +641,52 @@ export default function AcompanhamentoScreen() {
 
   const ids = useMemo(() => (q.data?.clientes ?? []).map((c) => c.id), [q.data]);
 
-  const obsCountQuery = useQuery({
-    queryKey: ['acompanhamento_observacoes_counts', ids.join(',')],
-    queryFn: () => contarObservacoesAcompanhamento(ids),
+  const contatosQ = useQuery({
+    queryKey: ['acompanhamento_ultimos_contatos', ids.join(',')],
+    queryFn: () => listarUltimoContatoPorCliente(ids),
+    enabled: canAccessScreen('acompanhamento') && ids.length > 0,
+  });
+
+  const abertasQ = useQuery({
+    queryKey: ['pendencias_abertas', ids.join(',')],
+    queryFn: () => resumirReunioesPorCliente(ids),
     enabled: canAccessScreen('acompanhamento') && ids.length > 0,
   });
 
   const porColunaFiltrado = useMemo(() => {
+    const out = agrupamentoAcompanhamentoVazio();
     const base = q.data?.porColuna;
-    const out: Record<AcompanhamentoColuna, AcompanhamentoCliente[]> = {
-      fila_espera: [],
-      urgentes: [],
-      precisa_ajuda: [],
-      pode_esperar: [],
-      esta_usando: [],
-    };
     if (!base) return out;
     for (const col of ACOMPANHAMENTO_COLUNAS) {
-      out[col.key] = (base[col.key] ?? []).filter((c) => matchBuscaAcompanhamento(c, busca));
+      out[col.key] = (base[col.key] ?? []).filter((c) => matchBusca(c, busca));
     }
     return out;
   }, [q.data, busca]);
 
+  const adminEmail = adminProfile?.email ?? session?.user?.email ?? null;
+
   const moverMutation = useMutation({
-    mutationFn: async ({
-      clienteId,
-      coluna,
-    }: {
-      clienteId: string;
-      coluna: AcompanhamentoColuna;
-    }) =>
-      moverClienteKanban({
-        clienteId,
-        coluna,
-        adminEmail: session?.user?.email ?? null,
-      }),
+    mutationFn: async ({ clienteId, coluna }: { clienteId: string; coluna: AcompanhamentoColuna }) =>
+      moverClienteKanban({ clienteId, coluna, adminEmail }),
     onMutate: async ({ clienteId, coluna }) => {
       setErroMove(null);
       await qc.cancelQueries({ queryKey: ['acompanhamento_clientes'] });
-      const prev = qc.getQueryData<Awaited<ReturnType<typeof carregarAcompanhamentoClientes>>>([
-        'acompanhamento_clientes',
-      ]);
+      const prev = qc.getQueryData<Board>(['acompanhamento_clientes']);
       if (prev) {
-        const clientes = prev.clientes.map((c) =>
-          c.id === clienteId ? { ...c, coluna, etiqueta: coluna } : c,
+        qc.setQueryData(
+          ['acompanhamento_clientes'],
+          recomporBoard(prev.clientes.map((c) => (c.id === clienteId ? { ...c, coluna, etiqueta: coluna } : c))),
         );
-        const porColuna: typeof prev.porColuna = {
-          fila_espera: [],
-          urgentes: [],
-          precisa_ajuda: [],
-          pode_esperar: [],
-          esta_usando: [],
-        };
-        for (const c of clientes) {
-          porColuna[c.coluna].push(c);
-        }
-        qc.setQueryData(['acompanhamento_clientes'], {
-          ...prev,
-          clientes,
-          porColuna,
-          porEtiqueta: porColuna,
-        });
       }
       return { prev };
     },
     onError: (e, _v, ctx) => {
       if (ctx?.prev) qc.setQueryData(['acompanhamento_clientes'], ctx.prev);
+      const message = e instanceof Error ? e.message : 'Erro ao mover cliente';
       setErroMove(
-        e instanceof Error && e.message.includes('admin_acompanhamento_kanban')
+        message.includes('admin_acompanhamento_kanban') || message.includes('check constraint')
           ? 'Execute supabase/sql/admin_acompanhamento_kanban.sql no Supabase.'
-          : e instanceof Error
-            ? e.message
-            : 'Erro ao mover cliente',
+          : message,
       );
     },
     onSettled: () => {
@@ -581,12 +696,65 @@ export default function AcompanhamentoScreen() {
     },
   });
 
+  const fichaMutation = useMutation({
+    mutationFn: async (ficha: {
+      proximaReuniao: string;
+      ultimaDificuldade: string;
+      proximaAcao: string;
+    }) => {
+      if (!clienteFicha) throw new Error('Cliente inválido.');
+      return salvarFichaAcompanhamento({
+        clienteId: clienteFicha.id,
+        coluna: clienteFicha.coluna,
+        adminEmail,
+        ultimaReuniao: clienteFicha.ultima_reuniao,
+        proximaReuniao: ficha.proximaReuniao,
+        pendenciasAbertas: clienteFicha.pendencias_abertas,
+        ultimaDificuldade: ficha.ultimaDificuldade,
+        proximaAcao: ficha.proximaAcao,
+      });
+    },
+    onMutate: async (ficha) => {
+      if (!clienteFicha) return { prev: undefined as Board | undefined };
+      setErroFicha(null);
+      await qc.cancelQueries({ queryKey: ['acompanhamento_clientes'] });
+      const prev = qc.getQueryData<Board>(['acompanhamento_clientes']);
+      if (prev) {
+        qc.setQueryData(
+          ['acompanhamento_clientes'],
+          recomporBoard(
+            prev.clientes.map((c) =>
+              c.id === clienteFicha.id
+                ? {
+                    ...c,
+                    proxima_reuniao: ficha.proximaReuniao || null,
+                    ultima_dificuldade: ficha.ultimaDificuldade.trim() || null,
+                    proxima_acao: ficha.proximaAcao.trim() || null,
+                  }
+                : c,
+            ),
+          ),
+        );
+      }
+      return { prev };
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['acompanhamento_clientes'], ctx.prev);
+      setErroFicha(e instanceof Error ? e.message : 'Erro ao salvar ficha');
+    },
+    onSuccess: () => {
+      setClienteFicha(null);
+      setErroFicha(null);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+    },
+  });
+
   if (!canAccessScreen('acompanhamento')) {
     return (
       <View style={{ flex: 1, padding: 16, backgroundColor: theme.background }}>
-        <Text style={{ color: theme.warning, fontWeight: '800' }}>
-          Seu perfil não tem acesso a Acompanhamento.
-        </Text>
+        <Text style={{ color: theme.warning, fontWeight: '800' }}>Seu perfil não tem acesso a Acompanhamento.</Text>
       </View>
     );
   }
@@ -602,7 +770,7 @@ export default function AcompanhamentoScreen() {
         <View style={{ gap: 12, minWidth: ACOMPANHAMENTO_COLUNAS.length * (COL_WIDTH + 12) }}>
           <PageHeader
             title="Acompanhamento"
-            subtitle="Kanban: clientes ativos/trial começam na Fila de espera — arraste para as colunas."
+            subtitle="Trial e planos entram na Fila de espera. Arraste o card para avançar."
           />
 
           <View style={styles.searchRow}>
@@ -624,9 +792,7 @@ export default function AcompanhamentoScreen() {
 
           {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando Kanban…</Text> : null}
           {q.error ? (
-            <Text style={{ color: theme.error }}>
-              {q.error instanceof Error ? q.error.message : 'Erro ao carregar acompanhamento'}
-            </Text>
+            <Text style={{ color: theme.error }}>{q.error instanceof Error ? q.error.message : 'Erro ao carregar'}</Text>
           ) : null}
           {erroMove ? <Text style={{ color: theme.error }}>{erroMove}</Text> : null}
 
@@ -636,11 +802,16 @@ export default function AcompanhamentoScreen() {
                 key={col.key}
                 coluna={col}
                 clientes={porColunaFiltrado[col.key]}
+                ultimosContatos={contatosQ.data ?? new Map()}
+                resumoReunioes={abertasQ.data ?? new Map()}
                 dropOver={dropOverColuna === col.key}
-                expandidoId={expandidoId}
-                obsCounts={obsCountQuery.data ?? new Map()}
-                onToggleExpand={(id) => setExpandidoId((cur) => (cur === id ? null : id))}
-                onAbrirObservacoes={setClienteObs}
+                onAbrir={setClienteHistorico}
+                onRegistrarConversa={setClienteConversa}
+                onRegistrarReuniao={setClienteReuniao}
+                onEditarFicha={(c) => {
+                  setErroFicha(null);
+                  setClienteFicha(c);
+                }}
                 onAbrirMover={setClienteMover}
                 onDragEnter={() => setDropOverColuna(col.key)}
                 onDragLeave={() => setDropOverColuna((cur) => (cur === col.key ? null : cur))}
@@ -655,15 +826,38 @@ export default function AcompanhamentoScreen() {
         </View>
       </ScrollView>
 
-      <ObservacoesModal
-        cliente={clienteObs}
-        visible={Boolean(clienteObs)}
-        onClose={() => setClienteObs(null)}
+      <HistoricoClienteModal
+        cliente={clienteHistorico}
+        visible={Boolean(clienteHistorico)}
+        onClose={() => setClienteHistorico(null)}
+      />
+      <ConversaModal
+        cliente={clienteConversa}
+        visible={Boolean(clienteConversa)}
+        onClose={() => setClienteConversa(null)}
         onSaved={() => {
-          void qc.invalidateQueries({ queryKey: ['acompanhamento_observacoes_counts'] });
+          void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+          void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
         }}
       />
-
+      <RegistrarReuniaoModal
+        cliente={clienteReuniao}
+        visible={Boolean(clienteReuniao)}
+        onClose={() => setClienteReuniao(null)}
+        onSaved={() => {
+          void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
+          void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
+          void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+        }}
+      />
+      <FichaModal
+        cliente={clienteFicha}
+        visible={Boolean(clienteFicha)}
+        onClose={() => setClienteFicha(null)}
+        saving={fichaMutation.isPending}
+        erro={erroFicha}
+        onSalvar={(ficha) => fichaMutation.mutate(ficha)}
+      />
       <MoverModal
         cliente={clienteMover}
         visible={Boolean(clienteMover)}
@@ -683,84 +877,52 @@ const styles = StyleSheet.create({
   searchIcon: { position: 'absolute', left: 8, zIndex: 1 },
   searchInput: { height: 36, fontSize: 13, paddingLeft: 28, paddingRight: 28 },
   clearIcon: { position: 'absolute', right: 8, zIndex: 1 },
-  boardRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12, flex: 1, minHeight: 520 },
-  column: {
-    width: COL_WIDTH,
-    borderRadius: 12,
-    overflow: 'hidden',
-    minHeight: 480,
-    maxHeight: 720,
-  },
+  boardRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12, flex: 1, minHeight: 560 },
+  column: { width: COL_WIDTH, borderRadius: 16, overflow: 'hidden', minHeight: 520, maxHeight: 820 },
   columnHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingTop: 10,
+    paddingHorizontal: 12,
+    paddingTop: 12,
     paddingBottom: 8,
-    borderBottomWidth: 1,
+    gap: 8,
   },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  card: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 10,
-    gap: 6,
-  },
-  rowBetween: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  miniBtn: {
-    flexDirection: 'row',
+  columnTitle: { fontWeight: '700', fontSize: 13, flex: 1 },
+  columnCount: { fontWeight: '800', fontSize: 13 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  card: { borderWidth: 1, borderRadius: 14, padding: 12, gap: 10 },
+  cardTopo: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: AVATAR,
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-    borderWidth: 1,
+    justifyContent: 'center',
   },
-  detalhe: { gap: 3, paddingTop: 8, marginTop: 2, borderTopWidth: 1 },
-  whatsappBtn: {
-    marginTop: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
+  avatarTexto: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
+  datasRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  metaLabel: { fontSize: 11 },
+  metaValor: { fontSize: 15, fontWeight: '800', marginTop: 1 },
+  pendenciasBox: { width: 92, alignItems: 'flex-end' },
+  pendenciasLabel: { fontSize: 9, fontWeight: '700', textAlign: 'right' },
+  pendenciasNumero: { fontSize: 28, fontWeight: '800', lineHeight: 32, marginTop: 4 },
+  fichaBloco: { borderTopWidth: 1, paddingTop: 10 },
+  secaoLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  registrarBtn: { minHeight: 36, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  vazio: { height: 72, borderRadius: 12, opacity: 0.65 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  modalCard: {
-    maxHeight: '88%',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    borderWidth: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: 16,
-    gap: 10,
   },
-  moverCard: {
-    margin: 24,
-    marginBottom: 'auto',
-    marginTop: 'auto',
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 16,
-    gap: 8,
-  },
-  moverOpt: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  obsItem: {
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 10,
-  },
+  conversaCard: { width: '100%', maxWidth: 440, borderRadius: 16, borderWidth: 1, padding: 16, gap: 12 },
+  historicoCard: { width: '100%', maxWidth: 520, borderRadius: 16, borderWidth: 1, padding: 16, gap: 12 },
+  historicoItem: { borderWidth: 1, borderRadius: 10, padding: 10 },
+  clienteFixo: { minHeight: 44, borderWidth: 1, borderRadius: 8, justifyContent: 'center', paddingHorizontal: 12 },
+  moverCard: { width: '100%', maxWidth: 420, borderRadius: 12, borderWidth: 1, padding: 16, gap: 8 },
+  moverOpt: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10 },
 });
