@@ -52,6 +52,7 @@ const CAMPO_LABELS: Record<string, string> = {
   descricao: 'O que foi conversado',
   pendencia: 'Pendência',
   data_retorno: 'Data do retorno',
+  data_registro: 'Data do registro',
   assuntos: 'Assuntos tratados',
   proxima_acao: 'Próxima ação',
 };

@@ -356,22 +356,36 @@ function AcoesRegistro({
 function EditarReuniaoBloco({
   reuniao,
   saving,
+  podeAlterarData,
   onCancelar,
   onSalvar,
 }: {
   reuniao: ReuniaoClienteRow;
   saving: boolean;
+  podeAlterarData: boolean;
   onCancelar: () => void;
-  onSalvar: (valor: { pendencia: string; dataRetorno: string; assuntos: string; proximaAcao: string }) => void;
+  onSalvar: (valor: {
+    pendencia: string;
+    dataRetorno: string;
+    assuntos: string;
+    proximaAcao: string;
+    dataRegistro?: string;
+  }) => void;
 }) {
   const { theme } = useTheme();
   const [pendencia, setPendencia] = useState(reuniao.pendencia ?? '');
   const [dataRetorno, setDataRetorno] = useState(`${reuniao.data_retorno ?? ''}`.slice(0, 10));
+  const [dataRegistro, setDataRegistro] = useState(dataCalendarioBrasil(reuniao.created_at) ?? '');
   const [assuntos, setAssuntos] = useState(reuniao.assuntos ?? '');
   const [proximaAcao, setProximaAcao] = useState(reuniao.proxima_acao ?? '');
 
   return (
     <View style={{ gap: 8, marginTop: 8 }}>
+      {podeAlterarData ? (
+        <FormField label="Data do registro">
+          <FormDateInput value={dataRegistro} onChange={setDataRegistro} />
+        </FormField>
+      ) : null}
       <FormField label="Pendência">
         <FormInput value={pendencia} onChangeText={setPendencia} multiline style={styles.areaHistorico} />
       </FormField>
@@ -388,7 +402,15 @@ function EditarReuniaoBloco({
         <PrimaryButton
           label="Salvar"
           loading={saving}
-          onPress={() => onSalvar({ pendencia, dataRetorno, assuntos, proximaAcao })}
+          onPress={() =>
+            onSalvar({
+              pendencia,
+              dataRetorno,
+              assuntos,
+              proximaAcao,
+              dataRegistro: podeAlterarData ? dataRegistro : undefined,
+            })
+          }
           style={{ flex: 1 }}
         />
         <Pressable onPress={onCancelar} style={styles.cancelarHistorico}>
@@ -451,7 +473,8 @@ function HistoricoClienteModal({
   onClose: () => void;
 }) {
   const { theme } = useTheme();
-  const { adminProfile, canDeleteRecords } = useAdminAuth();
+  const { adminProfile, canDeleteRecords, papel } = useAdminAuth();
+  const podeAlterarDataRegistro = papel === 'owner';
   const qc = useQueryClient();
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
@@ -495,9 +518,17 @@ function HistoricoClienteModal({
       dataRetorno: string;
       assuntos: string;
       proximaAcao: string;
+      dataRegistro?: string;
     }) => {
       const anterior = (reunioesQ.data ?? []).find((r) => r.id === params.id);
-      await atualizarReuniaoCliente(params);
+      if (podeAlterarDataRegistro && !/^\d{4}-\d{2}-\d{2}$/.test(`${params.dataRegistro ?? ''}`.trim())) {
+        throw new Error('Informe a data do registro.');
+      }
+      await atualizarReuniaoCliente({
+        ...params,
+        dataRegistro: podeAlterarDataRegistro ? params.dataRegistro : null,
+        createdAtAtual: anterior?.created_at,
+      });
       await registrarAuditoria(
         { id: adminProfile?.id, email: adminProfile?.email },
         {
@@ -506,6 +537,7 @@ function HistoricoClienteModal({
           entidade_id: params.id,
           valores_anteriores: {
             cliente: cliente?.nome ?? null,
+            data_registro: dataCalendarioBrasil(anterior?.created_at),
             pendencia: anterior?.pendencia ?? null,
             data_retorno: anterior?.data_retorno ?? null,
             assuntos: anterior?.assuntos ?? null,
@@ -513,6 +545,7 @@ function HistoricoClienteModal({
           },
           valores_novos: {
             cliente: cliente?.nome ?? null,
+            data_registro: podeAlterarDataRegistro ? params.dataRegistro?.trim() || null : dataCalendarioBrasil(anterior?.created_at),
             pendencia: params.pendencia.trim(),
             data_retorno: params.dataRetorno.trim(),
             assuntos: params.assuntos.trim() || null,
@@ -702,6 +735,7 @@ function HistoricoClienteModal({
                       <EditarReuniaoBloco
                         reuniao={reuniao}
                         saving={salvarReuniao.isPending}
+                        podeAlterarData={podeAlterarDataRegistro}
                         onCancelar={() => setEditandoId(null)}
                         onSalvar={(valor) =>
                           salvarReuniao.mutate({
@@ -710,6 +744,7 @@ function HistoricoClienteModal({
                             dataRetorno: valor.dataRetorno,
                             assuntos: valor.assuntos,
                             proximaAcao: valor.proximaAcao,
+                            dataRegistro: valor.dataRegistro,
                           })
                         }
                       />

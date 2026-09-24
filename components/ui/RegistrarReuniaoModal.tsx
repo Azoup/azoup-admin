@@ -13,6 +13,7 @@ import { useTheme } from '@/src/contexts/ThemeContext';
 import { salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
 import { criarPendenciasReuniao, listarUsuariosDoCliente } from '@/src/services/repos/reunioes-repo';
 import type { AcompanhamentoCliente } from '@/src/utils/acompanhamento';
+import { dataHojeBrasil } from '@/src/utils/format';
 
 const AVATAR = '#FF7A1A';
 
@@ -31,10 +32,12 @@ type Props = {
 
 export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Props) {
   const { theme } = useTheme();
-  const { adminProfile, session } = useAdminAuth();
+  const { adminProfile, session, papel } = useAdminAuth();
+  const podeAlterarData = papel === 'owner';
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [assuntos, setAssuntos] = useState('');
   const [proximaAcao, setProximaAcao] = useState('');
+  const [dataRegistro, setDataRegistro] = useState(dataHojeBrasil);
   const [linhas, setLinhas] = useState<LinhaPendencia[]>([linhaVazia()]);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -49,6 +52,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
     setSelecionados([]);
     setAssuntos('');
     setProximaAcao('');
+    setDataRegistro(dataHojeBrasil());
     setLinhas([linhaVazia()]);
     setErro(null);
   }, [visible, cliente?.id]);
@@ -60,6 +64,9 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
   const salvarMutation = useMutation({
     mutationFn: async () => {
       if (!cliente) throw new Error('Cliente inválido.');
+      if (podeAlterarData && !/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro.trim())) {
+        throw new Error('Informe a data do registro.');
+      }
       const criadas = await criarPendenciasReuniao({
         clienteId: cliente.id,
         empresaNome: cliente.empresa_nome?.trim() || cliente.nome,
@@ -67,6 +74,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
         proximaAcao,
         participanteIds: selecionados,
         adminEmail: adminProfile?.email ?? session?.user?.email ?? null,
+        dataRegistro: podeAlterarData ? dataRegistro : null,
         pendencias: linhas.map((linha) => ({ texto: linha.texto, dataRetorno: linha.dataRetorno })),
       });
       const primeiraData = criadas.map((item) => item.data_retorno).sort()[0] ?? null;
@@ -168,6 +176,12 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
               <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                 {cliente?.empresa_nome?.trim() || cliente?.nome || 'Cliente'}
               </Text>
+
+              {podeAlterarData ? (
+                <FormField label="Data do registro">
+                  <FormDateInput value={dataRegistro} onChange={setDataRegistro} />
+                </FormField>
+              ) : null}
 
               <FormField label="Assuntos tratados">
                 <FormInput

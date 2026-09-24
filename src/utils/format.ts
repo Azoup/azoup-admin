@@ -32,6 +32,27 @@ export function dataHojeBrasil(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 }
 
+/** Horário HH:MM:SS no fuso America/Sao_Paulo. */
+export function horaBrasil(raw?: string | Date | null): string {
+  const d = raw == null || raw === '' ? new Date() : raw instanceof Date ? raw : new Date(raw);
+  const base = Number.isNaN(d.getTime()) ? new Date() : d;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(base);
+  const ler = (tipo: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === tipo)?.value ?? '00';
+  return `${ler('hour')}:${ler('minute')}:${ler('second')}`;
+}
+
+/** Instante na data YYYY-MM-DD, mantendo o dia em America/Sao_Paulo. */
+export function instanteNaDataBrasil(ymd: string, horaHms?: string | null): string {
+  const hora = horaHms && /^\d{2}:\d{2}:\d{2}$/.test(horaHms) ? horaHms : '12:00:00';
+  return `${ymd}T${hora}-03:00`;
+}
+
 /**
  * Converte timestamp/ISO/YYYY-MM-DD para data de calendário em America/Sao_Paulo (YYYY-MM-DD).
  * Aceita formatos Postgres (`2024-01-15 12:00:00+00`) e ISO.

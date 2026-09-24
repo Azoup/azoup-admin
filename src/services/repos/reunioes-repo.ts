@@ -1,5 +1,5 @@
 import { supabase } from '@/src/lib/supabase';
-import { dataCalendarioBrasil, dataHojeBrasil } from '@/src/utils/format';
+import { dataCalendarioBrasil, dataHojeBrasil, horaBrasil, instanteNaDataBrasil } from '@/src/utils/format';
 
 export type ReuniaoClienteRow = {
   id: string;
@@ -142,6 +142,8 @@ export async function criarPendenciasReuniao(params: {
   proximaAcao?: string | null;
   participanteIds: string[];
   adminEmail?: string | null;
+  /** YYYY-MM-DD. Só o owner envia; define a data do registro em vez de agora. */
+  dataRegistro?: string | null;
   pendencias: { texto: string; dataRetorno: string }[];
 }): Promise<ReuniaoClienteRow[]> {
   if (!params.clienteId) throw new Error('Cliente inválido.');
@@ -158,6 +160,8 @@ export async function criarPendenciasReuniao(params: {
   const assuntos = params.assuntos?.trim() || null;
   const proximaAcao = params.proximaAcao?.trim() || null;
   const empresa = params.empresaNome?.trim() || null;
+  const dataRegistro = params.dataRegistro?.trim() ?? '';
+  const createdAt = /^\d{4}-\d{2}-\d{2}$/.test(dataRegistro) ? instanteNaDataBrasil(dataRegistro, horaBrasil()) : null;
 
   const { data, error } = await supabase
     .from('admin_cliente_reunioes')
@@ -172,6 +176,7 @@ export async function criarPendenciasReuniao(params: {
         participante_ids: params.participanteIds,
         concluida: false,
         admin_email: params.adminEmail ?? null,
+        ...(createdAt ? { created_at: createdAt } : {}),
       })) as never,
     )
     .select(SELECT_REUNIAO);
@@ -245,21 +250,33 @@ export async function atualizarReuniaoCliente(params: {
   dataRetorno: string;
   assuntos?: string | null;
   proximaAcao?: string | null;
+  /** YYYY-MM-DD. Quando informado, troca a data do registro e mantém o horário. */
+  dataRegistro?: string | null;
+  createdAtAtual?: string | null;
 }): Promise<void> {
   if (!params.id) throw new Error('Reunião inválida.');
   const pendencia = params.pendencia.trim();
   if (!pendencia) throw new Error('Escreva a pendência da reunião.');
   const dataRetorno = params.dataRetorno.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dataRetorno)) throw new Error('Informe a data do retorno.');
+  const dataRegistro = params.dataRegistro?.trim() ?? '';
+
+  const patch: Record<string, unknown> = {
+    pendencia,
+    data_retorno: dataRetorno,
+    assuntos: params.assuntos?.trim() || null,
+    proxima_acao: params.proximaAcao?.trim() || null,
+  };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro)) {
+    const diaAtual = dataCalendarioBrasil(params.createdAtAtual);
+    if (diaAtual !== dataRegistro) {
+      patch.created_at = instanteNaDataBrasil(dataRegistro, horaBrasil(params.createdAtAtual));
+    }
+  }
 
   const { data, error } = await supabase
     .from('admin_cliente_reunioes')
-    .update({
-      pendencia,
-      data_retorno: dataRetorno,
-      assuntos: params.assuntos?.trim() || null,
-      proxima_acao: params.proximaAcao?.trim() || null,
-    } as never)
+    .update(patch as never)
     .eq('id', params.id)
     .select('id')
     .single();
