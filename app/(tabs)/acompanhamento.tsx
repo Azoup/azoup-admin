@@ -750,10 +750,14 @@ function HistoricoClienteModal({
                       />
                     ) : (
                       <>
-                        <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 4 }}>{reuniao.pendencia}</Text>
-                        <Text style={{ color: theme.text, fontSize: 13, marginTop: 2 }}>
-                          Retorno: {formatYmdBR(reuniao.data_retorno)}
-                        </Text>
+                        {reuniao.pendencia?.trim() ? (
+                          <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 4 }}>{reuniao.pendencia}</Text>
+                        ) : null}
+                        {reuniao.pendencia?.trim() ? (
+                          <Text style={{ color: theme.text, fontSize: 13, marginTop: 2 }}>
+                            Retorno: {formatYmdBR(reuniao.data_retorno)}
+                          </Text>
+                        ) : null}
                         {reuniao.assuntos?.trim() ? (
                           <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 2 }}>{reuniao.assuntos}</Text>
                         ) : null}

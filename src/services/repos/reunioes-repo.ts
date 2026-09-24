@@ -86,7 +86,7 @@ export async function listarReunioes(): Promise<ReuniaoClienteRow[]> {
   );
 
   if (error) throw new Error(error.message);
-  return (data ?? []) as unknown as ReuniaoClienteRow[];
+  return ((data ?? []) as unknown as ReuniaoClienteRow[]).filter((row) => row.pendencia?.trim());
 }
 
 export type ResumoReunioesCliente = {
@@ -104,7 +104,7 @@ export async function resumirReunioesPorCliente(clienteIds: string[]): Promise<M
   const CHUNK = 200;
   for (let i = 0; i < clienteIds.length; i += CHUNK) {
     const chunk = clienteIds.slice(i, i + CHUNK);
-    const { data, error } = await consultarReunioes('cliente_id,concluida,created_at', (colunas) =>
+    const { data, error } = await consultarReunioes('cliente_id,concluida,created_at,pendencia', (colunas) =>
       supabase.from('admin_cliente_reunioes').select(colunas).in('cliente_id', chunk),
     );
 
@@ -113,11 +113,12 @@ export async function resumirReunioesPorCliente(clienteIds: string[]): Promise<M
       cliente_id: string;
       concluida?: boolean | null;
       created_at?: string | null;
+      pendencia?: string | null;
       avulsa?: boolean | null;
     }[]) {
       if (!row.cliente_id) continue;
       const atual = map.get(row.cliente_id) ?? { abertas: 0, ultimaCriacao: null };
-      if (!row.concluida) atual.abertas += 1;
+      if (!row.concluida && `${row.pendencia ?? ''}`.trim()) atual.abertas += 1;
       if (row.avulsa) {
         map.set(row.cliente_id, atual);
         continue;
@@ -147,12 +148,11 @@ export async function criarPendenciasReuniao(params: {
   pendencias: { texto: string; dataRetorno: string }[];
 }): Promise<ReuniaoClienteRow[]> {
   if (!params.clienteId) throw new Error('Cliente inválido.');
+  if (!params.participanteIds.length) throw new Error('Selecione ao menos um participante.');
 
   const itens = params.pendencias
     .map((item) => ({ texto: item.texto.trim(), dataRetorno: item.dataRetorno.trim() }))
     .filter((item) => item.texto.length > 0);
-
-  if (!itens.length) throw new Error('Escreva ao menos uma pendência para registrar a reunião.');
 
   const semData = itens.find((item) => !/^\d{4}-\d{2}-\d{2}$/.test(item.dataRetorno));
   if (semData) throw new Error('Informe a data do retorno de cada pendência preenchida.');
@@ -162,9 +162,13 @@ export async function criarPendenciasReuniao(params: {
   const empresa = params.empresaNome?.trim() || null;
   const dataRegistro = params.dataRegistro?.trim() ?? '';
   const createdAt = /^\d{4}-\d{2}-\d{2}$/.test(dataRegistro) ? instanteNaDataBrasil(dataRegistro, horaBrasil()) : null;
+  const diaRegistro = /^\d{4}-\d{2}-\d{2}$/.test(dataRegistro) ? dataRegistro : dataHojeBrasil();
+  const linhas = itens.length
+    ? itens
+    : [{ texto: '', dataRetorno: diaRegistro }];
 
   const linhasInsert = (comData: boolean) =>
-    itens.map((item) => ({
+    linhas.map((item) => ({
       cliente_id: params.clienteId,
       empresa_nome: empresa,
       assuntos,
@@ -258,17 +262,16 @@ export async function atualizarReuniaoCliente(params: {
 }): Promise<void> {
   if (!params.id) throw new Error('Reunião inválida.');
   const pendencia = params.pendencia.trim();
-  if (!pendencia) throw new Error('Escreva a pendência da reunião.');
   const dataRetorno = params.dataRetorno.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dataRetorno)) throw new Error('Informe a data do retorno.');
+  if (pendencia && !/^\d{4}-\d{2}-\d{2}$/.test(dataRetorno)) throw new Error('Informe a data do retorno.');
   const dataRegistro = params.dataRegistro?.trim() ?? '';
 
   const patch: Record<string, unknown> = {
     pendencia,
-    data_retorno: dataRetorno,
     assuntos: params.assuntos?.trim() || null,
     proxima_acao: params.proximaAcao?.trim() || null,
   };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dataRetorno)) patch.data_retorno = dataRetorno;
   if (/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro)) {
     const diaAtual = dataCalendarioBrasil(params.createdAtAtual);
     if (diaAtual !== dataRegistro) {

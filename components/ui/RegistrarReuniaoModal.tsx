@@ -64,6 +64,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
   const salvarMutation = useMutation({
     mutationFn: async () => {
       if (!cliente) throw new Error('Cliente inválido.');
+      if (!selecionados.length) throw new Error('Selecione ao menos um participante.');
       if (podeAlterarData && !/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro.trim())) {
         throw new Error('Informe a data do registro.');
       }
