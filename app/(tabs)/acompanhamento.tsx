@@ -16,6 +16,7 @@ import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { registrarAuditoria } from '@/src/services/audit';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
+import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
 import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
 import {
   atualizarReuniaoCliente,
@@ -496,6 +497,12 @@ function HistoricoClienteModal({
     enabled: visible && Boolean(cliente?.id),
   });
 
+  const acessoQ = useQuery({
+    queryKey: ['cliente_ultimo_acesso', cliente?.id],
+    queryFn: () => buscarMetricasUsoCliente(cliente!.id),
+    enabled: visible && Boolean(cliente?.id),
+  });
+
   useEffect(() => {
     if (visible) return;
     setEditandoId(null);
@@ -688,6 +695,24 @@ function HistoricoClienteModal({
               </Text>
               <Text style={{ color: theme.text, fontSize: 14 }}>
                 Empresa: <Text style={{ fontWeight: '800' }}>{cliente?.empresa_nome?.trim() || '—'}</Text>
+              </Text>
+              <Text style={{ color: theme.text, fontSize: 14 }}>
+                Plano: <Text style={{ fontWeight: '800' }}>{cliente?.plano_nome?.trim() || '—'}</Text>
+              </Text>
+              {cliente?.dias_trial_restantes != null ? (
+                <Text style={{ color: theme.text, fontSize: 14 }}>
+                  Trial:{' '}
+                  <Text style={{ fontWeight: '800' }}>
+                    {cliente.dias_trial_restantes} {cliente.dias_trial_restantes === 1 ? 'dia restante' : 'dias restantes'}
+                    {cliente.trial_fim ? ` · até ${formatYmdBR(cliente.trial_fim)}` : ''}
+                  </Text>
+                </Text>
+              ) : null}
+              <Text style={{ color: theme.text, fontSize: 14 }}>
+                Último acesso:{' '}
+                <Text style={{ fontWeight: '800' }}>
+                  {acessoQ.isLoading ? '…' : formatDateTimeBR(acessoQ.data?.ultimo_acesso)}
+                </Text>
               </Text>
               <Text style={{ color: theme.text, fontSize: 14 }}>
                 Desde {cadastroEm} · {rotuloTempoCadastro(cliente?.created_at)}
