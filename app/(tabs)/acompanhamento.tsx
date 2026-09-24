@@ -1301,6 +1301,7 @@ export default function AcompanhamentoScreen() {
           void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
           void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
           void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+          void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
         }}
       />
       <FichaModal

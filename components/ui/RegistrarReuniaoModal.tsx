@@ -108,7 +108,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={[styles.sheet, { backgroundColor: theme.background }]}>
+        <View style={[styles.sheet, { backgroundColor: theme.background, zIndex: 2 }]}>
           <View style={styles.colunas}>
             <View style={[styles.painel, { backgroundColor: theme.surface, borderColor: theme.border }]}>
               <View style={styles.tituloRow}>

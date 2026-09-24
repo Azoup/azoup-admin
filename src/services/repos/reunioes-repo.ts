@@ -152,7 +152,7 @@ export async function criarPendenciasReuniao(params: {
     .map((item) => ({ texto: item.texto.trim(), dataRetorno: item.dataRetorno.trim() }))
     .filter((item) => item.texto.length > 0);
 
-  if (!itens.length) return [];
+  if (!itens.length) throw new Error('Escreva ao menos uma pendência para registrar a reunião.');
 
   const semData = itens.find((item) => !/^\d{4}-\d{2}-\d{2}$/.test(item.dataRetorno));
   if (semData) throw new Error('Informe a data do retorno de cada pendência preenchida.');
@@ -163,23 +163,24 @@ export async function criarPendenciasReuniao(params: {
   const dataRegistro = params.dataRegistro?.trim() ?? '';
   const createdAt = /^\d{4}-\d{2}-\d{2}$/.test(dataRegistro) ? instanteNaDataBrasil(dataRegistro, horaBrasil()) : null;
 
-  const { data, error } = await supabase
-    .from('admin_cliente_reunioes')
-    .insert(
-      itens.map((item) => ({
-        cliente_id: params.clienteId,
-        empresa_nome: empresa,
-        assuntos,
-        pendencia: item.texto,
-        proxima_acao: proximaAcao,
-        data_retorno: item.dataRetorno,
-        participante_ids: params.participanteIds,
-        concluida: false,
-        admin_email: params.adminEmail ?? null,
-        ...(createdAt ? { created_at: createdAt } : {}),
-      })) as never,
-    )
-    .select(SELECT_REUNIAO);
+  const linhasInsert = (comData: boolean) =>
+    itens.map((item) => ({
+      cliente_id: params.clienteId,
+      empresa_nome: empresa,
+      assuntos,
+      pendencia: item.texto,
+      proxima_acao: proximaAcao,
+      data_retorno: item.dataRetorno,
+      participante_ids: params.participanteIds,
+      concluida: false,
+      admin_email: params.adminEmail ?? null,
+      ...(comData && createdAt ? { created_at: createdAt } : {}),
+    })) as never;
+
+  let { data, error } = await supabase.from('admin_cliente_reunioes').insert(linhasInsert(true)).select(SELECT_REUNIAO);
+  if (error && createdAt && /created_at|timestamp|time zone/i.test(error.message)) {
+    ({ data, error } = await supabase.from('admin_cliente_reunioes').insert(linhasInsert(false)).select(SELECT_REUNIAO));
+  }
 
   if (error) {
     if (/admin_cliente_reunioes|schema cache/i.test(error.message)) {
@@ -187,7 +188,8 @@ export async function criarPendenciasReuniao(params: {
     }
     throw new Error(error.message);
   }
-  return (data ?? []) as unknown as ReuniaoClienteRow[];
+  if (!data?.length) throw new Error('Não foi possível registrar a reunião.');
+  return data as unknown as ReuniaoClienteRow[];
 }
 
 /** Pendência criada na tela de pendências, sem registro de reunião. */
