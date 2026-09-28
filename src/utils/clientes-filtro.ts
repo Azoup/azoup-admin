@@ -8,6 +8,7 @@ export type ClienteStatusFiltro =
   | 'todos'
   | 'ativo'
   | 'trial'
+  | 'inadimplente'
   | 'inativo'
   | 'cancelado'
   | 'congelado'
@@ -132,6 +133,7 @@ function matchStatus(item: ClienteAzoupAdminView, status: ClienteStatusFiltro): 
 
   if (status === 'ativo') return grupo === 'ativa';
   if (status === 'trial') return grupo === 'trial';
+  if (status === 'inadimplente') return grupo === 'inadimplente';
   if (status === 'cancelado') return grupo === 'cancelada';
   if (status === 'inativo') {
     return (
