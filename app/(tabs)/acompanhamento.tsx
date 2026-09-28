@@ -893,6 +893,7 @@ function KanbanCard({
   onSoltar: (x: number, y: number) => void;
 }) {
   const { theme } = useTheme();
+  const [aberto, setAberto] = useState(false);
   const empresa = `${item.empresa_nome ?? ''}`.trim();
   const pendencias = pendenciasAbertas;
   const arrastarRef = useRef(onArrastar);
@@ -917,6 +918,52 @@ function KanbanCard({
         },
       ]}
     >
+      <View style={styles.cardTopo}>
+        <Pressable
+          onPress={() => {
+            if (arrastou.current) {
+              arrastou.current = false;
+              return;
+            }
+            onAbrir();
+          }}
+          style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1, flex: 1, flexDirection: 'row', gap: 10, minWidth: 0 })}
+        >
+          <View style={styles.avatarWrap}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarTexto}>{iniciaisNome(item.nome)}</Text>
+            </View>
+            {item.dias_trial_restantes != null ? (
+              <View style={styles.marcaTrial}>
+                <Text style={styles.marcaTrialTexto}>T</Text>
+              </View>
+            ) : null}
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ fontWeight: '800', fontSize: 15, color: theme.headerText }} numberOfLines={2}>
+              {item.nome}
+            </Text>
+            <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+              {empresa ? empresa.toUpperCase() : '—'}
+            </Text>
+            <Text style={{ color: theme.cadastroAction, fontSize: 11, fontWeight: '700', marginTop: 2 }}>
+              {rotuloTempoCadastro(item.created_at)}
+            </Text>
+          </View>
+        </Pressable>
+        <SemArraste>
+          <Pressable
+            onPress={() => setAberto((atual) => !atual)}
+            hitSlop={8}
+            accessibilityLabel={aberto ? 'Recolher card' : 'Expandir card'}
+          >
+            <FontAwesome name={aberto ? 'chevron-up' : 'chevron-down'} size={14} color={theme.textMuted} />
+          </Pressable>
+        </SemArraste>
+      </View>
+
+      {aberto ? (
+        <>
       <Pressable
         onPress={() => {
           if (arrastou.current) {
@@ -927,30 +974,6 @@ function KanbanCard({
         }}
         style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1, gap: 10 })}
       >
-      <View style={styles.cardTopo}>
-        <View style={styles.avatarWrap}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarTexto}>{iniciaisNome(item.nome)}</Text>
-          </View>
-          {item.dias_trial_restantes != null ? (
-            <View style={styles.marcaTrial}>
-              <Text style={styles.marcaTrialTexto}>T</Text>
-            </View>
-          ) : null}
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ fontWeight: '800', fontSize: 15, color: theme.headerText }} numberOfLines={2}>
-            {item.nome}
-          </Text>
-          <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
-            {empresa ? empresa.toUpperCase() : '—'}
-          </Text>
-          <Text style={{ color: theme.cadastroAction, fontSize: 11, fontWeight: '700', marginTop: 2 }}>
-            {rotuloTempoCadastro(item.created_at)}
-          </Text>
-        </View>
-      </View>
-
       <View style={styles.datasRow}>
         <View style={{ flex: 1, gap: 8 }}>
           <View>
@@ -1003,6 +1026,8 @@ function KanbanCard({
         <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'center' }}>Mover de coluna</Text>
       </Pressable>
       </SemArraste>
+        </>
+      ) : null}
     </View>
   );
 }
