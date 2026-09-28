@@ -13,6 +13,7 @@ import { RegistrarReuniaoModal } from '@/components/ui/RegistrarReuniaoModal';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
+import { useAvisoAoAbrirPopup } from '@/components/ui/AvisoRetornoPendencias';
 import { registrarAuditoria } from '@/src/services/audit';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
@@ -98,6 +99,7 @@ function ConversaModal({
   onSaved: () => void;
 }) {
   const { theme } = useTheme();
+  useAvisoAoAbrirPopup(visible);
   const { adminProfile, session } = useAdminAuth();
   const [dataConversa, setDataConversa] = useState(hojeIsoLocal);
   const [horaConversa, setHoraConversa] = useState(agoraHorarioLocal);
@@ -206,6 +208,7 @@ function FichaModal({
   }) => void;
 }) {
   const { theme } = useTheme();
+  useAvisoAoAbrirPopup(visible);
   const [proximaReuniao, setProximaReuniao] = useState('');
   const [dificuldade, setDificuldade] = useState('');
   const [proximaAcao, setProximaAcao] = useState('');
@@ -272,6 +275,7 @@ function MoverModal({
   moving: boolean;
 }) {
   const { theme } = useTheme();
+  useAvisoAoAbrirPopup(visible);
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
@@ -474,6 +478,7 @@ function HistoricoClienteModal({
   onClose: () => void;
 }) {
   const { theme } = useTheme();
+  useAvisoAoAbrirPopup(visible);
   const { adminProfile, canDeleteRecords, papel } = useAdminAuth();
   const podeAlterarDataRegistro = papel === 'owner';
   const qc = useQueryClient();

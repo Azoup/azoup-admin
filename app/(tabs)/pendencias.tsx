@@ -11,6 +11,7 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
+import { useAvisoAoAbrirPopup } from '@/components/ui/AvisoRetornoPendencias';
 import { listarClientesParaSelecao } from '@/src/services/repos/conversas-repo';
 import {
   colunaPendencia,
@@ -115,6 +116,7 @@ function NovaPendenciaModal({
   onSaved: () => void;
 }) {
   const { theme } = useTheme();
+  useAvisoAoAbrirPopup(visible);
   const [cliente, setCliente] = useState<ClienteAzoupRow | null>(null);
   const [texto, setTexto] = useState('');
   const [dataRetorno, setDataRetorno] = useState('');

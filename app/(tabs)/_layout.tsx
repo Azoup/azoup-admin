@@ -2,6 +2,7 @@ import { Redirect, Stack } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
 import { AdminShell } from '@/components/layout/AdminShell';
+import { AvisoRetornoProvider } from '@/components/ui/AvisoRetornoPendencias';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 
@@ -35,6 +36,7 @@ export default function AppLayout() {
 
   return (
     <AdminShell>
+      <AvisoRetornoProvider>
       <Stack
         screenOptions={{
           headerShown: false,
@@ -52,6 +54,7 @@ export default function AppLayout() {
         <Stack.Screen name="metodo360" />
         <Stack.Screen name="admins" />
       </Stack>
+      </AvisoRetornoProvider>
     </AdminShell>
   );
 }
