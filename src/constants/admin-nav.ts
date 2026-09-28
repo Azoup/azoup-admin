@@ -34,6 +34,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.filter((screen) => 
             ? '/(tabs)/acompanhamento'
             : screen.key === 'pendencias'
               ? '/(tabs)/pendencias'
+              : screen.key === 'agendamentos'
+                ? '/(tabs)/agendamentos'
               : `/(tabs)/${screen.key}`;
 
   const icon: ComponentProps<typeof FontAwesome>['name'] =
@@ -45,6 +47,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.filter((screen) => 
           ? 'heartbeat'
           : screen.key === 'pendencias'
             ? 'tasks'
+            : screen.key === 'agendamentos'
+              ? 'calendar'
             : screen.key === 'conversas'
             ? 'comments'
             : screen.key === 'billing'
@@ -64,6 +68,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.filter((screen) => 
     screen.key === 'clients' ||
     screen.key === 'acompanhamento' ||
     screen.key === 'pendencias' ||
+    screen.key === 'agendamentos' ||
     screen.key === 'conversas'
       ? 'visao'
       : screen.key === 'billing' || screen.key === 'marketing' || screen.key === 'audit'

@@ -46,6 +46,7 @@ export default function AppLayout() {
         <Stack.Screen name="clients" />
         <Stack.Screen name="acompanhamento" />
         <Stack.Screen name="pendencias" />
+        <Stack.Screen name="agendamentos" />
         <Stack.Screen name="conversas" />
         <Stack.Screen name="billing" />
         <Stack.Screen name="audit" />

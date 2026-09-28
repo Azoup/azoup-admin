@@ -17,6 +17,7 @@ import { useAvisoAoAbrirPopup } from '@/components/ui/AvisoRetornoPendencias';
 import { registrarAuditoria } from '@/src/services/audit';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
+import { listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
 import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
 import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
 import {
@@ -872,6 +873,7 @@ function KanbanCard({
   ultimoContato,
   pendenciasAbertas,
   ultimaReuniao,
+  proximaReuniaoGoogle,
   onAbrir,
   onRegistrarConversa,
   onRegistrarReuniao,
@@ -884,6 +886,7 @@ function KanbanCard({
   ultimoContato?: string | null;
   pendenciasAbertas: number;
   ultimaReuniao?: string | null;
+  proximaReuniaoGoogle?: string | null;
   onAbrir: () => void;
   onRegistrarConversa: () => void;
   onRegistrarReuniao: () => void;
@@ -896,6 +899,8 @@ function KanbanCard({
   const [aberto, setAberto] = useState(false);
   const empresa = `${item.empresa_nome ?? ''}`.trim();
   const pendencias = pendenciasAbertas;
+  const proximaReuniao = proximaReuniaoGoogle || item.proxima_reuniao || null;
+  const proximaDeGoogle = Boolean(proximaReuniaoGoogle);
   const arrastarRef = useRef(onArrastar);
   const soltarRef = useRef(onSoltar);
   arrastarRef.current = onArrastar;
@@ -985,8 +990,10 @@ function KanbanCard({
             <Text style={[styles.metaValor, { color: theme.headerText }]}>{dataOuTraco(ultimaReuniao)}</Text>
           </View>
           <View>
-            <Text style={[styles.metaLabel, { color: theme.textMuted }]}>Próxima reunião</Text>
-            <Text style={[styles.metaValor, { color: theme.headerText }]}>{dataOuTraco(item.proxima_reuniao)}</Text>
+            <Text style={[styles.metaLabel, { color: theme.textMuted }]}>
+              Próxima reunião{proximaDeGoogle ? ' · Google' : ''}
+            </Text>
+            <Text style={[styles.metaValor, { color: theme.headerText }]}>{dataOuTraco(proximaReuniao)}</Text>
           </View>
         </View>
         <View style={styles.pendenciasBox}>
@@ -1045,11 +1052,13 @@ function KanbanColumn({
   onArrastar,
   onSoltar,
   resumoReunioes,
+  proximasGoogle,
 }: {
   coluna: (typeof ACOMPANHAMENTO_COLUNAS)[number];
   clientes: AcompanhamentoCliente[];
   ultimosContatos: Map<string, string>;
   resumoReunioes: Map<string, ResumoReunioesCliente>;
+  proximasGoogle: Map<string, string>;
   dropOver: boolean;
   onAbrir: (c: AcompanhamentoCliente) => void;
   onRegistrarConversa: (c: AcompanhamentoCliente) => void;
@@ -1089,6 +1098,7 @@ function KanbanColumn({
               ultimoContato={ultimosContatos.get(item.id) ?? null}
               pendenciasAbertas={resumoReunioes.get(item.id)?.abertas ?? 0}
               ultimaReuniao={resumoReunioes.get(item.id)?.ultimaCriacao ?? null}
+              proximaReuniaoGoogle={proximasGoogle.get(item.id) ?? null}
               onAbrir={() => onAbrir(item)}
               onRegistrarConversa={() => onRegistrarConversa(item)}
               onRegistrarReuniao={() => onRegistrarReuniao(item)}
@@ -1144,6 +1154,12 @@ export default function AcompanhamentoScreen() {
   const abertasQ = useQuery({
     queryKey: ['pendencias_abertas', ids.join(',')],
     queryFn: () => resumirReunioesPorCliente(ids),
+    enabled: canAccessScreen('acompanhamento') && ids.length > 0,
+  });
+
+  const googleProximasQ = useQuery({
+    queryKey: ['google_proximas_reunioes', ids.join(',')],
+    queryFn: () => listarProximasReunioesGoogle(ids),
     enabled: canAccessScreen('acompanhamento') && ids.length > 0,
   });
 
@@ -1299,6 +1315,7 @@ export default function AcompanhamentoScreen() {
                 clientes={porColunaFiltrado[col.key]}
                 ultimosContatos={contatosQ.data ?? new Map()}
                 resumoReunioes={abertasQ.data ?? new Map()}
+                proximasGoogle={googleProximasQ.data ?? new Map()}
                 dropOver={dropOverColuna === col.key}
                 onAbrir={setClienteHistorico}
                 onRegistrarConversa={setClienteConversa}
