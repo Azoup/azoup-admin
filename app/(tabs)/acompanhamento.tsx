@@ -1087,7 +1087,12 @@ function KanbanColumn({
         <Text style={[styles.columnTitle, { color: theme.headerText }]}>{coluna.label}</Text>
         <Text style={[styles.columnCount, { color: coluna.cor }]}>{clientes.length}</Text>
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 16 }} nestedScrollEnabled>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 40 }}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator
+      >
         {clientes.length === 0 ? (
           <View style={[styles.vazio, { backgroundColor: theme.background }]} />
         ) : (
@@ -1278,7 +1283,7 @@ export default function AcompanhamentoScreen() {
         contentContainerStyle={{ padding: 16, gap: 12, minHeight: '100%' }}
         showsHorizontalScrollIndicator
       >
-        <View style={{ gap: 12, minWidth: ACOMPANHAMENTO_COLUNAS.length * (COL_WIDTH + 12) }}>
+        <View style={{ gap: 12, minWidth: ACOMPANHAMENTO_COLUNAS.length * (COL_WIDTH + 12), flex: 1 }}>
           <PageHeader
             title="Acompanhamento"
             subtitle="Trial e planos entram na Fila de espera. Arraste o card para avançar."
@@ -1417,7 +1422,14 @@ const styles = StyleSheet.create({
   searchInput: { height: 36, fontSize: 13, paddingLeft: 28, paddingRight: 28 },
   clearIcon: { position: 'absolute', right: 8, zIndex: 1 },
   boardRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12, flex: 1, minHeight: 560 },
-  column: { width: COL_WIDTH, borderRadius: 16, overflow: 'hidden', minHeight: 520, maxHeight: 820 },
+  column: {
+    width: COL_WIDTH,
+    borderRadius: 16,
+    overflow: 'hidden',
+    minHeight: 520,
+    maxHeight: 820,
+    flexDirection: 'column',
+  },
   columnHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1425,6 +1437,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
     gap: 8,
+    flexShrink: 0,
   },
   columnTitle: { fontWeight: '700', fontSize: 13, flex: 1 },
   columnCount: { fontWeight: '800', fontSize: 13 },

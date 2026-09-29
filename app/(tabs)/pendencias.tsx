@@ -291,8 +291,14 @@ export default function PendenciasScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
-      <ScrollView horizontal ref={marcarScrollKanban('pendencias')} contentContainerStyle={{ padding: 16, gap: 12, minHeight: '100%' }}>
-        <View style={{ gap: 12, minWidth: COLUNAS.length * (COL_WIDTH + 12) }}>
+      <ScrollView
+        horizontal
+        ref={marcarScrollKanban('pendencias')}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 16, gap: 12, minHeight: '100%' }}
+        showsHorizontalScrollIndicator
+      >
+        <View style={{ gap: 12, minWidth: COLUNAS.length * (COL_WIDTH + 12), flex: 1 }}>
           <PageHeader
             title="Pendências"
             subtitle="Cadastre uma pendência aqui ou ela entra ao registrar uma reunião. Atrasada e Em andamento seguem a data de retorno."
@@ -341,7 +347,12 @@ export default function PendenciasScreen() {
                       <Text style={{ color: '#1A1408', fontWeight: '800', fontSize: 12 }}>{itens.length}</Text>
                     </View>
                   </View>
-                  <ScrollView contentContainerStyle={{ padding: 10, gap: 10, flexGrow: 1 }} nestedScrollEnabled>
+                  <ScrollView
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 40 }}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator
+                  >
                     {itens.length === 0 ? (
                       <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center', marginTop: 12 }}>
                         Nenhuma pendência
@@ -389,9 +400,25 @@ export default function PendenciasScreen() {
 }
 
 const styles = StyleSheet.create({
-  board: { flexDirection: 'row', gap: 12, alignItems: 'stretch', minHeight: 520 },
-  coluna: { width: COL_WIDTH, borderRadius: 16, borderWidth: 1, minHeight: 480, maxHeight: 820, overflow: 'hidden' },
-  colunaTopo: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingTop: 14, paddingBottom: 8 },
+  board: { flexDirection: 'row', gap: 12, alignItems: 'stretch', flex: 1, minHeight: 560 },
+  coluna: {
+    width: COL_WIDTH,
+    borderRadius: 16,
+    borderWidth: 1,
+    minHeight: 480,
+    maxHeight: 820,
+    overflow: 'hidden',
+    flexDirection: 'column',
+  },
+  colunaTopo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 14,
+    paddingBottom: 8,
+    flexShrink: 0,
+  },
   dot: { width: 8, height: 8, borderRadius: 4 },
   badge: { minWidth: 28, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
   card: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 },
