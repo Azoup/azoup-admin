@@ -1088,8 +1088,8 @@ function KanbanColumn({
         <Text style={[styles.columnCount, { color: coluna.cor }]}>{clientes.length}</Text>
       </View>
       <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 40 }}
+        style={{ flex: 1, minHeight: 0 }}
+        contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 96 }}
         nestedScrollEnabled
         showsVerticalScrollIndicator
       >
@@ -1276,87 +1276,87 @@ export default function AcompanhamentoScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12 }}>
+        <PageHeader
+          title="Acompanhamento"
+          subtitle="Trial e planos entram na Fila de espera. Arraste o card para avançar."
+        />
+
+        <View style={styles.searchRow}>
+          <FontAwesome name="search" size={13} color={theme.textMuted} style={styles.searchIcon} />
+          <FormInput
+            style={styles.searchInput}
+            placeholder="Buscar por nome, e-mail, telefone ou empresa…"
+            value={busca}
+            onChangeText={setBusca}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {busca ? (
+            <Pressable onPress={() => setBusca('')} hitSlop={8} style={styles.clearIcon}>
+              <FontAwesome name="times-circle" size={14} color={theme.textMuted} />
+            </Pressable>
+          ) : null}
+        </View>
+
+        {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando Kanban…</Text> : null}
+        {q.error ? (
+          <Text style={{ color: theme.error }}>{q.error instanceof Error ? q.error.message : 'Erro ao carregar'}</Text>
+        ) : null}
+        {erroMove ? <Text style={{ color: theme.error }}>{erroMove}</Text> : null}
+      </View>
+
       <ScrollView
         horizontal
         ref={marcarScrollKanban('acompanhamento')}
-        style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, gap: 12, minHeight: '100%' }}
+        style={{ flex: 1, minHeight: 0 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, flexGrow: 1, height: '100%' }}
         showsHorizontalScrollIndicator
       >
-        <View style={{ gap: 12, minWidth: ACOMPANHAMENTO_COLUNAS.length * (COL_WIDTH + 12), flex: 1 }}>
-          <PageHeader
-            title="Acompanhamento"
-            subtitle="Trial e planos entram na Fila de espera. Arraste o card para avançar."
-          />
-
-          <View style={styles.searchRow}>
-            <FontAwesome name="search" size={13} color={theme.textMuted} style={styles.searchIcon} />
-            <FormInput
-              style={styles.searchInput}
-              placeholder="Buscar por nome, e-mail, telefone ou empresa…"
-              value={busca}
-              onChangeText={setBusca}
-              autoCapitalize="none"
-              autoCorrect={false}
+        <View style={styles.boardRow}>
+          {ACOMPANHAMENTO_COLUNAS.map((col) => (
+            <KanbanColumn
+              key={col.key}
+              coluna={col}
+              clientes={porColunaFiltrado[col.key]}
+              ultimosContatos={contatosQ.data ?? new Map()}
+              resumoReunioes={abertasQ.data ?? new Map()}
+              proximasGoogle={googleProximasQ.data ?? new Map()}
+              dropOver={dropOverColuna === col.key}
+              onAbrir={setClienteHistorico}
+              onRegistrarConversa={setClienteConversa}
+              onRegistrarReuniao={setClienteReuniao}
+              onEditarFicha={(c) => {
+                setErroFicha(null);
+                setClienteFicha(c);
+              }}
+              onAbrirMover={setClienteMover}
+              onArrastar={(item, x, y) => {
+                posicaoArraste.current = { x, y };
+                posicionarFantasma(fantasmaRef.current, x, y, true);
+                if (arrasteId.current !== item.id) {
+                  arrasteId.current = item.id;
+                  setRotuloArraste(item.nome);
+                }
+                const col = colunaSobPonto(x, y);
+                const valida = isAcompanhamentoColuna(col) ? col : null;
+                if (colunaSobre.current !== valida) {
+                  colunaSobre.current = valida;
+                  setDropOverColuna(valida);
+                }
+              }}
+              onSoltar={(item, x, y) => {
+                const col = x < 0 ? null : colunaSobPonto(x, y);
+                posicionarFantasma(fantasmaRef.current, 0, 0, false);
+                arrasteId.current = null;
+                colunaSobre.current = null;
+                setRotuloArraste(null);
+                setDropOverColuna(null);
+                if (!isAcompanhamentoColuna(col) || col === item.coluna) return;
+                moverMutation.mutate({ clienteId: item.id, coluna: col });
+              }}
             />
-            {busca ? (
-              <Pressable onPress={() => setBusca('')} hitSlop={8} style={styles.clearIcon}>
-                <FontAwesome name="times-circle" size={14} color={theme.textMuted} />
-              </Pressable>
-            ) : null}
-          </View>
-
-          {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando Kanban…</Text> : null}
-          {q.error ? (
-            <Text style={{ color: theme.error }}>{q.error instanceof Error ? q.error.message : 'Erro ao carregar'}</Text>
-          ) : null}
-          {erroMove ? <Text style={{ color: theme.error }}>{erroMove}</Text> : null}
-
-          <View style={styles.boardRow}>
-            {ACOMPANHAMENTO_COLUNAS.map((col) => (
-              <KanbanColumn
-                key={col.key}
-                coluna={col}
-                clientes={porColunaFiltrado[col.key]}
-                ultimosContatos={contatosQ.data ?? new Map()}
-                resumoReunioes={abertasQ.data ?? new Map()}
-                proximasGoogle={googleProximasQ.data ?? new Map()}
-                dropOver={dropOverColuna === col.key}
-                onAbrir={setClienteHistorico}
-                onRegistrarConversa={setClienteConversa}
-                onRegistrarReuniao={setClienteReuniao}
-                onEditarFicha={(c) => {
-                  setErroFicha(null);
-                  setClienteFicha(c);
-                }}
-                onAbrirMover={setClienteMover}
-                onArrastar={(item, x, y) => {
-                  posicaoArraste.current = { x, y };
-                  posicionarFantasma(fantasmaRef.current, x, y, true);
-                  if (arrasteId.current !== item.id) {
-                    arrasteId.current = item.id;
-                    setRotuloArraste(item.nome);
-                  }
-                  const col = colunaSobPonto(x, y);
-                  const valida = isAcompanhamentoColuna(col) ? col : null;
-                  if (colunaSobre.current !== valida) {
-                    colunaSobre.current = valida;
-                    setDropOverColuna(valida);
-                  }
-                }}
-                onSoltar={(item, x, y) => {
-                  const col = x < 0 ? null : colunaSobPonto(x, y);
-                  posicionarFantasma(fantasmaRef.current, 0, 0, false);
-                  arrasteId.current = null;
-                  colunaSobre.current = null;
-                  setRotuloArraste(null);
-                  setDropOverColuna(null);
-                  if (!isAcompanhamentoColuna(col) || col === item.coluna) return;
-                  moverMutation.mutate({ clienteId: item.id, coluna: col });
-                }}
-              />
-            ))}
-          </View>
+          ))}
         </View>
       </ScrollView>
 
@@ -1421,13 +1421,12 @@ const styles = StyleSheet.create({
   searchIcon: { position: 'absolute', left: 8, zIndex: 1 },
   searchInput: { height: 36, fontSize: 13, paddingLeft: 28, paddingRight: 28 },
   clearIcon: { position: 'absolute', right: 8, zIndex: 1 },
-  boardRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12, flex: 1, minHeight: 560 },
+  boardRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12, height: '100%' },
   column: {
     width: COL_WIDTH,
     borderRadius: 16,
     overflow: 'hidden',
-    minHeight: 520,
-    maxHeight: 820,
+    height: '100%',
     flexDirection: 'column',
   },
   columnHeader: {

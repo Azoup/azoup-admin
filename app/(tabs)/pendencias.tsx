@@ -291,90 +291,90 @@ export default function PendenciasScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12 }}>
+        <PageHeader
+          title="Pendências"
+          subtitle="Cadastre uma pendência aqui ou ela entra ao registrar uma reunião. Atrasada e Em andamento seguem a data de retorno."
+          trailing={
+            <Pressable
+              onPress={() => setNovaAberta(true)}
+              style={({ pressed }) => [
+                styles.novaBtn,
+                { backgroundColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 },
+              ]}
+            >
+              <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 13 }}>Nova pendência</Text>
+            </Pressable>
+          }
+        />
+        {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando pendências…</Text> : null}
+        {q.error ? (
+          <Text style={{ color: theme.error }}>
+            {(q.error as Error).message.includes('admin_cliente_reunioes')
+              ? 'Execute supabase/sql/admin_cliente_reunioes.sql no Supabase.'
+              : (q.error as Error).message}
+          </Text>
+        ) : null}
+        {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
+      </View>
+
       <ScrollView
         horizontal
         ref={marcarScrollKanban('pendencias')}
-        style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 16, gap: 12, minHeight: '100%' }}
+        style={{ flex: 1, minHeight: 0 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, flexGrow: 1, height: '100%' }}
         showsHorizontalScrollIndicator
       >
-        <View style={{ gap: 12, minWidth: COLUNAS.length * (COL_WIDTH + 12), flex: 1 }}>
-          <PageHeader
-            title="Pendências"
-            subtitle="Cadastre uma pendência aqui ou ela entra ao registrar uma reunião. Atrasada e Em andamento seguem a data de retorno."
-            trailing={
-              <Pressable
-                onPress={() => setNovaAberta(true)}
-                style={({ pressed }) => [
-                  styles.novaBtn,
-                  { backgroundColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 },
+        <View style={styles.board}>
+          {COLUNAS.map((col) => {
+            const itens = porColuna[col.key];
+            return (
+              <View
+                key={col.key}
+                ref={marcarColuna(col.key)}
+                style={[
+                  styles.coluna,
+                  {
+                    backgroundColor: theme.surfaceMuted,
+                    borderColor: dropOver === col.key ? col.cor : theme.border,
+                    borderWidth: dropOver === col.key ? 2 : 1,
+                  },
                 ]}
               >
-                <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 13 }}>Nova pendência</Text>
-              </Pressable>
-            }
-          />
-          {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando pendências…</Text> : null}
-          {q.error ? (
-            <Text style={{ color: theme.error }}>
-              {(q.error as Error).message.includes('admin_cliente_reunioes')
-                ? 'Execute supabase/sql/admin_cliente_reunioes.sql no Supabase.'
-                : (q.error as Error).message}
-            </Text>
-          ) : null}
-          {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
-
-          <View style={styles.board}>
-            {COLUNAS.map((col) => {
-              const itens = porColuna[col.key];
-              return (
-                <View
-                  key={col.key}
-                  ref={marcarColuna(col.key)}
-                  style={[
-                    styles.coluna,
-                    {
-                      backgroundColor: theme.surfaceMuted,
-                      borderColor: dropOver === col.key ? col.cor : theme.border,
-                      borderWidth: dropOver === col.key ? 2 : 1,
-                    },
-                  ]}
-                >
-                  <View style={styles.colunaTopo}>
-                    <View style={[styles.dot, { backgroundColor: col.cor }]} />
-                    <Text style={{ color: theme.headerText, fontWeight: '800', flex: 1 }}>{col.label}</Text>
-                    <View style={[styles.badge, { backgroundColor: col.cor }]}>
-                      <Text style={{ color: '#1A1408', fontWeight: '800', fontSize: 12 }}>{itens.length}</Text>
-                    </View>
+                <View style={styles.colunaTopo}>
+                  <View style={[styles.dot, { backgroundColor: col.cor }]} />
+                  <Text style={{ color: theme.headerText, fontWeight: '800', flex: 1 }}>{col.label}</Text>
+                  <View style={[styles.badge, { backgroundColor: col.cor }]}>
+                    <Text style={{ color: '#1A1408', fontWeight: '800', fontSize: 12 }}>{itens.length}</Text>
                   </View>
-                  <ScrollView
-                    style={{ flex: 1 }}
-                    contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 40 }}
-                    nestedScrollEnabled
-                    showsVerticalScrollIndicator
-                  >
-                    {itens.length === 0 ? (
-                      <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center', marginTop: 12 }}>
-                        Nenhuma pendência
-                      </Text>
-                    ) : (
-                      itens.map((item) => (
-                        <PendenciaCard
-                          key={item.id}
-                          item={item}
-                          cor={col.cor}
-                          onConcluir={() => statusMutation.mutate({ id: item.id, concluida: true })}
-                          onReabrir={() => statusMutation.mutate({ id: item.id, concluida: false })}
-                          onArrastar={(x, y) => aoArrastar(item, x, y)}
-                          onSoltar={(x, y) => aoSoltarPonto(item, x, y)}
-                        />
-                      ))
-                    )}
-                  </ScrollView>
                 </View>
-              );
-            })}
-          </View>
+                <ScrollView
+                  style={{ flex: 1, minHeight: 0 }}
+                  contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 96 }}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                >
+                  {itens.length === 0 ? (
+                    <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center', marginTop: 12 }}>
+                      Nenhuma pendência
+                    </Text>
+                  ) : (
+                    itens.map((item) => (
+                      <PendenciaCard
+                        key={item.id}
+                        item={item}
+                        cor={col.cor}
+                        onConcluir={() => statusMutation.mutate({ id: item.id, concluida: true })}
+                        onReabrir={() => statusMutation.mutate({ id: item.id, concluida: false })}
+                        onArrastar={(x, y) => aoArrastar(item, x, y)}
+                        onSoltar={(x, y) => aoSoltarPonto(item, x, y)}
+                      />
+                    ))
+                  )}
+                </ScrollView>
+              </View>
+            );
+          })}
         </View>
       </ScrollView>
       <NovaPendenciaModal
@@ -400,13 +400,12 @@ export default function PendenciasScreen() {
 }
 
 const styles = StyleSheet.create({
-  board: { flexDirection: 'row', gap: 12, alignItems: 'stretch', flex: 1, minHeight: 560 },
+  board: { flexDirection: 'row', gap: 12, alignItems: 'stretch', height: '100%' },
   coluna: {
     width: COL_WIDTH,
     borderRadius: 16,
     borderWidth: 1,
-    minHeight: 480,
-    maxHeight: 820,
+    height: '100%',
     overflow: 'hidden',
     flexDirection: 'column',
   },
