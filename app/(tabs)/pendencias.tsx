@@ -11,7 +11,6 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
-import { useAvisoAoAbrirPopup } from '@/components/ui/AvisoRetornoPendencias';
 import { listarClientesParaSelecao } from '@/src/services/repos/conversas-repo';
 import {
   colunaPendencia,
@@ -35,6 +34,8 @@ import {
 
 const COL_WIDTH = 320;
 const SCROLL_PENDENCIAS = '[data-kanban-scroll="pendencias"]';
+/** Espaço livre embaixo das colunas para a barra horizontal não cobrir o último card. */
+const FOLGA_BARRA_HORIZONTAL = 28;
 
 const COLUNAS: { key: PendenciaColuna; label: string; cor: string }[] = [
   { key: 'atrasada', label: 'Atrasada', cor: '#F07167' },
@@ -116,7 +117,6 @@ function NovaPendenciaModal({
   onSaved: () => void;
 }) {
   const { theme } = useTheme();
-  useAvisoAoAbrirPopup(visible);
   const [cliente, setCliente] = useState<ClienteAzoupRow | null>(null);
   const [texto, setTexto] = useState('');
   const [dataRetorno, setDataRetorno] = useState('');
@@ -198,6 +198,8 @@ export default function PendenciasScreen() {
   const { theme } = useTheme();
   const { canAccessScreen, session, adminProfile } = useAdminAuth();
   const qc = useQueryClient();
+  const [alturaSlot, setAlturaSlot] = useState(0);
+  const alturaColuna = Math.max(alturaSlot - 12 - FOLGA_BARRA_HORIZONTAL, 0);
   const [novaAberta, setNovaAberta] = useState(false);
   const [dropOver, setDropOver] = useState<PendenciaColuna | null>(null);
   const [rotuloArraste, setRotuloArraste] = useState<string | null>(null);
@@ -290,7 +292,7 @@ export default function PendenciasScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background }}>
+    <View style={{ flex: 1, minHeight: 0, backgroundColor: theme.background }}>
       <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12 }}>
         <PageHeader
           title="Pendências"
@@ -318,14 +320,25 @@ export default function PendenciasScreen() {
         {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
       </View>
 
+      <View
+        style={{ flex: 1, minHeight: 0 }}
+        onLayout={(event) => {
+          const altura = Math.floor(event.nativeEvent.layout.height);
+          setAlturaSlot((atual) => (atual === altura ? atual : altura));
+        }}
+      >
       <ScrollView
         horizontal
         ref={marcarScrollKanban('pendencias')}
-        style={{ flex: 1, minHeight: 0 }}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, flexGrow: 1, height: '100%' }}
+        style={{ height: alturaSlot || '100%', minHeight: 0 }}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: 12,
+          height: alturaSlot || undefined,
+        }}
         showsHorizontalScrollIndicator
       >
-        <View style={styles.board}>
+        <View style={[styles.board, alturaColuna ? { height: alturaColuna } : null]}>
           {COLUNAS.map((col) => {
             const itens = porColuna[col.key];
             return (
@@ -334,6 +347,7 @@ export default function PendenciasScreen() {
                 ref={marcarColuna(col.key)}
                 style={[
                   styles.coluna,
+                  alturaColuna ? { height: alturaColuna } : null,
                   {
                     backgroundColor: theme.surfaceMuted,
                     borderColor: dropOver === col.key ? col.cor : theme.border,
@@ -350,7 +364,7 @@ export default function PendenciasScreen() {
                 </View>
                 <ScrollView
                   style={{ flex: 1, minHeight: 0 }}
-                  contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 96 }}
+                  contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 24 }}
                   nestedScrollEnabled
                   showsVerticalScrollIndicator
                 >
@@ -377,6 +391,7 @@ export default function PendenciasScreen() {
           })}
         </View>
       </ScrollView>
+      </View>
       <NovaPendenciaModal
         visible={novaAberta}
         adminEmail={adminProfile?.email ?? session?.user?.email ?? null}
@@ -400,12 +415,12 @@ export default function PendenciasScreen() {
 }
 
 const styles = StyleSheet.create({
-  board: { flexDirection: 'row', gap: 12, alignItems: 'stretch', height: '100%' },
+  board: { flexDirection: 'row', gap: 12, alignItems: 'stretch' },
   coluna: {
     width: COL_WIDTH,
     borderRadius: 16,
     borderWidth: 1,
-    height: '100%',
+    alignSelf: 'stretch',
     overflow: 'hidden',
     flexDirection: 'column',
   },

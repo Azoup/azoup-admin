@@ -10,7 +10,6 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
-import { useAvisoAoAbrirPopup } from '@/components/ui/AvisoRetornoPendencias';
 import { salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
 import { criarPendenciasReuniao, listarUsuariosDoCliente } from '@/src/services/repos/reunioes-repo';
 import type { AcompanhamentoCliente } from '@/src/utils/acompanhamento';
@@ -33,7 +32,6 @@ type Props = {
 
 export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Props) {
   const { theme } = useTheme();
-  useAvisoAoAbrirPopup(visible);
   const { adminProfile, session, papel } = useAdminAuth();
   const podeAlterarData = papel === 'owner';
   const [selecionados, setSelecionados] = useState<string[]>([]);

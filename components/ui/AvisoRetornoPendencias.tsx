@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { usePathname } from 'expo-router';
 
@@ -7,8 +7,6 @@ import { Text } from '@/components/Themed';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { listarReunioes, type ReuniaoClienteRow } from '@/src/services/repos/reunioes-repo';
 import { dataHojeBrasil, formatYmdBR, somarDiasYmd } from '@/src/utils/format';
-
-const AvisoRetornoContext = createContext<() => void>(() => {});
 
 function diasAte(prazo: string, hoje: string): number {
   const [ya, ma, da] = prazo.split('-').map(Number);
@@ -29,17 +27,16 @@ function pendenciasParaAvisar(rows: ReuniaoClienteRow[]): ReuniaoClienteRow[] {
     .sort((a, b) => `${a.data_retorno}`.localeCompare(`${b.data_retorno}`));
 }
 
-export function useAvisoAoAbrirPopup(visible: boolean) {
-  const abrir = useContext(AvisoRetornoContext);
-  useEffect(() => {
-    if (visible) abrir();
-  }, [visible, abrir]);
+function telaPendencias(pathname: string): boolean {
+  const path = pathname.split('?')[0].replace(/\/$/, '') || '/';
+  return path === '/pendencias';
 }
 
 export function AvisoRetornoProvider({ children }: { children: React.ReactNode }) {
   const { theme } = useTheme();
   const pathname = usePathname();
   const [aberto, setAberto] = useState(false);
+  const jaAvisou = useRef(false);
 
   const q = useQuery({
     queryKey: ['admin_cliente_reunioes', 'avisos-retorno'],
@@ -49,16 +46,14 @@ export function AvisoRetornoProvider({ children }: { children: React.ReactNode }
   const avisos = useMemo(() => pendenciasParaAvisar(q.data ?? []), [q.data]);
   const hoje = dataHojeBrasil();
 
-  const abrir = useCallback(() => {
-    if (avisos.length) setAberto(true);
-  }, [avisos.length]);
-
   useEffect(() => {
-    abrir();
-  }, [pathname, abrir]);
+    if (jaAvisou.current || !q.isSuccess || !telaPendencias(pathname)) return;
+    jaAvisou.current = true;
+    if (avisos.length) setAberto(true);
+  }, [pathname, q.isSuccess, avisos.length]);
 
   return (
-    <AvisoRetornoContext.Provider value={abrir}>
+    <>
       {children}
       <Modal visible={aberto && avisos.length > 0} animationType="fade" transparent onRequestClose={() => setAberto(false)}>
         <View style={styles.overlay}>
@@ -99,7 +94,7 @@ export function AvisoRetornoProvider({ children }: { children: React.ReactNode }
           </View>
         </View>
       </Modal>
-    </AvisoRetornoContext.Provider>
+    </>
   );
 }
 

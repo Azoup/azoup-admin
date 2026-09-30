@@ -20,9 +20,18 @@ export default function Root({ children }: { children: React.ReactNode }) {
 }
 
 const globalCss = `
-html, body, #root { min-height: 100%; }
+html, body, #root {
+  height: 100%;
+  min-height: 100%;
+}
+#root {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 body {
   margin: 0;
+  overflow: hidden;
   background-color: #F4F7FB;
   color: #0F172A;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;

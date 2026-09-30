@@ -13,7 +13,6 @@ import { RegistrarReuniaoModal } from '@/components/ui/RegistrarReuniaoModal';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
-import { useAvisoAoAbrirPopup } from '@/components/ui/AvisoRetornoPendencias';
 import { registrarAuditoria } from '@/src/services/audit';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
@@ -52,6 +51,8 @@ import type { AdminClienteConversaRow } from '@/src/types/azoup';
 import { digitsOnlyPhone } from '@/src/utils/whatsapp';
 
 const COL_WIDTH = 300;
+/** Espaço livre embaixo das colunas para a barra horizontal não cobrir o último card. */
+const FOLGA_BARRA_HORIZONTAL = 28;
 const SCROLL_ACOMPANHAMENTO = '[data-kanban-scroll="acompanhamento"]';
 const AVATAR = '#FF7A1A';
 const PENDENCIA = '#FF7A1A';
@@ -100,7 +101,6 @@ function ConversaModal({
   onSaved: () => void;
 }) {
   const { theme } = useTheme();
-  useAvisoAoAbrirPopup(visible);
   const { adminProfile, session } = useAdminAuth();
   const [dataConversa, setDataConversa] = useState(hojeIsoLocal);
   const [horaConversa, setHoraConversa] = useState(agoraHorarioLocal);
@@ -209,7 +209,6 @@ function FichaModal({
   }) => void;
 }) {
   const { theme } = useTheme();
-  useAvisoAoAbrirPopup(visible);
   const [proximaReuniao, setProximaReuniao] = useState('');
   const [dificuldade, setDificuldade] = useState('');
   const [proximaAcao, setProximaAcao] = useState('');
@@ -276,7 +275,6 @@ function MoverModal({
   moving: boolean;
 }) {
   const { theme } = useTheme();
-  useAvisoAoAbrirPopup(visible);
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
@@ -479,7 +477,6 @@ function HistoricoClienteModal({
   onClose: () => void;
 }) {
   const { theme } = useTheme();
-  useAvisoAoAbrirPopup(visible);
   const { adminProfile, canDeleteRecords, papel } = useAdminAuth();
   const podeAlterarDataRegistro = papel === 'owner';
   const qc = useQueryClient();
@@ -1044,6 +1041,7 @@ function KanbanColumn({
   clientes,
   ultimosContatos,
   dropOver,
+  altura,
   onAbrir,
   onRegistrarConversa,
   onRegistrarReuniao,
@@ -1060,6 +1058,7 @@ function KanbanColumn({
   resumoReunioes: Map<string, ResumoReunioesCliente>;
   proximasGoogle: Map<string, string>;
   dropOver: boolean;
+  altura: number;
   onAbrir: (c: AcompanhamentoCliente) => void;
   onRegistrarConversa: (c: AcompanhamentoCliente) => void;
   onRegistrarReuniao: (c: AcompanhamentoCliente) => void;
@@ -1075,6 +1074,7 @@ function KanbanColumn({
       ref={marcarColuna(coluna.key)}
       style={[
         styles.column,
+        altura ? { height: altura } : null,
         {
           backgroundColor: theme.surfaceMuted,
           borderColor: dropOver ? coluna.cor : theme.border,
@@ -1089,7 +1089,7 @@ function KanbanColumn({
       </View>
       <ScrollView
         style={{ flex: 1, minHeight: 0 }}
-        contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 96 }}
+        contentContainerStyle={{ padding: 10, gap: 10, paddingBottom: 24 }}
         nestedScrollEnabled
         showsVerticalScrollIndicator
       >
@@ -1124,6 +1124,8 @@ export default function AcompanhamentoScreen() {
   const { canAccessScreen, session, adminProfile } = useAdminAuth();
   const qc = useQueryClient();
   const [busca, setBusca] = useState('');
+  const [alturaSlot, setAlturaSlot] = useState(0);
+  const alturaColuna = Math.max(alturaSlot - 12 - FOLGA_BARRA_HORIZONTAL, 0);
   const [clienteHistorico, setClienteHistorico] = useState<AcompanhamentoCliente | null>(null);
   const [clienteConversa, setClienteConversa] = useState<AcompanhamentoCliente | null>(null);
   const [clienteReuniao, setClienteReuniao] = useState<AcompanhamentoCliente | null>(null);
@@ -1275,7 +1277,7 @@ export default function AcompanhamentoScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.background }}>
+    <View style={{ flex: 1, minHeight: 0, backgroundColor: theme.background }}>
       <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12 }}>
         <PageHeader
           title="Acompanhamento"
@@ -1306,14 +1308,25 @@ export default function AcompanhamentoScreen() {
         {erroMove ? <Text style={{ color: theme.error }}>{erroMove}</Text> : null}
       </View>
 
+      <View
+        style={{ flex: 1, minHeight: 0 }}
+        onLayout={(event) => {
+          const altura = Math.floor(event.nativeEvent.layout.height);
+          setAlturaSlot((atual) => (atual === altura ? atual : altura));
+        }}
+      >
       <ScrollView
         horizontal
         ref={marcarScrollKanban('acompanhamento')}
-        style={{ flex: 1, minHeight: 0 }}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, flexGrow: 1, height: '100%' }}
+        style={{ height: alturaSlot || '100%', minHeight: 0 }}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: 12,
+          height: alturaSlot || undefined,
+        }}
         showsHorizontalScrollIndicator
       >
-        <View style={styles.boardRow}>
+        <View style={[styles.boardRow, alturaColuna ? { height: alturaColuna } : null]}>
           {ACOMPANHAMENTO_COLUNAS.map((col) => (
             <KanbanColumn
               key={col.key}
@@ -1323,6 +1336,7 @@ export default function AcompanhamentoScreen() {
               resumoReunioes={abertasQ.data ?? new Map()}
               proximasGoogle={googleProximasQ.data ?? new Map()}
               dropOver={dropOverColuna === col.key}
+              altura={alturaColuna}
               onAbrir={setClienteHistorico}
               onRegistrarConversa={setClienteConversa}
               onRegistrarReuniao={setClienteReuniao}
@@ -1359,6 +1373,7 @@ export default function AcompanhamentoScreen() {
           ))}
         </View>
       </ScrollView>
+      </View>
 
       <HistoricoClienteModal
         cliente={clienteHistorico}
@@ -1421,12 +1436,12 @@ const styles = StyleSheet.create({
   searchIcon: { position: 'absolute', left: 8, zIndex: 1 },
   searchInput: { height: 36, fontSize: 13, paddingLeft: 28, paddingRight: 28 },
   clearIcon: { position: 'absolute', right: 8, zIndex: 1 },
-  boardRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12, height: '100%' },
+  boardRow: { flexDirection: 'row', alignItems: 'stretch', gap: 12 },
   column: {
     width: COL_WIDTH,
     borderRadius: 16,
     overflow: 'hidden',
-    height: '100%',
+    alignSelf: 'stretch',
     flexDirection: 'column',
   },
   columnHeader: {

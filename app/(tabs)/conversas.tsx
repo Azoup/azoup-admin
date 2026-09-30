@@ -20,7 +20,6 @@ import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { registrarAuditoria } from '@/src/services/audit';
 import { useTheme } from '@/src/contexts/ThemeContext';
-import { useAvisoAoAbrirPopup } from '@/components/ui/AvisoRetornoPendencias';
 import {
   atualizarConversaCliente,
   criarConversaCliente,
@@ -53,7 +52,6 @@ function ConversaFormModal({
   onSaved: () => void;
 }) {
   const { theme } = useTheme();
-  useAvisoAoAbrirPopup(visible);
   const { adminProfile } = useAdminAuth();
   const editando = Boolean(conversa);
   const [cliente, setCliente] = useState<ClienteAzoupRow | null>(null);
