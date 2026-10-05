@@ -87,6 +87,9 @@ function PendenciaCard({
         {empresa}
       </Text>
       <Text style={{ color: theme.text, fontSize: 13, lineHeight: 18 }}>{item.pendencia}</Text>
+      <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+        Escrito por {item.admin_email?.trim() || '—'}
+      </Text>
       <View style={styles.cardRodape}>
         <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: 12 }}>{formatYmdBR(item.data_retorno)}</Text>
         <SemArraste>
@@ -358,7 +361,12 @@ export default function PendenciasScreen() {
                 <View style={styles.colunaTopo}>
                   <View style={[styles.dot, { backgroundColor: col.cor }]} />
                   <Text style={{ color: theme.headerText, fontWeight: '800', flex: 1 }}>{col.label}</Text>
-                  <View style={[styles.badge, { backgroundColor: col.cor }]}>
+                  <View
+                    style={[
+                      styles.badge,
+                      { backgroundColor: itens.length === 0 ? '#FFFFFF' : col.cor },
+                    ]}
+                  >
                     <Text style={{ color: '#1A1408', fontWeight: '800', fontSize: 12 }}>{itens.length}</Text>
                   </View>
                 </View>

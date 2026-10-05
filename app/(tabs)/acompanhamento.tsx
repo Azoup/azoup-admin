@@ -22,6 +22,8 @@ import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente,
 import {
   atualizarReuniaoCliente,
   excluirReuniaoCliente,
+  colunaPendencia,
+  listarReunioes,
   listarReunioesDoCliente,
   resumirReunioesPorCliente,
   type ResumoReunioesCliente,
@@ -734,9 +736,14 @@ function HistoricoClienteModal({
                 (reunioesQ.data ?? []).map((reuniao) => (
                   <View key={reuniao.id} style={[styles.historicoItem, { borderColor: theme.border }]}>
                     <View style={styles.rowBetween}>
-                      <Text style={{ color: theme.textMuted, fontSize: 12, flex: 1 }}>
-                        {formatDateTimeBR(reuniao.created_at)}
-                      </Text>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                          {formatDateTimeBR(reuniao.created_at)}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                          Registrado por {reuniao.admin_email?.trim() || '—'}
+                        </Text>
+                      </View>
                       {editandoId === reuniao.id ? null : (
                         <AcoesRegistro
                           confirmar={confirmarId === reuniao.id}
@@ -808,9 +815,14 @@ function HistoricoClienteModal({
                 (conversasQ.data ?? []).map((conversa) => (
                   <View key={conversa.id} style={[styles.historicoItem, { borderColor: theme.border }]}>
                     <View style={styles.rowBetween}>
-                      <Text style={{ color: theme.textMuted, fontSize: 12, flex: 1 }}>
-                        {formatConversaQuando(conversa.data_conversa, conversa.hora_conversa)}
-                      </Text>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                          {formatConversaQuando(conversa.data_conversa, conversa.hora_conversa)}
+                        </Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                          Registrado por {conversa.admin_email?.trim() || '—'}
+                        </Text>
+                      </View>
                       {editandoId === conversa.id ? null : (
                         <AcoesRegistro
                           confirmar={confirmarId === conversa.id}
@@ -865,6 +877,67 @@ function HistoricoClienteModal({
   );
 }
 
+function PendenciasAbertasModal({
+  cliente,
+  visible,
+  onClose,
+}: {
+  cliente: AcompanhamentoCliente | null;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const { theme } = useTheme();
+  const q = useQuery({
+    queryKey: ['admin_cliente_reunioes', cliente?.id, 'pendencias-abertas-modal'],
+    queryFn: () => listarReunioes(),
+    enabled: visible && Boolean(cliente?.id),
+    select: (rows) =>
+      rows.filter(
+        (row) => row.cliente_id === cliente?.id && !row.concluida && `${row.pendencia ?? ''}`.trim(),
+      ),
+  });
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[styles.historicoCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <View style={styles.rowBetween}>
+            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 18, flex: 1 }} numberOfLines={2}>
+              Pendências · {cliente?.nome ?? 'Cliente'}
+            </Text>
+            <Pressable onPress={onClose} hitSlop={10}>
+              <FontAwesome name="times" size={16} color={theme.textMuted} />
+            </Pressable>
+          </View>
+          <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 8 }}>
+            {q.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+            {q.error ? <Text style={{ color: theme.error }}>{(q.error as Error).message}</Text> : null}
+            {!q.isLoading && !q.error && (q.data ?? []).length === 0 ? (
+              <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhuma pendência em aberto.</Text>
+            ) : null}
+            {(q.data ?? []).map((item) => {
+              const coluna = colunaPendencia(item);
+              const atrasada = coluna === 'atrasada';
+              return (
+                <View key={item.id} style={[styles.historicoItem, { borderColor: atrasada ? '#F07167' : theme.border }]}>
+                  <Text style={{ color: atrasada ? '#F07167' : theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+                    {atrasada ? 'Atrasada' : 'Em andamento'} · {formatYmdBR(item.data_retorno)}
+                  </Text>
+                  <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 4 }}>{item.pendencia}</Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
+                    Escrito por {item.admin_email?.trim() || '—'}
+                  </Text>
+                </View>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function KanbanCard({
   item,
   ultimoContato,
@@ -872,6 +945,7 @@ function KanbanCard({
   ultimaReuniao,
   proximaReuniaoGoogle,
   onAbrir,
+  onAbrirPendencias,
   onRegistrarConversa,
   onRegistrarReuniao,
   onEditarFicha,
@@ -885,6 +959,7 @@ function KanbanCard({
   ultimaReuniao?: string | null;
   proximaReuniaoGoogle?: string | null;
   onAbrir: () => void;
+  onAbrirPendencias: () => void;
   onRegistrarConversa: () => void;
   onRegistrarReuniao: () => void;
   onEditarFicha: () => void;
@@ -966,18 +1041,18 @@ function KanbanCard({
 
       {aberto ? (
         <>
-      <Pressable
-        onPress={() => {
-          if (arrastou.current) {
-            arrastou.current = false;
-            return;
-          }
-          onAbrir();
-        }}
-        style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1, gap: 10 })}
-      >
+      <View style={{ gap: 10 }}>
       <View style={styles.datasRow}>
-        <View style={{ flex: 1, gap: 8 }}>
+        <Pressable
+          onPress={() => {
+            if (arrastou.current) {
+              arrastou.current = false;
+              return;
+            }
+            onAbrir();
+          }}
+          style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1, flex: 1, gap: 8 })}
+        >
           <View>
             <Text style={[styles.metaLabel, { color: theme.textMuted }]}>Último contato</Text>
             <Text style={[styles.metaValor, { color: theme.headerText }]}>{dataOuTraco(ultimoContato)}</Text>
@@ -992,13 +1067,30 @@ function KanbanCard({
             </Text>
             <Text style={[styles.metaValor, { color: theme.headerText }]}>{dataOuTraco(proximaReuniao)}</Text>
           </View>
-        </View>
-        <View style={styles.pendenciasBox}>
-          <Text style={[styles.pendenciasLabel, { color: theme.textMuted }]}>PENDÊNCIAS EM ABERTO</Text>
-          <Text style={[styles.pendenciasNumero, { color: pendencias > 0 ? PENDENCIA : theme.textMuted }]}>{pendencias}</Text>
-        </View>
+        </Pressable>
+        <SemArraste>
+          <Pressable
+            onPress={onAbrirPendencias}
+            hitSlop={6}
+            accessibilityLabel="Ver pendências em aberto"
+            style={({ pressed }) => [styles.pendenciasBox, { opacity: pressed ? 0.8 : 1 }]}
+          >
+            <Text style={[styles.pendenciasLabel, { color: theme.textMuted }]}>PENDÊNCIAS EM ABERTO</Text>
+            <Text style={[styles.pendenciasNumero, { color: pendencias > 0 ? PENDENCIA : theme.textMuted }]}>{pendencias}</Text>
+          </Pressable>
+        </SemArraste>
       </View>
 
+      <Pressable
+        onPress={() => {
+          if (arrastou.current) {
+            arrastou.current = false;
+            return;
+          }
+          onAbrir();
+        }}
+        style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1 })}
+      >
       <View style={[styles.fichaBloco, { borderTopColor: theme.border }]}>
         <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>ÚLTIMA DIFICULDADE</Text>
         <Text style={{ color: theme.text, fontSize: 13, marginTop: 3 }}>{item.ultima_dificuldade?.trim() || '—'}</Text>
@@ -1006,6 +1098,7 @@ function KanbanCard({
         <Text style={{ color: theme.text, fontSize: 13, marginTop: 3 }}>{item.proxima_acao?.trim() || '—'}</Text>
       </View>
       </Pressable>
+      </View>
       <SemArraste style={{ gap: 10 }}>
       <Pressable onPress={onEditarFicha} hitSlop={6}>
         <Text style={{ color: theme.cadastroAction, fontWeight: '700', fontSize: 12 }}>Editar ficha</Text>
@@ -1043,6 +1136,7 @@ function KanbanColumn({
   dropOver,
   altura,
   onAbrir,
+  onAbrirPendencias,
   onRegistrarConversa,
   onRegistrarReuniao,
   onEditarFicha,
@@ -1060,6 +1154,7 @@ function KanbanColumn({
   dropOver: boolean;
   altura: number;
   onAbrir: (c: AcompanhamentoCliente) => void;
+  onAbrirPendencias: (c: AcompanhamentoCliente) => void;
   onRegistrarConversa: (c: AcompanhamentoCliente) => void;
   onRegistrarReuniao: (c: AcompanhamentoCliente) => void;
   onEditarFicha: (c: AcompanhamentoCliente) => void;
@@ -1105,6 +1200,7 @@ function KanbanColumn({
               ultimaReuniao={resumoReunioes.get(item.id)?.ultimaCriacao ?? null}
               proximaReuniaoGoogle={proximasGoogle.get(item.id) ?? null}
               onAbrir={() => onAbrir(item)}
+              onAbrirPendencias={() => onAbrirPendencias(item)}
               onRegistrarConversa={() => onRegistrarConversa(item)}
               onRegistrarReuniao={() => onRegistrarReuniao(item)}
               onEditarFicha={() => onEditarFicha(item)}
@@ -1127,6 +1223,7 @@ export default function AcompanhamentoScreen() {
   const [alturaSlot, setAlturaSlot] = useState(0);
   const alturaColuna = Math.max(alturaSlot - 12 - FOLGA_BARRA_HORIZONTAL, 0);
   const [clienteHistorico, setClienteHistorico] = useState<AcompanhamentoCliente | null>(null);
+  const [clientePendencias, setClientePendencias] = useState<AcompanhamentoCliente | null>(null);
   const [clienteConversa, setClienteConversa] = useState<AcompanhamentoCliente | null>(null);
   const [clienteReuniao, setClienteReuniao] = useState<AcompanhamentoCliente | null>(null);
   const [clienteFicha, setClienteFicha] = useState<AcompanhamentoCliente | null>(null);
@@ -1338,6 +1435,7 @@ export default function AcompanhamentoScreen() {
               dropOver={dropOverColuna === col.key}
               altura={alturaColuna}
               onAbrir={setClienteHistorico}
+              onAbrirPendencias={setClientePendencias}
               onRegistrarConversa={setClienteConversa}
               onRegistrarReuniao={setClienteReuniao}
               onEditarFicha={(c) => {
@@ -1379,6 +1477,11 @@ export default function AcompanhamentoScreen() {
         cliente={clienteHistorico}
         visible={Boolean(clienteHistorico)}
         onClose={() => setClienteHistorico(null)}
+      />
+      <PendenciasAbertasModal
+        cliente={clientePendencias}
+        visible={Boolean(clientePendencias)}
+        onClose={() => setClientePendencias(null)}
       />
       <ConversaModal
         cliente={clienteConversa}

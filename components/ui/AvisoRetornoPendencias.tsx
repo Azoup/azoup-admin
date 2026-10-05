@@ -36,7 +36,7 @@ export function AvisoRetornoProvider({ children }: { children: React.ReactNode }
   const { theme } = useTheme();
   const pathname = usePathname();
   const [aberto, setAberto] = useState(false);
-  const jaAvisou = useRef(false);
+  const estavaNaTela = useRef(false);
 
   const q = useQuery({
     queryKey: ['admin_cliente_reunioes', 'avisos-retorno'],
@@ -46,11 +46,18 @@ export function AvisoRetornoProvider({ children }: { children: React.ReactNode }
   const avisos = useMemo(() => pendenciasParaAvisar(q.data ?? []), [q.data]);
   const hoje = dataHojeBrasil();
 
+  const naTelaPendencias = telaPendencias(pathname);
+
   useEffect(() => {
-    if (jaAvisou.current || !q.isSuccess || !telaPendencias(pathname)) return;
-    jaAvisou.current = true;
+    if (!naTelaPendencias) {
+      estavaNaTela.current = false;
+      setAberto(false);
+      return;
+    }
+    if (!q.isSuccess || estavaNaTela.current) return;
+    estavaNaTela.current = true;
     if (avisos.length) setAberto(true);
-  }, [pathname, q.isSuccess, avisos.length]);
+  }, [naTelaPendencias, q.isSuccess, avisos.length]);
 
   return (
     <>
