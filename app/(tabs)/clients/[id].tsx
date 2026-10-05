@@ -85,7 +85,6 @@ export default function ClientDetailScreen() {
   const efetivos = useMemo(() => (data ? resolverLimitesEfetivos(data) : null), [data]);
 
   const [limU, setLimU] = useState('');
-  const [limE, setLimE] = useState('');
   const [limS, setLimS] = useState('');
   const [limT, setLimT] = useState('');
   const [motivo, setMotivo] = useState('');
@@ -100,7 +99,6 @@ export default function ClientDetailScreen() {
 
   useEffect(() => {
     setLimU('');
-    setLimE('');
     setLimS('');
     setLimT('');
     setMotivo('');
@@ -172,7 +170,7 @@ export default function ClientDetailScreen() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       setSaveHint(null);
-      const valores = parseLimitesFormulario(limU, limE, limS, limT);
+      const valores = parseLimitesFormulario(limU, '', limS, limT);
       const anteriorAssinatura = data?.assinatura as unknown as Record<string, unknown> | null;
       const anteriorOverride = data?.limites_override as unknown as Record<string, unknown> | null;
 
@@ -621,9 +619,6 @@ export default function ClientDetailScreen() {
           <>
             <FormField label="Usuários adicionais" helper="Vazio = não alterar · preenchido = novo total na assinatura">
               <FormInput keyboardType="number-pad" value={limU} onChangeText={setLimU} placeholder="—" />
-            </FormField>
-            <FormField label="Empresas adicionais" helper="Vazio = não alterar · preenchido = novo total na assinatura">
-              <FormInput keyboardType="number-pad" value={limE} onChangeText={setLimE} placeholder="—" />
             </FormField>
             <FormField label="Armazenamento (GB)" helper="Vazio = não alterar · preenchido = novo limite administrativo">
               <FormInput keyboardType="decimal-pad" value={limS} onChangeText={setLimS} placeholder="—" />
