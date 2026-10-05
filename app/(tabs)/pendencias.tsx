@@ -6,6 +6,7 @@ import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
 import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
+import { FormSelect } from '@/components/ui/FormSelect';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Text } from '@/components/Themed';
@@ -36,6 +37,7 @@ const COL_WIDTH = 320;
 const SCROLL_PENDENCIAS = '[data-kanban-scroll="pendencias"]';
 /** Espaço livre embaixo das colunas para a barra horizontal não cobrir o último card. */
 const FOLGA_BARRA_HORIZONTAL = 28;
+const FILTRO_TODOS = '__todos__';
 
 const COLUNAS: { key: PendenciaColuna; label: string; cor: string }[] = [
   { key: 'atrasada', label: 'Atrasada', cor: '#F07167' },
@@ -207,6 +209,7 @@ export default function PendenciasScreen() {
   const [dropOver, setDropOver] = useState<PendenciaColuna | null>(null);
   const [rotuloArraste, setRotuloArraste] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [autorFiltro, setAutorFiltro] = useState('');
   const fantasmaRef = useRef<View>(null);
   const posicaoArraste = useRef({ x: 0, y: 0 });
   const colunaSobre = useRef<string | null>(null);
@@ -223,6 +226,15 @@ export default function PendenciasScreen() {
     enabled: pode,
   });
 
+  const autores = useMemo(() => {
+    const emails = new Set<string>();
+    for (const row of q.data ?? []) {
+      const email = row.admin_email?.trim();
+      if (email) emails.add(email);
+    }
+    return [...emails].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [q.data]);
+
   const porColuna = useMemo(() => {
     const out: Record<PendenciaColuna, ReuniaoClienteRow[]> = {
       atrasada: [],
@@ -230,10 +242,12 @@ export default function PendenciasScreen() {
       concluida: [],
     };
     for (const row of q.data ?? []) {
+      const autor = row.admin_email?.trim() || '';
+      if (autorFiltro && autor !== autorFiltro) continue;
       out[colunaPendencia(row)].push(row);
     }
     return out;
-  }, [q.data]);
+  }, [q.data, autorFiltro]);
 
   const statusMutation = useMutation({
     mutationFn: ({ id, concluida }: { id: string; concluida: boolean }) => definirReuniaoConcluida(id, concluida),
@@ -296,7 +310,7 @@ export default function PendenciasScreen() {
 
   return (
     <View style={{ flex: 1, minHeight: 0, backgroundColor: theme.background }}>
-      <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12 }}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12, zIndex: 2 }}>
         <PageHeader
           title="Pendências"
           subtitle="Cadastre uma pendência aqui ou ela entra ao registrar uma reunião. Atrasada e Em andamento seguem a data de retorno."
@@ -312,6 +326,16 @@ export default function PendenciasScreen() {
             </Pressable>
           }
         />
+        <View style={{ maxWidth: 360, zIndex: 2 }}>
+          <FormField label="Quem escreveu">
+            <FormSelect
+              options={[FILTRO_TODOS, ...autores]}
+              value={autorFiltro || FILTRO_TODOS}
+              onChange={(valor) => setAutorFiltro(valor === FILTRO_TODOS ? '' : valor)}
+              labels={{ [FILTRO_TODOS]: 'Todos' }}
+            />
+          </FormField>
+        </View>
         {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando pendências…</Text> : null}
         {q.error ? (
           <Text style={{ color: theme.error }}>
