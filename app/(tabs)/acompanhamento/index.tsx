@@ -660,6 +660,37 @@ function ChamadoDigisacModal({
   );
 }
 
+function BotaoAcao({ label, onPress }: { label: string; onPress: () => void }) {
+  const { theme } = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed, hovered }) => {
+        const ativo = pressed || Boolean(hovered);
+        return [
+          styles.registrarBtn,
+          {
+            paddingHorizontal: 12,
+            borderWidth: 1,
+            borderColor: theme.cadastroAction,
+            backgroundColor: ativo ? theme.cadastroAction : 'transparent',
+            cursor: 'pointer',
+          },
+        ];
+      }}
+    >
+      {({ pressed, hovered }) => {
+        const ativo = pressed || Boolean(hovered);
+        return (
+          <Text style={{ color: ativo ? theme.cadastroActionText : theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+            {label}
+          </Text>
+        );
+      }}
+    </Pressable>
+  );
+}
+
 export function HistoricoClienteTela({
   cliente,
   embutido = false,
@@ -920,24 +951,9 @@ export function HistoricoClienteTela({
       {embutido ? null : <BackLink href="/(tabs)/acompanhamento" label="Acompanhamento" />}
       {embutido ? null : <PageHeader title={cliente.nome} subtitle={cliente.empresa_nome?.trim() || 'Cliente'} />}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        <Pressable
-          onPress={() => setReuniaoAberta(true)}
-          style={({ pressed }) => [styles.registrarBtn, { paddingHorizontal: 12, borderWidth: 1, borderColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 }]}
-        >
-          <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Registrar reunião</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setConversaAberta(true)}
-          style={({ pressed }) => [styles.registrarBtn, { paddingHorizontal: 12, backgroundColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 }]}
-        >
-          <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 12 }}>Registrar conversa</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setPendenciaAberta(true)}
-          style={({ pressed }) => [styles.registrarBtn, { paddingHorizontal: 12, borderWidth: 1, borderColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 }]}
-        >
-          <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Nova pendência</Text>
-        </Pressable>
+        <BotaoAcao label="Registrar reunião" onPress={() => setReuniaoAberta(true)} />
+        <BotaoAcao label="Registrar conversa" onPress={() => setConversaAberta(true)} />
+        <BotaoAcao label="Nova pendência" onPress={() => setPendenciaAberta(true)} />
       </View>
       <View style={{ gap: 14 }}>
             <View style={{ gap: 4 }}>
