@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
-import { FlatList, Switch, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { FlatList, Pressable, View } from 'react-native';
 
 import { SuporteVideoCard } from '@/components/ui/SuporteVideoCard';
 import { FormField } from '@/components/ui/FormField';
@@ -43,9 +43,10 @@ function DigisacBoasVindasConfig() {
   const [mensagem, setMensagem] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const editou = useRef(false);
 
   useEffect(() => {
-    if (!q.data) return;
+    if (!q.data || editou.current) return;
     setHabilitado(q.data.habilitado);
     setMensagem(q.data.mensagem);
   }, [q.data]);
@@ -82,17 +83,36 @@ function DigisacBoasVindasConfig() {
       <Text style={{ color: theme.textMuted, fontSize: 13 }}>
         Quando ligada, todo cliente novo recebe esta mensagem no telefone cadastrado. O contato entra na conexão e no departamento Azoup Confec.
       </Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <Text style={{ color: theme.text, fontWeight: '700', flex: 1 }}>Enviar mensagem automática</Text>
-        <Switch
-          value={habilitado}
-          onValueChange={(valor) => {
-            setHabilitado(valor);
-            setOk(null);
-          }}
-          trackColor={{ true: theme.cadastroAction }}
-        />
-      </View>
+      <Pressable
+        accessibilityRole="switch"
+        accessibilityState={{ checked: habilitado }}
+        onPress={() => {
+          editou.current = true;
+          setHabilitado((atual) => !atual);
+          setOk(null);
+        }}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          minHeight: 52,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          borderRadius: 10,
+          borderWidth: 2,
+          borderColor: habilitado ? theme.cadastroAction : theme.border,
+          backgroundColor: habilitado ? theme.cadastroAction : theme.surface,
+          opacity: pressed ? 0.88 : 1,
+        })}
+      >
+        <Text style={{ color: habilitado ? theme.cadastroActionText : theme.text, fontWeight: '800', flex: 1 }}>
+          Enviar mensagem automática
+        </Text>
+        <Text style={{ color: habilitado ? theme.cadastroActionText : theme.textMuted, fontWeight: '800', fontSize: 13 }}>
+          {habilitado ? 'LIGADA' : 'DESLIGADA'}
+        </Text>
+      </Pressable>
       <FormField label="Mensagem" helper="Enviada exatamente como estiver escrita.">
         <FormInput
           multiline
