@@ -6,3 +6,7 @@ verify_jwt = false
 # O webhook do banco chega sem JWT. A função exige o header x-webhook-secret.
 [functions.digisac-boas-vindas]
 verify_jwt = false
+
+# O painel envia o JWT, mas a conferência do admin fica dentro da função.
+[functions.digisac-historico]
+verify_jwt = false

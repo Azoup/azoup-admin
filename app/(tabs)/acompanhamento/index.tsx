@@ -21,6 +21,11 @@ import { useTheme } from '@/src/contexts/ThemeContext';
 import { listarAlertaContato } from '@/src/services/repos/acompanhamento-alerta-repo';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
 import { listarAgendaDoCliente, listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
+import {
+  listarChamadosDigisac,
+  listarMensagensDigisac,
+  type DigisacChamado,
+} from '@/src/services/digisac-historico-api';
 import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
 import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
 import {
@@ -546,6 +551,97 @@ function NovaPendenciaClienteModal({
   );
 }
 
+function tituloChamado(chamado: DigisacChamado): string {
+  const assunto = chamado.assunto?.trim();
+  if (assunto) return assunto;
+  if (chamado.protocolo) return `Protocolo ${chamado.protocolo}`;
+  return 'Chamado';
+}
+
+function detalheChamado(chamado: DigisacChamado): string {
+  const partes = [chamado.aberto ? 'Aberto' : 'Encerrado'];
+  if (chamado.assunto?.trim() && chamado.protocolo) partes.push(`Protocolo ${chamado.protocolo}`);
+  if (chamado.inicio) partes.push(formatDataHoraBrasil(chamado.inicio));
+  return partes.join(' · ');
+}
+
+const VAZIO_CHAMADOS: Record<string, string> = {
+  sem_telefone: 'Este cliente não tem telefone para buscar na Digisac.',
+  sem_contato: 'Nenhum contato deste telefone na Digisac.',
+  sem_chamados: 'Nenhum chamado na Digisac.',
+};
+
+function ChamadoDigisacModal({
+  clienteId,
+  chamado,
+  onClose,
+}: {
+  clienteId: string;
+  chamado: DigisacChamado | null;
+  onClose: () => void;
+}) {
+  const { theme } = useTheme();
+  const mensagensQ = useQuery({
+    queryKey: ['digisac_mensagens', clienteId, chamado?.id],
+    queryFn: () => listarMensagensDigisac(clienteId, chamado!.id),
+    enabled: Boolean(clienteId && chamado?.id),
+  });
+  const mensagens = mensagensQ.data?.mensagens ?? [];
+
+  return (
+    <Modal visible={Boolean(chamado)} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[styles.historicoCard, { backgroundColor: theme.surface, borderColor: theme.border, maxHeight: '85%' }]}>
+          <View style={styles.rowBetween}>
+            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 16, flex: 1 }} numberOfLines={2}>
+              {chamado ? tituloChamado(chamado) : 'Chamado'}
+            </Text>
+            <Pressable onPress={onClose} hitSlop={10}>
+              <FontAwesome name="times" size={16} color={theme.textMuted} />
+            </Pressable>
+          </View>
+          {chamado ? <Text style={{ color: theme.textMuted, fontSize: 12 }}>{detalheChamado(chamado)}</Text> : null}
+          <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+            {mensagensQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+            {mensagensQ.error ? <Text style={{ color: theme.error }}>{(mensagensQ.error as Error).message}</Text> : null}
+            {!mensagensQ.isLoading && !mensagensQ.error && mensagens.length === 0 ? (
+              <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhuma mensagem neste chamado.</Text>
+            ) : null}
+            {mensagens.map((mensagem) => (
+              <View
+                key={mensagem.id}
+                style={{
+                  alignSelf: mensagem.deEquipe ? 'flex-end' : 'flex-start',
+                  maxWidth: '88%',
+                  borderRadius: 12,
+                  paddingHorizontal: 12,
+                  paddingVertical: 8,
+                  backgroundColor: mensagem.deEquipe ? theme.cadastroAction : theme.background,
+                }}
+              >
+                <Text style={{ color: mensagem.deEquipe ? theme.cadastroActionText : theme.text, fontSize: 14 }}>
+                  {mensagem.texto}
+                </Text>
+                <Text
+                  style={{
+                    color: mensagem.deEquipe ? theme.cadastroActionText : theme.textMuted,
+                    fontSize: 11,
+                    marginTop: 4,
+                    opacity: 0.85,
+                  }}
+                >
+                  {mensagem.deEquipe ? 'Equipe' : 'Cliente'} · {formatDataHoraBrasil(mensagem.em)}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoCliente }) {
   const { theme } = useTheme();
   const { adminProfile, canDeleteRecords, papel } = useAdminAuth();
@@ -557,6 +653,7 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
   const [reuniaoAberta, setReuniaoAberta] = useState(false);
   const [conversaAberta, setConversaAberta] = useState(false);
   const [pendenciaAberta, setPendenciaAberta] = useState(false);
+  const [chamadoAberto, setChamadoAberto] = useState<DigisacChamado | null>(null);
   const telefone = cliente?.telefone?.trim() || '';
   const celular = cliente?.celular?.trim() || '';
   const contato = [telefone, celular && celular !== telefone ? celular : ''].filter(Boolean).join(' · ') || '—';
@@ -607,6 +704,12 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
   const acessoQ = useQuery({
     queryKey: ['cliente_ultimo_acesso', cliente.id],
     queryFn: () => buscarMetricasUsoCliente(cliente.id),
+    enabled: Boolean(cliente.id),
+  });
+
+  const chamadosQ = useQuery({
+    queryKey: ['digisac_chamados', cliente.id],
+    queryFn: () => listarChamadosDigisac(cliente.id),
     enabled: Boolean(cliente.id),
   });
 
@@ -836,6 +939,25 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
               <Text style={{ color: theme.text, fontSize: 14 }}>
                 Desde {cadastroEm} · {rotuloTempoCadastro(cliente?.created_at)}
               </Text>
+            </View>
+
+            <View style={{ gap: 8 }}>
+              <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>HISTÓRICO DE CHAMADOS</Text>
+              {chamadosQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+              {chamadosQ.error ? <Text style={{ color: theme.error }}>{(chamadosQ.error as Error).message}</Text> : null}
+              {!chamadosQ.isLoading && !chamadosQ.error && chamadosQ.data?.situacao && chamadosQ.data.situacao !== 'ok' ? (
+                <Text style={{ color: theme.textMuted, fontSize: 13 }}>{VAZIO_CHAMADOS[chamadosQ.data.situacao]}</Text>
+              ) : null}
+              {(chamadosQ.data?.chamados ?? []).map((chamado) => (
+                <Pressable
+                  key={chamado.id}
+                  onPress={() => setChamadoAberto(chamado)}
+                  style={({ pressed }) => [styles.historicoItem, { borderColor: theme.border, opacity: pressed ? 0.85 : 1 }]}
+                >
+                  <Text style={{ color: theme.headerText, fontWeight: '800' }}>{tituloChamado(chamado)}</Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>{detalheChamado(chamado)}</Text>
+                </Pressable>
+              ))}
             </View>
 
             <View style={{ gap: 8 }}>
@@ -1117,6 +1239,7 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
         onClose={() => setPendenciaAberta(false)}
         onSaved={invalidarHistorico}
       />
+      <ChamadoDigisacModal clienteId={cliente.id} chamado={chamadoAberto} onClose={() => setChamadoAberto(null)} />
     </Screen>
   );
 }
