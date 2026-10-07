@@ -572,6 +572,23 @@ const VAZIO_CHAMADOS: Record<string, string> = {
   sem_chamados: 'Nenhum chamado na Digisac.',
 };
 
+function textoBusca(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function chamadoCombina(chamado: DigisacChamado, assunto: string, de: string, ate: string): boolean {
+  const termo = textoBusca(assunto.trim());
+  if (termo) {
+    const alvo = textoBusca(`${chamado.assunto ?? ''} ${chamado.protocolo ?? ''}`);
+    if (!alvo.includes(termo)) return false;
+  }
+  const dia = dataCalendarioBrasil(chamado.inicio);
+  if ((de || ate) && !dia) return false;
+  if (de && dia && dia < de) return false;
+  if (ate && dia && dia > ate) return false;
+  return true;
+}
+
 function ChamadoDigisacModal({
   clienteId,
   chamado,
@@ -655,6 +672,10 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
   const [conversaAberta, setConversaAberta] = useState(false);
   const [pendenciaAberta, setPendenciaAberta] = useState(false);
   const [chamadoAberto, setChamadoAberto] = useState<DigisacChamado | null>(null);
+  const [historicoAberto, setHistoricoAberto] = useState(false);
+  const [buscaAssunto, setBuscaAssunto] = useState('');
+  const [periodoDe, setPeriodoDe] = useState('');
+  const [periodoAte, setPeriodoAte] = useState('');
   const telefone = cliente?.telefone?.trim() || '';
   const celular = cliente?.celular?.trim() || '';
   const contato = [telefone, celular && celular !== telefone ? celular : ''].filter(Boolean).join(' · ') || '—';
@@ -711,8 +732,13 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
   const chamadosQ = useQuery({
     queryKey: ['digisac_chamados', cliente.id],
     queryFn: () => listarChamadosDigisac(cliente.id),
-    enabled: Boolean(cliente.id),
+    enabled: Boolean(cliente.id) && historicoAberto,
   });
+
+  const chamadosFiltrados = useMemo(() => {
+    const lista = chamadosQ.data?.chamados ?? [];
+    return lista.filter((chamado) => chamadoCombina(chamado, buscaAssunto, periodoDe, periodoAte));
+  }, [chamadosQ.data, buscaAssunto, periodoDe, periodoAte]);
 
   function invalidarHistorico() {
     void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
@@ -942,23 +968,83 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
               </Text>
             </View>
 
-            <View style={{ gap: 8 }}>
-              <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>HISTÓRICO DE CHAMADOS</Text>
-              {chamadosQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
-              {chamadosQ.error ? <Text style={{ color: theme.error }}>{(chamadosQ.error as Error).message}</Text> : null}
-              {!chamadosQ.isLoading && !chamadosQ.error && chamadosQ.data?.situacao && chamadosQ.data.situacao !== 'ok' ? (
-                <Text style={{ color: theme.textMuted, fontSize: 13 }}>{VAZIO_CHAMADOS[chamadosQ.data.situacao]}</Text>
+            <View
+              style={{
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: theme.border,
+                backgroundColor: theme.surface,
+                overflow: 'hidden',
+              }}
+            >
+              <Pressable
+                onPress={() => setHistoricoAberto((atual) => !atual)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: historicoAberto }}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  paddingHorizontal: 12,
+                  paddingVertical: 12,
+                  opacity: pressed ? 0.82 : 1,
+                })}
+              >
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>HISTÓRICO DE CHAMADOS</Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                    {chamadosQ.data
+                      ? chamadosQ.data.chamados.length === 1
+                        ? '1 chamado'
+                        : `${chamadosQ.data.chamados.length} chamados`
+                      : 'Toque para abrir'}
+                  </Text>
+                </View>
+                <FontAwesome name={historicoAberto ? 'chevron-up' : 'chevron-down'} size={12} color={theme.textMuted} />
+              </Pressable>
+              {historicoAberto ? (
+                <View style={{ gap: 10, paddingHorizontal: 12, paddingBottom: 12, borderTopWidth: 1, borderTopColor: theme.border }}>
+                  <FormField label="Assunto">
+                    <FormInput
+                      value={buscaAssunto}
+                      onChangeText={setBuscaAssunto}
+                      placeholder="Buscar pelo assunto"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </FormField>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={{ flex: 1 }}>
+                      <FormField label="De">
+                        <FormDateInput value={periodoDe} onChange={setPeriodoDe} />
+                      </FormField>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <FormField label="Até">
+                        <FormDateInput value={periodoAte} onChange={setPeriodoAte} />
+                      </FormField>
+                    </View>
+                  </View>
+                  {chamadosQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+                  {chamadosQ.error ? <Text style={{ color: theme.error }}>{(chamadosQ.error as Error).message}</Text> : null}
+                  {!chamadosQ.isLoading && !chamadosQ.error && chamadosQ.data?.situacao && chamadosQ.data.situacao !== 'ok' ? (
+                    <Text style={{ color: theme.textMuted, fontSize: 13 }}>{VAZIO_CHAMADOS[chamadosQ.data.situacao]}</Text>
+                  ) : null}
+                  {!chamadosQ.isLoading && !chamadosQ.error && chamadosQ.data?.situacao === 'ok' && chamadosFiltrados.length === 0 ? (
+                    <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhum chamado nesse filtro.</Text>
+                  ) : null}
+                  {chamadosFiltrados.map((chamado) => (
+                    <Pressable
+                      key={chamado.id}
+                      onPress={() => setChamadoAberto(chamado)}
+                      style={({ pressed }) => [styles.historicoItem, { borderColor: theme.border, opacity: pressed ? 0.85 : 1 }]}
+                    >
+                      <Text style={{ color: theme.headerText, fontWeight: '800' }}>{tituloChamado(chamado)}</Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>{detalheChamado(chamado)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
               ) : null}
-              {(chamadosQ.data?.chamados ?? []).map((chamado) => (
-                <Pressable
-                  key={chamado.id}
-                  onPress={() => setChamadoAberto(chamado)}
-                  style={({ pressed }) => [styles.historicoItem, { borderColor: theme.border, opacity: pressed ? 0.85 : 1 }]}
-                >
-                  <Text style={{ color: theme.headerText, fontWeight: '800' }}>{tituloChamado(chamado)}</Text>
-                  <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>{detalheChamado(chamado)}</Text>
-                </Pressable>
-              ))}
             </View>
 
             <View style={{ gap: 8 }}>
