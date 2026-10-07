@@ -28,6 +28,25 @@ export async function listarEventosAgendaCache(inicio: string, fim: string, cale
     .filter((ev) => `${ev.status ?? ''}` !== 'cancelled');
 }
 
+/** Agendamentos ainda sem cliente, do mais próximo para os passados. */
+export async function listarEventosSemCliente(): Promise<GoogleAgendaEvento[]> {
+  const { data, error } = await supabase
+    .from('admin_google_agendamentos')
+    .select('id,google_event_id,calendar_id,titulo,descricao,inicio,fim,status,cliente_id,match_tipo,participantes')
+    .is('cliente_id', null)
+    .order('inicio', { ascending: true })
+    .limit(300);
+  if (error) {
+    if (/admin_google_agendamentos|schema cache|does not exist/i.test(error.message)) return [];
+    throw new Error(error.message);
+  }
+  const agora = Date.now();
+  const lista = ((data ?? []) as GoogleAgendaEvento[]).filter((ev) => `${ev.status ?? ''}` !== 'cancelled');
+  const futuros = lista.filter((ev) => Date.parse(ev.inicio) >= agora);
+  const passados = lista.filter((ev) => Date.parse(ev.inicio) < agora).reverse();
+  return [...futuros, ...passados];
+}
+
 /** Eventos já sincronizados e vinculados a este cliente. Não chama o Google de novo. */
 export async function listarAgendaDoCliente(clienteId: string): Promise<GoogleAgendaEvento[]> {
   if (!clienteId) return [];

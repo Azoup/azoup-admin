@@ -113,11 +113,14 @@ function ultimaPagina(data: unknown): number {
   return Number.isFinite(last) ? last : NaN;
 }
 
-async function digisac(path: string): Promise<unknown> {
+async function digisac(path: string, init?: RequestInit): Promise<unknown> {
   const res = await fetch(`${digisacBase()}${path}`, {
+    ...init,
     headers: {
       Authorization: `Bearer ${digisacToken()}`,
       Accept: 'application/json',
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(init?.headers ?? {}),
     },
   });
   const text = await res.text();
@@ -148,7 +151,8 @@ async function listarPaginas(path: string): Promise<Record<string, unknown>[]> {
 
 function acharPorNome(rows: Record<string, unknown>[], nome: string): Record<string, unknown> | null {
   const alvo = semAcento(nome);
-  return rows.find((row) => semAcento(`${row.name ?? ''}`) === alvo) ?? null;
+  const iguais = rows.filter((row) => semAcento(`${row.name ?? ''}`) === alvo);
+  return iguais.find((row) => !row.archivedAt) ?? iguais[0] ?? null;
 }
 
 async function requireAdmin(req: Request) {
@@ -219,9 +223,9 @@ async function consultarTickets(contactId: string, comTopicos: boolean, page: nu
     page,
     perPage: POR_PAGINA,
   };
-  const include: unknown[] = [{ model: 'department', attributes: ['id', 'name'] }];
+  const include: unknown[] = [];
   if (comTopicos) include.push('ticketTopics');
-  query.include = include;
+  if (include.length) query.include = include;
   return digisac(`/api/v1/tickets?query=${encodeURIComponent(JSON.stringify(query))}`);
 }
 
@@ -314,15 +318,35 @@ function numeroDoContatoDigisac(row: Record<string, unknown>): string | null {
   return null;
 }
 
+function limparNomes(value: string): string[] {
+  const bruto = value.trim();
+  if (bruto.length < 3) return [];
+  const semAspas = bruto.replace(/"[^"]*"/g, ' ').replace(/\s+/g, ' ').trim();
+  const saida = new Set<string>();
+  saida.add(bruto);
+  if (semAspas.length >= 3) saida.add(semAspas);
+  const palavras = semAspas.split(' ').filter((parte) => parte.length >= 3);
+  if (palavras[0] && palavras[0].length >= 8) saida.add(palavras[0]);
+  if (palavras.length >= 2) {
+    const dois = `${palavras[0]} ${palavras[1]}`;
+    if (dois.length >= 8) saida.add(dois);
+  }
+  return [...saida];
+}
+
 /** O nome da Digisac é o da pessoa, o da empresa, ou os dois separados por traço. */
 function nomeCompativel(nomeDigisac: string, alvos: string[]): boolean {
   const nome = semAcento(nomeDigisac);
   if (!nome) return false;
-  const partes = nome.split(/\s*-\s*/).map((parte) => parte.trim()).filter((parte) => parte.length >= 3);
+  const partes = [nome, ...nome.split(/\s*-\s*/).map((parte) => parte.trim())].filter((parte) => parte.length >= 3);
   for (const alvo of alvos) {
     const comparado = semAcento(alvo);
     if (comparado.length < 3) continue;
-    if (nome === comparado || partes.some((parte) => parte === comparado)) return true;
+    if (partes.some((parte) => parte === comparado)) return true;
+    if (comparado.length < 8) continue;
+    if (partes.some((parte) => parte.startsWith(`${comparado} `) || (parte.length >= 8 && comparado.startsWith(`${parte} `)))) {
+      return true;
+    }
   }
   return false;
 }
@@ -333,6 +357,8 @@ function contatoDoClienteCombina(row: Record<string, unknown>, numeros: string[]
   const name = `${row.name ?? ''}`.trim();
   const internal = `${row.internalName ?? ''}`.trim();
   if (name && nomeCompativel(name, nomes)) return true;
+  const alternativa = `${row.alternativeName ?? ''}`.trim();
+  if (alternativa && nomeCompativel(alternativa, nomes)) return true;
   if (internal && internal !== name && nomeCompativel(internal, nomes)) return true;
   return false;
 }
@@ -365,15 +391,10 @@ async function departamentoAzoupConfec(): Promise<string> {
 
 async function buscarContatosPorTelefone(serviceId: string, numero: string): Promise<Record<string, unknown>[]> {
   const local = nacional(numero);
-  const sufixos = new Set<string>();
-  if (local.length >= 8) sufixos.add(local.slice(-8));
-  if (local) sufixos.add(local);
-  if (numero) sufixos.add(numero);
-  if (local.length === 10) {
-    const com9 = comNonoDigito(local);
-    sufixos.add(com9);
-    sufixos.add(`55${com9}`);
-  }
+  const termos = new Set<string>();
+  if (local.length >= 8) termos.add(local.slice(-8));
+  if (numero) termos.add(numero);
+  if (local.length === 10) termos.add(`55${comNonoDigito(local)}`);
   const vistos = new Set<string>();
   const out: Record<string, unknown>[] = [];
   const guardar = (rows: Record<string, unknown>[]) => {
@@ -385,43 +406,47 @@ async function buscarContatosPorTelefone(serviceId: string, numero: string): Pro
     }
   };
 
-  for (const sufixo of sufixos) {
-    const path =
-      `/api/v1/contacts?where[data.number][$iLike]=${encodeURIComponent(`%${sufixo}%`)}` +
+  for (const termo of termos) {
+    const porCampo =
+      `/api/v1/contacts?where[data.number][$iLike]=%${encodeURIComponent(termo)}%` +
       `&where[serviceId]=${encodeURIComponent(serviceId)}&perPage=20`;
-    try {
-      guardar(asRows(await digisac(path)));
-    } catch (erro) {
-      console.error('[digisac-historico] busca telefone', erro instanceof Error ? erro.message : erro);
+    const porNumero =
+      `/api/v1/contacts?number=${encodeURIComponent(termo)}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`;
+    for (const path of [porCampo, porNumero]) {
+      try {
+        guardar(asRows(await digisac(path)));
+      } catch (erro) {
+        console.error('[digisac-historico] busca telefone', erro instanceof Error ? erro.message : erro);
+      }
     }
   }
   return out;
 }
 
 async function buscarContatosPorNome(serviceId: string, termo: string): Promise<Record<string, unknown>[]> {
-  const like = `%${termo.replace(/[%_\\]/g, '')}%`;
-  const query = encodeURIComponent(JSON.stringify({
-    where: {
-      serviceId,
-      $or: [
-        { name: { $iLike: like } },
-        { internalName: { $iLike: like } },
-      ],
-    },
-    perPage: 30,
-  }));
-  try {
-    return asRows(await digisac(`/api/v1/contacts?query=${query}`));
-  } catch (erro) {
-    console.error('[digisac-historico] busca nome', erro instanceof Error ? erro.message : erro);
+  const limpo = termo.replace(/[%_\\]/g, '').trim();
+  if (limpo.length < 3) return [];
+  const like = `%${encodeURIComponent(limpo)}%`;
+  const vistos = new Set<string>();
+  const out: Record<string, unknown>[] = [];
+  const guardar = (rows: Record<string, unknown>[]) => {
+    for (const row of rows) {
+      const id = pickId(row);
+      if (!id || vistos.has(id)) continue;
+      vistos.add(id);
+      out.push(row);
+    }
+  };
+  for (const campo of ['name', 'internalName', 'alternativeName']) {
     try {
-      return asRows(await digisac(
-        `/api/v1/contacts?serviceId=${encodeURIComponent(serviceId)}&name=${encodeURIComponent(termo)}&perPage=30`,
-      ));
-    } catch {
-      return [];
+      guardar(asRows(await digisac(
+        `/api/v1/contacts?where[${campo}][$iLike]=${like}&where[serviceId]=${encodeURIComponent(serviceId)}&perPage=20`,
+      )));
+    } catch (erro) {
+      console.error('[digisac-historico] busca nome', erro instanceof Error ? erro.message : erro);
     }
   }
+  return out;
 }
 
 async function contatosDoCliente(
@@ -445,7 +470,7 @@ async function contatosDoCliente(
 
   const nomes = new Set<string>();
   const pessoa = `${(cliente as { nome?: string | null }).nome ?? ''}`.trim();
-  if (pessoa) nomes.add(pessoa);
+  for (const nome of limparNomes(pessoa)) nomes.add(nome);
   const empresasOrd = [...(empresas ?? [])].sort((a, b) => {
     const am = (a as { empresa_matriz?: boolean | null }).empresa_matriz ? 0 : 1;
     const bm = (b as { empresa_matriz?: boolean | null }).empresa_matriz ? 0 : 1;
@@ -455,8 +480,8 @@ async function contatosDoCliente(
     const row = empresa as { nome_fantasia?: string | null; razao_social?: string | null };
     const fantasia = `${row.nome_fantasia ?? ''}`.trim();
     const razao = `${row.razao_social ?? ''}`.trim();
-    if (fantasia) nomes.add(fantasia);
-    if (razao) nomes.add(razao);
+    if (fantasia) for (const nome of limparNomes(fantasia)) nomes.add(nome);
+    if (razao) for (const nome of limparNomes(razao)) nomes.add(nome);
   }
   const alvos = [...nomes];
   const numeros = new Set<string>();
@@ -498,12 +523,10 @@ async function contatosDoCliente(
     }
   }
 
-  for (const numero of listaNumeros.slice(0, 12)) {
-    candidatos.push(...await buscarContatosPorTelefone(serviceId, numero));
-  }
-  for (const nome of alvos.slice(0, 12)) {
-    candidatos.push(...await buscarContatosPorNome(serviceId, nome));
-  }
+  const telefonesAchados = await Promise.all(listaNumeros.slice(0, 8).map((numero) => buscarContatosPorTelefone(serviceId, numero)));
+  const nomesBusca = [...alvos].sort((a, b) => a.length - b.length).slice(0, 8);
+  const nomesAchados = await Promise.all(nomesBusca.map((nome) => buscarContatosPorNome(serviceId, nome)));
+  for (const lista of [...telefonesAchados, ...nomesAchados]) candidatos.push(...lista);
 
   const ids = new Set<string>();
   for (const row of candidatos) {
@@ -711,6 +734,41 @@ serve(async (req) => {
       if (contato.situacao || !contato.contactIds.length) falha('Chamado não encontrado para este cliente', 404);
       const mensagens = await listarMensagens(contato.contactIds, ticketId, departmentId);
       return json({ mensagens });
+    }
+
+    if (op === 'enviar_mensagem_pronta') {
+      const clienteId = clienteIdDoPayload(payload);
+      const texto = `${payload.texto ?? ''}`.trim();
+      if (!texto || texto.length > 4000) falha('Mensagem inválida');
+      const [contato, departmentId] = await Promise.all([
+        contatosDoCliente(supabaseAdmin, clienteId),
+        departamentoAzoupConfec(),
+      ]);
+      if (contato.situacao || !contato.contactIds.length) {
+        falha('Nenhum contato deste cliente na Digisac', 404);
+      }
+      const contactId = contato.contactIds[0];
+      const userId = pickId(await digisac('/api/v1/me'));
+      if (!userId) falha('Token Digisac sem usuário');
+      await digisac('/api/v1/messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          text: texto,
+          type: 'chat',
+          contactId,
+          userId,
+          origin: 'bot',
+        }),
+      });
+      try {
+        await digisac(`/api/v1/contacts/${encodeURIComponent(contactId)}/ticket/transfer`, {
+          method: 'POST',
+          body: JSON.stringify({ departmentId }),
+        });
+      } catch (erro) {
+        console.error('[digisac-historico] transferir chamado', erro instanceof Error ? erro.message : erro);
+      }
+      return json({ ok: true });
     }
 
     return json({ error: `Operação desconhecida: ${op}` }, 400);

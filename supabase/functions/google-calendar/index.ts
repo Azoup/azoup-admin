@@ -236,7 +236,85 @@ async function loadEmailMap(supabaseAdmin: ReturnType<typeof createClient>) {
     const email = `${(row as { email?: string }).email ?? ''}`.trim().toLowerCase();
     if (email) map.set(email, (row as { id: string }).id);
   }
+  const aprendidos = await supabaseAdmin.from('admin_google_cliente_emails').select('email, cliente_id');
+  if (!aprendidos.error) {
+    for (const row of aprendidos.data ?? []) {
+      const email = `${(row as { email?: string }).email ?? ''}`.trim().toLowerCase();
+      const clienteId = `${(row as { cliente_id?: string }).cliente_id ?? ''}`.trim();
+      if (email && clienteId) map.set(email, clienteId);
+    }
+  }
   return map;
+}
+
+function emailsDoEvento(row: {
+  participantes?: unknown;
+  titulo?: string | null;
+  descricao?: string | null;
+}): string[] {
+  const emails = new Set<string>();
+  if (Array.isArray(row.participantes)) {
+    for (const item of row.participantes as Array<{ email?: string }>) {
+      const email = `${item?.email ?? ''}`.trim().toLowerCase();
+      if (email.includes('@')) emails.add(email);
+    }
+  }
+  for (const email of extractEmailsFromText(row.titulo, row.descricao)) emails.add(email);
+  return [...emails];
+}
+
+async function emailDaContaGoogle(supabaseAdmin: ReturnType<typeof createClient>): Promise<string> {
+  const { data } = await supabaseAdmin
+    .from('admin_google_calendar_conexao')
+    .select('google_account_email')
+    .eq('id', 1)
+    .maybeSingle();
+  return `${(data as { google_account_email?: string | null } | null)?.google_account_email ?? ''}`.trim().toLowerCase();
+}
+
+async function aprenderEmailsDoCliente(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+  emails: string[],
+): Promise<void> {
+  const conta = await emailDaContaGoogle(supabaseAdmin);
+  const rows = emails
+    .map((email) => email.trim().toLowerCase())
+    .filter((email) => email.includes('@') && email !== conta)
+    .map((email) => ({ email, cliente_id: clienteId }));
+  if (!rows.length) return;
+  const { error } = await supabaseAdmin.from('admin_google_cliente_emails').upsert(rows, { onConflict: 'email' });
+  if (error && !/admin_google_cliente_emails|schema cache/i.test(error.message)) throw new Error(error.message);
+}
+
+async function vincularSoltosPeloEmail(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+  emails: string[],
+  ignorarId: string,
+): Promise<void> {
+  const alvo = new Set(emails.map((email) => email.trim().toLowerCase()).filter((email) => email.includes('@')));
+  if (!alvo.size) return;
+  const { data, error } = await supabaseAdmin
+    .from('admin_google_agendamentos')
+    .select('id,participantes,titulo,descricao,match_tipo')
+    .is('cliente_id', null)
+    .neq('match_tipo', 'manual')
+    .limit(400);
+  if (error) return;
+  const ids = (data ?? [])
+    .filter((row) => {
+      const id = `${(row as { id?: string }).id ?? ''}`;
+      if (!id || id === ignorarId) return false;
+      return emailsDoEvento(row as { participantes?: unknown; titulo?: string | null; descricao?: string | null })
+        .some((email) => alvo.has(email));
+    })
+    .map((row) => `${(row as { id?: string }).id}`);
+  if (!ids.length) return;
+  await supabaseAdmin
+    .from('admin_google_agendamentos')
+    .update({ cliente_id: clienteId, match_tipo: 'email_auto', updated_at: new Date().toISOString() })
+    .in('id', ids);
 }
 
 function instante(value: string | null | undefined): number {
@@ -662,6 +740,11 @@ serve(async (req) => {
       const id = `${p.id ?? ''}`.trim();
       const clienteId = `${p.cliente_id ?? ''}`.trim();
       if (!id || !clienteId) throw new Error('id e cliente_id obrigatórios');
+      const atual = await supabaseAdmin
+        .from('admin_google_agendamentos')
+        .select('participantes,titulo,descricao')
+        .eq('id', id)
+        .maybeSingle();
       const { data, error } = await supabaseAdmin
         .from('admin_google_agendamentos')
         .update({ cliente_id: clienteId, match_tipo: 'manual', updated_at: new Date().toISOString() })
@@ -669,6 +752,13 @@ serve(async (req) => {
         .select('*, cliente:clientes_azoup(id,nome,email)')
         .single();
       if (error) throw error;
+      const emails = emailsDoEvento((atual.data ?? {}) as {
+        participantes?: unknown;
+        titulo?: string | null;
+        descricao?: string | null;
+      });
+      await aprenderEmailsDoCliente(supabaseAdmin, clienteId, emails);
+      await vincularSoltosPeloEmail(supabaseAdmin, clienteId, emails, id);
       return json({ evento: data });
     }
 
@@ -677,7 +767,7 @@ serve(async (req) => {
       if (!id) throw new Error('id obrigatório');
       const { data, error } = await supabaseAdmin
         .from('admin_google_agendamentos')
-        .update({ cliente_id: null, match_tipo: 'nenhum', updated_at: new Date().toISOString() })
+        .update({ cliente_id: null, match_tipo: 'manual', updated_at: new Date().toISOString() })
         .eq('id', id)
         .select('*, cliente:clientes_azoup(id,nome,email)')
         .single();

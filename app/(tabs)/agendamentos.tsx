@@ -32,7 +32,7 @@ import {
   type GoogleAgendaEvento,
 } from '@/src/services/google-calendar-api';
 import { listarClientesParaSelecao } from '@/src/services/repos/conversas-repo';
-import { listarEventosAgendaCache } from '@/src/services/repos/google-agendamentos-repo';
+import { listarEventosAgendaCache, listarEventosSemCliente } from '@/src/services/repos/google-agendamentos-repo';
 import type { ClienteAzoupRow } from '@/src/types/azoup';
 import { descricaoTemHtml } from '@/src/utils/agenda-html';
 import { dataCalendarioBrasil, dataHojeBrasil, formatDateTimeBR, formatYmdBR, somarDiasYmd } from '@/src/utils/format';
@@ -292,6 +292,12 @@ export default function AgendamentosScreen() {
     staleTime: 60_000,
   });
 
+  const semClienteQ = useQuery({
+    queryKey: ['google_eventos_sem_cliente'],
+    queryFn: listarEventosSemCliente,
+    enabled: canAccessScreen('agendamentos') && Boolean(statusQ.data?.connected),
+  });
+
   useEffect(() => {
     if (!statusQ.data?.connected) return;
     const chave = `${janela.inicio}|${janela.fim}|${statusQ.data.calendar_id ?? ''}`;
@@ -302,6 +308,7 @@ export default function AgendamentosScreen() {
     void sincronizarGoogleAgenda({ inicio: janela.inicio, fim: janela.fim })
       .then(() => {
         void qc.invalidateQueries({ queryKey: ['google_calendar_eventos'] });
+        void qc.invalidateQueries({ queryKey: ['google_eventos_sem_cliente'] });
         void qc.invalidateQueries({ queryKey: ['google_proximas_reunioes'] });
       })
       .catch((e) => {
@@ -354,6 +361,7 @@ export default function AgendamentosScreen() {
     onSuccess: (r) => {
       setMsg(`Sincronizado: ${r.synced} evento(s).`);
       void qc.invalidateQueries({ queryKey: ['google_calendar_eventos'] });
+      void qc.invalidateQueries({ queryKey: ['google_eventos_sem_cliente'] });
       void qc.invalidateQueries({ queryKey: ['google_proximas_reunioes'] });
     },
     onError: (e) => setMsg(e instanceof Error ? e.message : 'Erro ao sincronizar'),
@@ -373,6 +381,7 @@ export default function AgendamentosScreen() {
     mutationFn: excluirEventoGoogle,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['google_calendar_eventos'] });
+      void qc.invalidateQueries({ queryKey: ['google_eventos_sem_cliente'] });
       void qc.invalidateQueries({ queryKey: ['google_proximas_reunioes'] });
     },
     onError: (e) => setMsg(e instanceof Error ? e.message : 'Erro ao excluir'),
@@ -394,6 +403,7 @@ export default function AgendamentosScreen() {
       setVincularEvento(null);
       setClienteVinculo(null);
       void qc.invalidateQueries({ queryKey: ['google_calendar_eventos'] });
+      void qc.invalidateQueries({ queryKey: ['google_eventos_sem_cliente'] });
       void qc.invalidateQueries({ queryKey: ['google_proximas_reunioes'] });
     },
     onError: (e) => setMsg(e instanceof Error ? e.message : 'Erro ao vincular'),
@@ -528,6 +538,8 @@ export default function AgendamentosScreen() {
               ) : null}
             </ScreenCard>
 
+            <View style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <View style={{ flex: 1, minWidth: 320, gap: 12 }}>
             <ScreenCard style={{ gap: 10 }}>
               <View style={styles.mesNav}>
                 <Pressable
@@ -654,6 +666,7 @@ export default function AgendamentosScreen() {
                       onPress={() =>
                         desvincularClienteEvento(ev.id).then(() => {
                           void qc.invalidateQueries({ queryKey: ['google_calendar_eventos'] });
+                          void qc.invalidateQueries({ queryKey: ['google_eventos_sem_cliente'] });
                           void qc.invalidateQueries({ queryKey: ['google_proximas_reunioes'] });
                         })
                       }
@@ -665,6 +678,60 @@ export default function AgendamentosScreen() {
                 </ScreenCard>
               ))
             )}
+            </View>
+            <View
+              style={{
+                width: 320,
+                maxWidth: '100%',
+                flexGrow: 1,
+                gap: 8,
+                borderWidth: 1,
+                borderColor: theme.border,
+                borderRadius: 16,
+                padding: 12,
+                backgroundColor: theme.surface,
+              }}
+            >
+              <Text style={{ color: theme.headerText, fontWeight: '800' }}>Sem cliente</Text>
+              <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                Vincule uma vez. Os próximos agendamentos com o mesmo e-mail entram nesse cliente.
+              </Text>
+              {semClienteQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+              {semClienteQ.error ? (
+                <Text style={{ color: theme.error, fontSize: 12 }}>
+                  {semClienteQ.error instanceof Error ? semClienteQ.error.message : 'Erro ao listar'}
+                </Text>
+              ) : null}
+              <ScrollView style={{ maxHeight: 640 }} contentContainerStyle={{ gap: 8 }} nestedScrollEnabled>
+                {(semClienteQ.data ?? []).length === 0 && !semClienteQ.isLoading ? (
+                  <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhum agendamento sem cliente.</Text>
+                ) : null}
+                {(semClienteQ.data ?? []).map((ev) => (
+                  <Pressable
+                    key={ev.id}
+                    onPress={() => {
+                      setClienteVinculo(null);
+                      setVincularEvento(ev);
+                    }}
+                    style={({ pressed }) => ({
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                      borderRadius: 10,
+                      padding: 10,
+                      gap: 4,
+                      opacity: pressed ? 0.85 : 1,
+                    })}
+                  >
+                    <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 13 }} numberOfLines={2}>
+                      {ev.titulo || '(Sem título)'}
+                    </Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>{formatDateTimeBR(ev.inicio)}</Text>
+                    <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Vincular</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+            </View>
           </>
         )}
       </ScrollView>
@@ -678,6 +745,7 @@ export default function AgendamentosScreen() {
         }}
         onSaved={() => {
           void qc.invalidateQueries({ queryKey: ['google_calendar_eventos'] });
+          void qc.invalidateQueries({ queryKey: ['google_eventos_sem_cliente'] });
           void qc.invalidateQueries({ queryKey: ['google_proximas_reunioes'] });
         }}
       />

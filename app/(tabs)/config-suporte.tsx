@@ -20,6 +20,11 @@ import {
   lerDigisacBoasVindas,
   salvarDigisacBoasVindas,
 } from '@/src/services/repos/digisac-boas-vindas-repo';
+import {
+  excluirMensagemProntaDigisac,
+  listarMensagensProntasDigisac,
+  salvarMensagemProntaDigisac,
+} from '@/src/services/repos/digisac-mensagens-prontas-repo';
 import { SUPORTE_VIDEO_CATEGORIAS, type SuporteVideoCategoria } from '@/src/constants/suporte-video-categorias';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
@@ -30,7 +35,7 @@ import {
   listarSuporteVideos,
 } from '@/src/services/repos/suporte-videos-repo';
 
-type PainelId = 'digisac' | 'alerta' | 'videos';
+type PainelId = 'digisac' | 'prontas' | 'alerta' | 'videos';
 
 function PainelConfig({
   titulo,
@@ -218,6 +223,126 @@ function DigisacBoasVindasConfig({ aberto, onPress }: { aberto: boolean; onPress
   );
 }
 
+    </PainelConfig>
+  );
+}
+
+function MensagensProntasConfig({ aberto, onPress }: { aberto: boolean; onPress: () => void }) {
+  const { theme } = useTheme();
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ['digisac_mensagens_prontas'],
+    queryFn: listarMensagensProntasDigisac,
+  });
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [titulo, setTitulo] = useState('');
+  const [descricao, setDescricao] = useState('');
+  const [erro, setErro] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const mensagens = q.data ?? [];
+
+  function limpar() {
+    setEditandoId(null);
+    setTitulo('');
+    setDescricao('');
+  }
+
+  const salvar = useMutation({
+    mutationFn: () => salvarMensagemProntaDigisac({ id: editandoId, titulo, descricao }),
+    onSuccess: () => {
+      setErro(null);
+      setOk(editandoId ? 'Mensagem atualizada.' : 'Mensagem cadastrada.');
+      limpar();
+      void qc.invalidateQueries({ queryKey: ['digisac_mensagens_prontas'] });
+    },
+    onError: (e) => {
+      setOk(null);
+      setErro(e instanceof Error ? e.message : 'Erro ao salvar a mensagem');
+    },
+  });
+
+  const excluir = useMutation({
+    mutationFn: excluirMensagemProntaDigisac,
+    onSuccess: () => {
+      setErro(null);
+      setOk('Mensagem excluída.');
+      void qc.invalidateQueries({ queryKey: ['digisac_mensagens_prontas'] });
+    },
+    onError: (e) => {
+      setOk(null);
+      setErro(e instanceof Error ? e.message : 'Erro ao excluir a mensagem');
+    },
+  });
+
+  return (
+    <PainelConfig
+      titulo="Mensagens prontas"
+      resumo={q.isLoading ? 'Carregando…' : mensagens.length === 1 ? '1 mensagem' : `${mensagens.length} mensagens`}
+      aberto={aberto}
+      onPress={onPress}
+    >
+      <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 12 }}>
+        O título aparece na escolha. A descrição é o texto enviado ao contato do cliente na Digisac.
+      </Text>
+      <FormField label="Título" required>
+        <FormInput value={titulo} onChangeText={setTitulo} placeholder="Ex.: Lembrete de treinamento" />
+      </FormField>
+      <FormField label="Descrição" required>
+        <FormInput
+          multiline
+          numberOfLines={5}
+          textAlignVertical="top"
+          value={descricao}
+          onChangeText={setDescricao}
+          placeholder="Texto que será enviado no WhatsApp"
+          style={{ minHeight: 120, paddingTop: 10 }}
+        />
+      </FormField>
+      <PrimaryButton
+        label={salvar.isPending ? 'Salvando…' : editandoId ? 'Atualizar mensagem' : 'Cadastrar mensagem'}
+        loading={salvar.isPending}
+        onPress={() => salvar.mutate()}
+      />
+      {editandoId ? (
+        <Pressable onPress={limpar} hitSlop={6}>
+          <Text style={{ color: theme.textMuted, fontWeight: '700' }}>Cancelar edição</Text>
+        </Pressable>
+      ) : null}
+      {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando mensagens…</Text> : null}
+      {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
+      {ok ? <Text style={{ color: theme.success, fontWeight: '700' }}>{ok}</Text> : null}
+      {mensagens.map((item) => (
+        <View
+          key={item.id}
+          style={{ borderWidth: 1, borderColor: theme.border, borderRadius: 10, padding: 12, gap: 6 }}
+        >
+          <Text style={{ color: theme.headerText, fontWeight: '800' }}>{item.titulo}</Text>
+          <Text style={{ color: theme.text, fontSize: 13 }} numberOfLines={4}>
+            {item.descricao}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 16 }}>
+            <Pressable
+              onPress={() => {
+                setEditandoId(item.id);
+                setTitulo(item.titulo);
+                setDescricao(item.descricao);
+                setOk(null);
+                setErro(null);
+              }}
+              hitSlop={6}
+            >
+              <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Editar</Text>
+            </Pressable>
+            <Pressable onPress={() => excluir.mutate(item.id)} hitSlop={6} disabled={excluir.isPending}>
+              <Text style={{ color: theme.error, fontWeight: '800', fontSize: 12 }}>Excluir</Text>
+            </Pressable>
+          </View>
+        </View>
+      ))}
+    </PainelConfig>
+  );
+}
+
 function AlertaContatoConfig({ aberto, onPress }: { aberto: boolean; onPress: () => void }) {
   const { theme } = useTheme();
   const qc = useQueryClient();
@@ -386,6 +511,7 @@ export default function ConfigSuporteScreen() {
     >
       <PageHeader title="Config. Suporte" subtitle="Abra só o que for editar." />
       <DigisacBoasVindasConfig aberto={painel === 'digisac'} onPress={() => alternar('digisac')} />
+      <MensagensProntasConfig aberto={painel === 'prontas'} onPress={() => alternar('prontas')} />
       <AlertaContatoConfig aberto={painel === 'alerta'} onPress={() => alternar('alerta')} />
       <PainelConfig
         titulo="Vídeos de suporte"

@@ -28,10 +28,12 @@ import {
 } from '@/src/services/repos/digisac-telefones-repo';
 import { listarAgendaDoCliente, listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
 import {
+  enviarMensagemProntaDigisac,
   listarChamadosDigisac,
   listarMensagensDigisac,
   type DigisacChamado,
 } from '@/src/services/digisac-historico-api';
+import { listarMensagensProntasDigisac } from '@/src/services/repos/digisac-mensagens-prontas-repo';
 import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
 import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
 import {
@@ -48,6 +50,7 @@ import {
   type ReuniaoClienteRow,
 } from '@/src/services/repos/reunioes-repo';
 import { moverClienteKanban, salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
+import { lerFiltrosAcompanhamento, salvarFiltrosAcompanhamento } from '@/src/utils/acompanhamento-filtros';
 import {
   ACOMPANHAMENTO_COLUNAS,
   agrupamentoAcompanhamentoVazio,
@@ -752,6 +755,7 @@ export function HistoricoClienteTela({
   const [reuniaoAberta, setReuniaoAberta] = useState(false);
   const [conversaAberta, setConversaAberta] = useState(false);
   const [pendenciaAberta, setPendenciaAberta] = useState(false);
+  const [mensagemAberta, setMensagemAberta] = useState(false);
   const [chamadoAberto, setChamadoAberto] = useState<DigisacChamado | null>(null);
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [buscaAssunto, setBuscaAssunto] = useState('');
@@ -1027,6 +1031,7 @@ export function HistoricoClienteTela({
         <BotaoAcao label="Registrar reunião" onPress={() => setReuniaoAberta(true)} />
         <BotaoAcao label="Registrar conversa" onPress={() => setConversaAberta(true)} />
         <BotaoAcao label="Nova pendência" onPress={() => setPendenciaAberta(true)} />
+        <BotaoAcao label="Enviar mensagem" onPress={() => setMensagemAberta(true)} />
       </View>
       <View style={{ gap: 14 }}>
             <View style={{ gap: 4 }}>
@@ -1472,6 +1477,12 @@ export function HistoricoClienteTela({
         onSaved={invalidarHistorico}
       />
       <ChamadoDigisacModal clienteId={cliente.id} chamado={chamadoAberto} onClose={() => setChamadoAberto(null)} />
+      <EnviarMensagemProntaModal
+        clienteId={cliente.id}
+        clienteNome={cliente.nome}
+        visible={mensagemAberta}
+        onClose={() => setMensagemAberta(false)}
+      />
     </>
   );
 
@@ -1540,6 +1551,103 @@ function PendenciasAbertasModal({
   );
 }
 
+function EnviarMensagemProntaModal({
+  clienteId,
+  clienteNome,
+  visible,
+  onClose,
+}: {
+  clienteId: string;
+  clienteNome: string;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const { theme } = useTheme();
+  const q = useQuery({
+    queryKey: ['digisac_mensagens_prontas'],
+    queryFn: listarMensagensProntasDigisac,
+    enabled: visible,
+  });
+  const enviar = useMutation({
+    mutationFn: (texto: string) => enviarMensagemProntaDigisac(clienteId, texto),
+  });
+  const mensagens = q.data ?? [];
+
+  function fechar() {
+    enviar.reset();
+    onClose();
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={fechar}>
+      <View style={[styles.modalOverlay, { justifyContent: 'center', padding: 24 }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={fechar} />
+        <View
+          style={{
+            backgroundColor: theme.surface,
+            borderRadius: 14,
+            padding: 16,
+            gap: 12,
+            maxWidth: 560,
+            width: '100%',
+            alignSelf: 'center',
+            maxHeight: '80%',
+          }}
+        >
+          <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 16 }}>Enviar mensagem</Text>
+          <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+            Escolha uma mensagem pronta para enviar a {clienteNome}.
+          </Text>
+          {enviar.isSuccess ? (
+            <Text style={{ color: theme.success, fontWeight: '700' }}>Mensagem enviada no Digisac.</Text>
+          ) : null}
+          {enviar.isError ? (
+            <Text style={{ color: theme.error }}>
+              {enviar.error instanceof Error ? enviar.error.message : 'Erro ao enviar'}
+            </Text>
+          ) : null}
+          {q.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+          {q.isError ? (
+            <Text style={{ color: theme.error }}>
+              {q.error instanceof Error ? q.error.message : 'Erro ao carregar mensagens'}
+            </Text>
+          ) : null}
+          {!q.isLoading && !mensagens.length ? (
+            <Text style={{ color: theme.textMuted }}>
+              Nenhuma mensagem pronta. Cadastre em Config. Suporte.
+            </Text>
+          ) : null}
+          <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ gap: 8 }}>
+            {mensagens.map((item) => (
+              <Pressable
+                key={item.id}
+                disabled={enviar.isPending}
+                onPress={() => enviar.mutate(item.descricao)}
+                style={({ hovered, pressed }) => ({
+                  borderWidth: 1,
+                  borderColor: hovered || pressed ? theme.cadastroAction : theme.border,
+                  borderRadius: 10,
+                  padding: 12,
+                  gap: 4,
+                  opacity: enviar.isPending ? 0.6 : 1,
+                })}
+              >
+                <Text style={{ color: theme.headerText, fontWeight: '800' }}>{item.titulo}</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }} numberOfLines={3}>
+                  {item.descricao}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <Pressable onPress={fechar} hitSlop={6}>
+            <Text style={{ color: theme.textMuted, fontWeight: '700' }}>Fechar</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function KanbanCard({
   item,
   ultimoContato,
@@ -1550,6 +1658,7 @@ function KanbanCard({
   mensagemAutomatica,
   onAbrir,
   onAbrirPendencias,
+  onEnviarMensagem,
   onRegistrarConversa,
   onRegistrarReuniao,
   onEditarFicha,
@@ -1566,6 +1675,7 @@ function KanbanCard({
   mensagemAutomatica?: boolean;
   onAbrir: () => void;
   onAbrirPendencias: () => void;
+  onEnviarMensagem: () => void;
   onRegistrarConversa: () => void;
   onRegistrarReuniao: () => void;
   onEditarFicha: () => void;
@@ -1660,6 +1770,17 @@ function KanbanCard({
           </Pressable>
         </SemArraste>
       </View>
+      <SemArraste>
+        <Pressable
+          onPress={onEnviarMensagem}
+          style={({ pressed }) => [
+            styles.registrarBtn,
+            { borderWidth: 1, borderColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 },
+          ]}
+        >
+          <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Enviar mensagem</Text>
+        </Pressable>
+      </SemArraste>
 
       {aberto ? (
         <>
@@ -1762,6 +1883,7 @@ function KanbanColumn({
   altura,
   onAbrir,
   onAbrirPendencias,
+  onEnviarMensagem,
   onRegistrarConversa,
   onRegistrarReuniao,
   onEditarFicha,
@@ -1783,6 +1905,7 @@ function KanbanColumn({
   altura: number;
   onAbrir: (c: AcompanhamentoCliente) => void;
   onAbrirPendencias: (c: AcompanhamentoCliente) => void;
+  onEnviarMensagem: (c: AcompanhamentoCliente) => void;
   onRegistrarConversa: (c: AcompanhamentoCliente) => void;
   onRegistrarReuniao: (c: AcompanhamentoCliente) => void;
   onEditarFicha: (c: AcompanhamentoCliente) => void;
@@ -1831,6 +1954,7 @@ function KanbanColumn({
               mensagemAutomatica={coluna.key === 'primeiro_contato' && mensagensEnviadas.has(item.id)}
               onAbrir={() => onAbrir(item)}
               onAbrirPendencias={() => onAbrirPendencias(item)}
+              onEnviarMensagem={() => onEnviarMensagem(item)}
               onRegistrarConversa={() => onRegistrarConversa(item)}
               onRegistrarReuniao={() => onRegistrarReuniao(item)}
               onEditarFicha={() => onEditarFicha(item)}
@@ -1850,9 +1974,13 @@ export default function AcompanhamentoScreen() {
   const router = useRouter();
   const { canAccessScreen, session, adminProfile } = useAdminAuth();
   const qc = useQueryClient();
-  const [busca, setBusca] = useState('');
-  const [filtroAlerta, setFiltroAlerta] = useState(false);
-  const [filtroSemReuniao, setFiltroSemReuniao] = useState(false);
+  const filtrosIniciais = useRef(lerFiltrosAcompanhamento());
+  const [busca, setBusca] = useState(filtrosIniciais.current.busca);
+  const [filtroAlerta, setFiltroAlerta] = useState(filtrosIniciais.current.filtroAlerta);
+  const [filtroSemReuniao, setFiltroSemReuniao] = useState(filtrosIniciais.current.filtroSemReuniao);
+  useEffect(() => {
+    salvarFiltrosAcompanhamento({ busca, filtroAlerta, filtroSemReuniao });
+  }, [busca, filtroAlerta, filtroSemReuniao]);
   const [alturaSlot, setAlturaSlot] = useState(0);
   const alturaColuna = Math.max(alturaSlot - 12 - FOLGA_BARRA_HORIZONTAL, 0);
   const [clientePendencias, setClientePendencias] = useState<AcompanhamentoCliente | null>(null);
@@ -1860,6 +1988,7 @@ export default function AcompanhamentoScreen() {
   const [clienteReuniao, setClienteReuniao] = useState<AcompanhamentoCliente | null>(null);
   const [clienteFicha, setClienteFicha] = useState<AcompanhamentoCliente | null>(null);
   const [clienteMover, setClienteMover] = useState<AcompanhamentoCliente | null>(null);
+  const [clienteMensagem, setClienteMensagem] = useState<AcompanhamentoCliente | null>(null);
   const [dropOverColuna, setDropOverColuna] = useState<AcompanhamentoColuna | null>(null);
   const [rotuloArraste, setRotuloArraste] = useState<string | null>(null);
   const fantasmaRef = useRef<View>(null);
@@ -2105,6 +2234,7 @@ export default function AcompanhamentoScreen() {
                 })
               }
               onAbrirPendencias={setClientePendencias}
+              onEnviarMensagem={setClienteMensagem}
               onRegistrarConversa={setClienteConversa}
               onRegistrarReuniao={setClienteReuniao}
               onEditarFicha={(c) => {
@@ -2185,6 +2315,14 @@ export default function AcompanhamentoScreen() {
           moverMutation.mutate({ clienteId: clienteMover.id, coluna });
         }}
       />
+      {clienteMensagem ? (
+        <EnviarMensagemProntaModal
+          clienteId={clienteMensagem.id}
+          clienteNome={clienteMensagem.nome}
+          visible
+          onClose={() => setClienteMensagem(null)}
+        />
+      ) : null}
       <View
         ref={fantasmaRef}
         pointerEvents="none"
