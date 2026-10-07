@@ -37,6 +37,11 @@ function painelBaseUrl(): string {
   return (Deno.env.get('PAINEL_PUBLIC_URL') ?? 'http://localhost:8081').replace(/\/$/, '');
 }
 
+/** URL pública do Expo Router. Grupos como `(tabs)` não fazem parte do endereço. */
+function painelAgendamentosUrl(query: string): string {
+  return `${painelBaseUrl()}/agendamentos?${query}`;
+}
+
 async function requireAdmin(
   req: Request,
 ): Promise<{ admin: AdminRow; supabaseAdmin: ReturnType<typeof createClient>; userJwt: string }> {
@@ -320,7 +325,7 @@ serve(async (req) => {
       const state = url.searchParams.get('state');
       const err = url.searchParams.get('error');
       if (err) {
-        return Response.redirect(`${painelBaseUrl()}/(tabs)/agendamentos?gcal_error=${encodeURIComponent(err)}`, 302);
+        return Response.redirect(painelAgendamentosUrl(`gcal_error=${encodeURIComponent(err)}`), 302);
       }
       if (!code) throw new Error('Código OAuth ausente');
 
@@ -380,7 +385,7 @@ serve(async (req) => {
         connected_at: new Date().toISOString(),
       });
 
-      return Response.redirect(`${painelBaseUrl()}/(tabs)/agendamentos?gcal=connected`, 302);
+      return Response.redirect(painelAgendamentosUrl('gcal=connected'), 302);
     }
 
     if (req.method !== 'POST') {
