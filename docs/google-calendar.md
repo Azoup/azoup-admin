@@ -24,8 +24,9 @@ No Supabase (Project Settings → Edge Functions → Secrets), defina:
 - Já existentes: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`
 
 ## 4. Deploy
+O callback do Google não envia o JWT do painel. A função precisa ser publicada sem verificação de JWT na borda (`supabase/config.toml`).
 ```bash
-npx supabase functions deploy google-calendar --project-ref SEU_REF
+npx supabase functions deploy google-calendar --project-ref SEU_REF --no-verify-jwt
 npx supabase functions deploy admin-stripe --project-ref SEU_REF
 ```
 (`admin-stripe` precisa do redeploy para aceitar a tela `agendamentos` em `telas_acesso`.)

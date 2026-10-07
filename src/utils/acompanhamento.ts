@@ -96,6 +96,29 @@ export function diasUsandoSistema(createdAt?: string | null, dataInicio?: string
   return Math.max(0, diasEntreYmd(base, dataHojeBrasil()));
 }
 
+/** Dias desde uma data YYYY-MM-DD. Sem data válida, null. */
+export function diasDesdeData(ymd?: string | null): number | null {
+  const base = `${ymd ?? ''}`.trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(base)) return null;
+  return Math.max(0, diasEntreYmd(base, dataHojeBrasil()));
+}
+
+/** Tempo desde o último contato registrado no acompanhamento. */
+export function rotuloUltimoContato(data?: string | null): string {
+  const dias = diasDesdeData(data);
+  if (dias == null) return 'Sem contato';
+  if (dias <= 0) return 'Último contato hoje';
+  if (dias === 1) return 'Último contato há 1 dia';
+  return `Último contato há ${dias} dias`;
+}
+
+/** Vermelho a partir do dia informado (ex.: 7 → "há 7 dias" já fica vermelho). */
+export function contatoAtrasado(data: string | null | undefined, limiteDias: number): boolean {
+  const dias = diasDesdeData(data);
+  if (dias == null || !Number.isFinite(limiteDias)) return false;
+  return dias >= limiteDias;
+}
+
 /** Idade do cadastro em `clientes_azoup.created_at`. */
 export function rotuloTempoCadastro(createdAt?: string | null): string {
   if (!`${createdAt ?? ''}`.trim()) return 'Cadastro sem data';

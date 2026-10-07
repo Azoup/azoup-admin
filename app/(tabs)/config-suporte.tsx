@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FlatList, View } from 'react-native';
 
 import { SuporteVideoCard } from '@/components/ui/SuporteVideoCard';
@@ -11,6 +11,12 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ScreenCard } from '@/components/ui/ScreenCard';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
+import { ACOMPANHAMENTO_COLUNAS } from '@/src/utils/acompanhamento';
+import {
+  listarAlertaContato,
+  salvarAlertaContato,
+  type AlertaContatoPorColuna,
+} from '@/src/services/repos/acompanhamento-alerta-repo';
 import { SUPORTE_VIDEO_CATEGORIAS, type SuporteVideoCategoria } from '@/src/constants/suporte-video-categorias';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
@@ -20,6 +26,82 @@ import {
   excluirSuporteVideo,
   listarSuporteVideos,
 } from '@/src/services/repos/suporte-videos-repo';
+
+function AlertaContatoConfig() {
+  const { theme } = useTheme();
+  const qc = useQueryClient();
+  const { adminProfile } = useAdminAuth();
+  const q = useQuery({
+    queryKey: ['acompanhamento_alerta_contato'],
+    queryFn: listarAlertaContato,
+  });
+  const [dias, setDias] = useState<AlertaContatoPorColuna | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (q.data) setDias(q.data);
+  }, [q.data]);
+
+  const salvar = useMutation({
+    mutationFn: async () => {
+      if (!dias) throw new Error('Aguarde o carregamento dos prazos.');
+      const anterior = q.data ?? null;
+      await salvarAlertaContato(dias);
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'ACOMPANHAMENTO_ALERTA_UPDATE',
+          entidade: 'admin_acompanhamento_alerta',
+          valores_anteriores: anterior,
+          valores_novos: dias,
+        },
+      );
+    },
+    onSuccess: () => {
+      setErro(null);
+      setOk('Prazos salvos.');
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_alerta_contato'] });
+    },
+    onError: (e) => {
+      setOk(null);
+      setErro(e instanceof Error ? e.message : 'Erro ao salvar prazos');
+    },
+  });
+
+  return (
+    <ScreenCard style={{ gap: 12 }}>
+      <SectionTitle>Alerta de último contato</SectionTitle>
+      <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+        Por coluna do acompanhamento. O texto do card fica vermelho a partir dessa quantidade de dias sem contato.
+      </Text>
+      {q.isLoading || !dias ? <Text style={{ color: theme.textMuted }}>Carregando prazos…</Text> : null}
+      {dias
+        ? ACOMPANHAMENTO_COLUNAS.map((coluna) => (
+            <FormField key={coluna.key} label={coluna.label} helper="Dias sem contato">
+              <FormInput
+                keyboardType="number-pad"
+                value={String(dias[coluna.key])}
+                onChangeText={(valor) => {
+                  const n = Number(valor.replace(/\D/g, ''));
+                  setDias((atual) => (atual ? { ...atual, [coluna.key]: Number.isFinite(n) ? n : 0 } : atual));
+                  setOk(null);
+                }}
+              />
+            </FormField>
+          ))
+        : null}
+      <PrimaryButton
+        label={salvar.isPending ? 'Salvando…' : 'Salvar prazos'}
+        loading={salvar.isPending}
+        disabled={!dias}
+        onPress={() => salvar.mutate()}
+      />
+      {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
+      {ok ? <Text style={{ color: theme.success, fontWeight: '700' }}>{ok}</Text> : null}
+    </ScreenCard>
+  );
+}
 
 export default function ConfigSuporteScreen() {
   const { theme } = useTheme();
@@ -108,8 +190,9 @@ export default function ConfigSuporteScreen() {
         <View style={{ gap: 12, marginBottom: 4 }}>
           <PageHeader
             title="Config. Suporte"
-            subtitle="Cadastre vídeos do YouTube por categoria para o suporte no app Azoup."
+            subtitle="Prazos do acompanhamento e vídeos do YouTube para o suporte no app Azoup."
           />
+          <AlertaContatoConfig />
 
           {podeGerenciar ? (
             <ScreenCard style={{ gap: 12 }}>

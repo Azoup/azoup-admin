@@ -1,0 +1,4 @@
+# O retorno do Google (GET /oauth_callback) chega sem JWT do painel.
+# As operações POST continuam exigindo sessão dentro da função.
+[functions.google-calendar]
+verify_jwt = false

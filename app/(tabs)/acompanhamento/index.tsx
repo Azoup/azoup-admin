@@ -1,5 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -7,7 +8,9 @@ import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
 import { FormTimeInput } from '@/components/ui/FormTimeInput';
+import { BackLink } from '@/components/ui/BackLink';
 import { PageHeader } from '@/components/ui/PageHeader';
+import { Screen } from '@/components/ui/Screen';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { RegistrarReuniaoModal } from '@/components/ui/RegistrarReuniaoModal';
 import { SectionTitle } from '@/components/ui/SectionTitle';
@@ -15,6 +18,7 @@ import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { registrarAuditoria } from '@/src/services/audit';
 import { useTheme } from '@/src/contexts/ThemeContext';
+import { listarAlertaContato } from '@/src/services/repos/acompanhamento-alerta-repo';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
 import { listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
 import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
@@ -34,7 +38,9 @@ import {
   ACOMPANHAMENTO_COLUNAS,
   agrupamentoAcompanhamentoVazio,
   iniciaisNome,
+  contatoAtrasado,
   rotuloTempoCadastro,
+  rotuloUltimoContato,
   isAcompanhamentoColuna,
   type AcompanhamentoCliente,
   type AcompanhamentoColuna,
@@ -469,15 +475,7 @@ function EditarConversaBloco({
   );
 }
 
-function HistoricoClienteModal({
-  cliente,
-  visible,
-  onClose,
-}: {
-  cliente: AcompanhamentoCliente | null;
-  visible: boolean;
-  onClose: () => void;
-}) {
+export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoCliente }) {
   const { theme } = useTheme();
   const { adminProfile, canDeleteRecords, papel } = useAdminAuth();
   const podeAlterarDataRegistro = papel === 'owner';
@@ -493,27 +491,20 @@ function HistoricoClienteModal({
   const reunioesQ = useQuery({
     queryKey: ['admin_cliente_reunioes', cliente?.id, 'historico'],
     queryFn: () => listarReunioesDoCliente(cliente!.id),
-    enabled: visible && Boolean(cliente?.id),
+    enabled: Boolean(cliente.id),
   });
 
   const conversasQ = useQuery({
-    queryKey: ['admin_cliente_conversas', cliente?.id, 'historico'],
-    queryFn: () => listarConversasClientes({ clienteId: cliente!.id, limit: 50 }),
-    enabled: visible && Boolean(cliente?.id),
+    queryKey: ['admin_cliente_conversas', cliente.id, 'historico'],
+    queryFn: () => listarConversasClientes({ clienteId: cliente.id, limit: 50 }),
+    enabled: Boolean(cliente.id),
   });
 
   const acessoQ = useQuery({
-    queryKey: ['cliente_ultimo_acesso', cliente?.id],
-    queryFn: () => buscarMetricasUsoCliente(cliente!.id),
-    enabled: visible && Boolean(cliente?.id),
+    queryKey: ['cliente_ultimo_acesso', cliente.id],
+    queryFn: () => buscarMetricasUsoCliente(cliente.id),
+    enabled: Boolean(cliente.id),
   });
-
-  useEffect(() => {
-    if (visible) return;
-    setEditandoId(null);
-    setConfirmarId(null);
-    setErro(null);
-  }, [visible]);
 
   function invalidarHistorico() {
     void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
@@ -676,20 +667,10 @@ function HistoricoClienteModal({
   const ocupado = salvarReuniao.isPending || excluirReuniao.isPending || salvarConversa.isPending || excluirConversa.isPending;
 
   return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={[styles.historicoCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <View style={styles.rowBetween}>
-            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 18, flex: 1 }} numberOfLines={2}>
-              {cliente?.nome ?? 'Cliente'}
-            </Text>
-            <Pressable onPress={onClose} hitSlop={10}>
-              <FontAwesome name="times" size={16} color={theme.textMuted} />
-            </Pressable>
-          </View>
-
-          <ScrollView style={{ maxHeight: 560 }} contentContainerStyle={{ gap: 14, paddingBottom: 8 }}>
+    <Screen scroll>
+      <BackLink href="/(tabs)/acompanhamento" label="Acompanhamento" />
+      <PageHeader title={cliente.nome} subtitle={cliente.empresa_nome?.trim() || 'Cliente'} />
+      <View style={{ gap: 14 }}>
             <View style={{ gap: 4 }}>
               <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>CADASTRO</Text>
               <Text style={{ color: theme.text, fontSize: 14 }}>
@@ -866,14 +847,12 @@ function HistoricoClienteModal({
                 ))
               )}
             </View>
-          </ScrollView>
           {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
           {ocupado && !salvarReuniao.isPending && !salvarConversa.isPending ? (
             <ActivityIndicator color={theme.cadastroAction} />
           ) : null}
-        </View>
       </View>
-    </Modal>
+    </Screen>
   );
 }
 
@@ -941,6 +920,7 @@ function PendenciasAbertasModal({
 function KanbanCard({
   item,
   ultimoContato,
+  diasAlerta,
   pendenciasAbertas,
   ultimaReuniao,
   proximaReuniaoGoogle,
@@ -955,6 +935,7 @@ function KanbanCard({
 }: {
   item: AcompanhamentoCliente;
   ultimoContato?: string | null;
+  diasAlerta: number;
   pendenciasAbertas: number;
   ultimaReuniao?: string | null;
   proximaReuniaoGoogle?: string | null;
@@ -1023,8 +1004,15 @@ function KanbanCard({
             <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
               {empresa ? empresa.toUpperCase() : '—'}
             </Text>
-            <Text style={{ color: theme.cadastroAction, fontSize: 11, fontWeight: '700', marginTop: 2 }}>
-              {rotuloTempoCadastro(item.created_at)}
+            <Text
+              style={{
+                color: contatoAtrasado(ultimoContato, diasAlerta) ? theme.error : theme.cadastroAction,
+                fontSize: 11,
+                fontWeight: '700',
+                marginTop: 2,
+              }}
+            >
+              {rotuloUltimoContato(ultimoContato)}
             </Text>
           </View>
         </Pressable>
@@ -1133,6 +1121,7 @@ function KanbanColumn({
   coluna,
   clientes,
   ultimosContatos,
+  diasAlerta,
   dropOver,
   altura,
   onAbrir,
@@ -1149,6 +1138,7 @@ function KanbanColumn({
   coluna: (typeof ACOMPANHAMENTO_COLUNAS)[number];
   clientes: AcompanhamentoCliente[];
   ultimosContatos: Map<string, string>;
+  diasAlerta: number;
   resumoReunioes: Map<string, ResumoReunioesCliente>;
   proximasGoogle: Map<string, string>;
   dropOver: boolean;
@@ -1196,6 +1186,7 @@ function KanbanColumn({
               key={item.id}
               item={item}
               ultimoContato={ultimosContatos.get(item.id) ?? null}
+              diasAlerta={diasAlerta}
               pendenciasAbertas={resumoReunioes.get(item.id)?.abertas ?? 0}
               ultimaReuniao={resumoReunioes.get(item.id)?.ultimaCriacao ?? null}
               proximaReuniaoGoogle={proximasGoogle.get(item.id) ?? null}
@@ -1217,12 +1208,12 @@ function KanbanColumn({
 
 export default function AcompanhamentoScreen() {
   const { theme } = useTheme();
+  const router = useRouter();
   const { canAccessScreen, session, adminProfile } = useAdminAuth();
   const qc = useQueryClient();
   const [busca, setBusca] = useState('');
   const [alturaSlot, setAlturaSlot] = useState(0);
   const alturaColuna = Math.max(alturaSlot - 12 - FOLGA_BARRA_HORIZONTAL, 0);
-  const [clienteHistorico, setClienteHistorico] = useState<AcompanhamentoCliente | null>(null);
   const [clientePendencias, setClientePendencias] = useState<AcompanhamentoCliente | null>(null);
   const [clienteConversa, setClienteConversa] = useState<AcompanhamentoCliente | null>(null);
   const [clienteReuniao, setClienteReuniao] = useState<AcompanhamentoCliente | null>(null);
@@ -1248,6 +1239,12 @@ export default function AcompanhamentoScreen() {
   });
 
   const ids = useMemo(() => (q.data?.clientes ?? []).map((c) => c.id), [q.data]);
+
+  const alertaQ = useQuery({
+    queryKey: ['acompanhamento_alerta_contato'],
+    queryFn: listarAlertaContato,
+    enabled: canAccessScreen('acompanhamento'),
+  });
 
   const contatosQ = useQuery({
     queryKey: ['acompanhamento_ultimos_contatos', ids.join(',')],
@@ -1430,11 +1427,17 @@ export default function AcompanhamentoScreen() {
               coluna={col}
               clientes={porColunaFiltrado[col.key]}
               ultimosContatos={contatosQ.data ?? new Map()}
+              diasAlerta={alertaQ.data?.[col.key] ?? 7}
               resumoReunioes={abertasQ.data ?? new Map()}
               proximasGoogle={googleProximasQ.data ?? new Map()}
               dropOver={dropOverColuna === col.key}
               altura={alturaColuna}
-              onAbrir={setClienteHistorico}
+              onAbrir={(cliente) =>
+                router.push({
+                  pathname: '/(tabs)/acompanhamento/[id]',
+                  params: { id: cliente.id },
+                })
+              }
               onAbrirPendencias={setClientePendencias}
               onRegistrarConversa={setClienteConversa}
               onRegistrarReuniao={setClienteReuniao}
@@ -1473,11 +1476,6 @@ export default function AcompanhamentoScreen() {
       </ScrollView>
       </View>
 
-      <HistoricoClienteModal
-        cliente={clienteHistorico}
-        visible={Boolean(clienteHistorico)}
-        onClose={() => setClienteHistorico(null)}
-      />
       <PendenciasAbertasModal
         cliente={clientePendencias}
         visible={Boolean(clientePendencias)}
