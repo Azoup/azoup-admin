@@ -112,11 +112,11 @@ export function rotuloUltimoContato(data?: string | null): string {
   return `Último contato há ${dias} dias`;
 }
 
-/** Vermelho a partir do dia informado (ex.: 7 → "há 7 dias" já fica vermelho). */
+/** Vermelho só depois do prazo (ex.: 7 → "há 7 dias" continua branco; "há 8 dias" fica vermelho). */
 export function contatoAtrasado(data: string | null | undefined, limiteDias: number): boolean {
   const dias = diasDesdeData(data);
   if (dias == null || !Number.isFinite(limiteDias)) return false;
-  return dias >= limiteDias;
+  return dias > limiteDias;
 }
 
 /** Idade do cadastro em `clientes_azoup.created_at`. */

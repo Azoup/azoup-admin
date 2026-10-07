@@ -1006,7 +1006,11 @@ function KanbanCard({
             </Text>
             <Text
               style={{
-                color: contatoAtrasado(ultimoContato, diasAlerta) ? theme.error : theme.cadastroAction,
+                color: contatoAtrasado(ultimoContato, diasAlerta)
+                  ? theme.error
+                  : theme.mode === 'dark'
+                    ? '#FFFFFF'
+                    : theme.headerText,
                 fontSize: 11,
                 fontWeight: '700',
                 marginTop: 2,

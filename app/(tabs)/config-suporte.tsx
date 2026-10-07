@@ -73,7 +73,7 @@ function AlertaContatoConfig() {
     <ScreenCard style={{ gap: 12 }}>
       <SectionTitle>Alerta de último contato</SectionTitle>
       <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-        Por coluna do acompanhamento. O texto do card fica vermelho a partir dessa quantidade de dias sem contato.
+        Por coluna do acompanhamento. O texto do card fica branco e só fica vermelho quando o último contato passar dessa quantidade de dias.
       </Text>
       {q.isLoading || !dias ? <Text style={{ color: theme.textMuted }}>Carregando prazos…</Text> : null}
       {dias
