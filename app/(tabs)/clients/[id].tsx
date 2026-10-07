@@ -3,7 +3,6 @@ import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
-import { ConversaClienteCard } from '@/components/ui/ConversaClienteCard';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
 import { BackLink } from '@/components/ui/BackLink';
@@ -30,12 +29,13 @@ import {
   descongelarCliente,
 } from '@/src/services/repos/congelamento-repo';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
-import { listarConversasClientes } from '@/src/services/repos/conversas-repo';
 import { buscarEnvioDigisac } from '@/src/services/repos/digisac-boas-vindas-repo';
 import {
   gerarCobrancaPdfViaFunction,
   obterAssinaturaStripe,
   obterCobrancaClienteViaFunction,
+  listarServicosStripeContratados,
+  nomesServicosContratados,
   type GerarCobrancaPdfResponse,
 } from '@/src/services/stripe-admin-api';
 import { enriquecerAcompanhamentoCliente, type AcompanhamentoCliente } from '@/src/utils/acompanhamento';
@@ -103,12 +103,6 @@ export default function ClientDetailScreen() {
     enabled: Boolean(id),
   });
 
-  const conversasQ = useQuery({
-    queryKey: ['admin_cliente_conversas', id],
-    queryFn: () => listarConversasClientes({ clienteId: id }),
-    enabled: Boolean(id),
-  });
-
   const acompQ = useQuery({
     queryKey: ['acompanhamento_clientes'],
     queryFn: carregarAcompanhamentoClientes,
@@ -118,6 +112,13 @@ export default function ClientDetailScreen() {
   const digisacQ = useQuery({
     queryKey: ['admin_digisac_envio', id],
     queryFn: () => buscarEnvioDigisac(id),
+    enabled: Boolean(id),
+  });
+
+  const servicosQ = useQuery({
+    queryKey: ['stripe_servicos_contratados'],
+    queryFn: listarServicosStripeContratados,
+    staleTime: 5 * 60_000,
     enabled: Boolean(id),
   });
 
@@ -528,6 +529,17 @@ export default function ClientDetailScreen() {
 
       <ScreenCard>
         <SectionTitle>Assinatura</SectionTitle>
+        <Meta label="Plano" value={data.plano?.nome ?? '—'} />
+        <Meta
+          label="Serviços contratados"
+          value={
+            servicosQ.isLoading
+              ? 'Consultando Stripe…'
+              : servicosQ.isError
+                ? 'Não foi possível consultar'
+                : nomesServicosContratados(data, servicosQ.data).join(' · ') || 'Nenhum além do plano'
+          }
+        />
         <Meta label="Status" value={rotuloStatusAssinatura(data.assinatura)} />
         <Meta label="Início" value={formatDateBR(data.assinatura?.data_inicio)} />
         {dataCancelamento ? <Meta label="Cancelado em" value={formatYmdBR(dataCancelamento)} /> : null}
@@ -647,25 +659,6 @@ export default function ClientDetailScreen() {
             {stripeJson}
           </Text>
         ) : null}
-      </ScreenCard>
-
-      <ScreenCard style={{ gap: 8 }}>
-        <SectionTitle>Histórico de conversas</SectionTitle>
-        {conversasQ.isLoading ? (
-          <Text style={{ color: theme.textMuted, fontSize: 13 }}>Carregando conversas…</Text>
-        ) : conversasQ.error ? (
-          <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-            Não foi possível carregar o histórico de conversas.
-          </Text>
-        ) : (conversasQ.data ?? []).length === 0 ? (
-          <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-            Nenhuma conversa registrada para este cliente. Use a aba Conversas para adicionar.
-          </Text>
-        ) : (
-          (conversasQ.data ?? []).map((conversa) => (
-            <ConversaClienteCard key={conversa.id} conversa={conversa} modo="cliente" />
-          ))
-        )}
       </ScreenCard>
 
       <ScreenCard>

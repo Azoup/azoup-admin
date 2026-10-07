@@ -84,6 +84,35 @@ export async function listarServicosStripeContratados() {
   return invoke<ServicosStripeContratados>('list_servicos_contratados', {});
 }
 
+function semAcento(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+export function nomesServicosContratados(
+  item: {
+    plano?: { nome?: string | null } | null;
+    assinatura?: { stripe_subscription_id?: string | null; stripe_customer_id?: string | null } | null;
+    stripe_customer_id?: string | null;
+  },
+  mapa?: ServicosStripeContratados,
+): string[] {
+  if (!mapa) return [];
+  const assinatura = `${item.assinatura?.stripe_subscription_id ?? ''}`.trim();
+  const customer = `${item.assinatura?.stripe_customer_id ?? item.stripe_customer_id ?? ''}`.trim();
+  const nomes = [
+    ...(assinatura ? mapa.por_assinatura?.[assinatura] ?? [] : []),
+    ...(customer ? mapa.por_customer?.[customer] ?? [] : []),
+  ];
+  const plano = semAcento(item.plano?.nome ?? '');
+  const unicos = new Set<string>();
+  for (const nome of nomes) {
+    const texto = nome.trim();
+    if (!texto || (plano && semAcento(texto) === plano)) continue;
+    unicos.add(texto);
+  }
+  return [...unicos];
+}
+
 export async function obterAssinaturaStripe(payload: StripeSubscriptionPayload) {
   return invoke<{ subscription: Record<string, unknown> }>('get_subscription', payload);
 }

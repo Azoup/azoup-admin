@@ -11,7 +11,7 @@ import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { listarClientesAzoup } from '@/src/services/repos/clientes-repo';
-import { listarServicosStripeContratados } from '@/src/services/stripe-admin-api';
+import { listarServicosStripeContratados, nomesServicosContratados } from '@/src/services/stripe-admin-api';
 import {
   desmarcarMensagemEnviadaHoje,
   marcarMensagemEnviadaHoje,
@@ -31,31 +31,6 @@ import {
 } from '@/src/utils/assinatura-status';
 import { resolveClienteWhatsAppUrl } from '@/src/utils/whatsapp';
 import { clientePrecisaChamar } from '@/src/services/repos/congelamento-repo';
-
-function semAcento(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-}
-
-function servicosContratados(
-  item: ClienteAzoupAdminView,
-  mapa?: { por_assinatura: Record<string, string[]>; por_customer: Record<string, string[]> },
-): string[] {
-  if (!mapa) return [];
-  const assinatura = `${item.assinatura?.stripe_subscription_id ?? ''}`.trim();
-  const customer = `${item.assinatura?.stripe_customer_id ?? item.stripe_customer_id ?? ''}`.trim();
-  const nomes = [
-    ...(assinatura ? mapa.por_assinatura[assinatura] ?? [] : []),
-    ...(customer ? mapa.por_customer[customer] ?? [] : []),
-  ];
-  const plano = semAcento(item.plano?.nome ?? '');
-  const unicos = new Set<string>();
-  for (const nome of nomes) {
-    const texto = nome.trim();
-    if (!texto || (plano && semAcento(texto) === plano)) continue;
-    unicos.add(texto);
-  }
-  return [...unicos];
-}
 
 const WHATSAPP_GREEN = '#25D366';
 const MENSAGEM_OK = '#16a34a';
@@ -165,7 +140,7 @@ export default function ClientsListScreen() {
           const statusAssinatura = rotuloStatusAssinatura(item.assinatura);
           const trialExpirado = isAssinaturaTrialExpirado(item.assinatura);
           const dataCancelamento = dataCancelamentoAssinatura(item.assinatura);
-          const servicos = servicosContratados(item, servicosQ.data);
+          const servicos = nomesServicosContratados(item, servicosQ.data);
 
           return (
             <View style={{ marginHorizontal: 12, marginVertical: 6 }}>
