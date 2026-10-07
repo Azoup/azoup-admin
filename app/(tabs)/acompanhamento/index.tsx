@@ -20,7 +20,7 @@ import { registrarAuditoria } from '@/src/services/audit';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { listarAlertaContato } from '@/src/services/repos/acompanhamento-alerta-repo';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
-import { listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
+import { listarAgendaDoCliente, listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
 import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
 import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
 import {
@@ -494,6 +494,30 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
     enabled: Boolean(cliente.id),
   });
 
+  const agendaQ = useQuery({
+    queryKey: ['google_agenda_cliente', cliente.id],
+    queryFn: () => listarAgendaDoCliente(cliente.id),
+    enabled: Boolean(cliente.id),
+  });
+
+  const agenda = useMemo(() => {
+    const agora = Date.now();
+    const eventos = agendaQ.data ?? [];
+    const futuras = eventos
+      .filter((ev) => Date.parse(ev.inicio) >= agora)
+      .sort((a, b) => Date.parse(a.inicio) - Date.parse(b.inicio));
+    const passadas = eventos
+      .filter((ev) => Date.parse(ev.inicio) < agora)
+      .sort((a, b) => Date.parse(b.inicio) - Date.parse(a.inicio));
+    const registros = reunioesQ.data ?? [];
+    const registroNoDia = (inicio: string) => {
+      const dia = dataCalendarioBrasil(inicio);
+      if (!dia) return [];
+      return registros.filter((row) => dataCalendarioBrasil(row.created_at) === dia);
+    };
+    return { futuras, passadas, registroNoDia };
+  }, [agendaQ.data, reunioesQ.data]);
+
   const conversasQ = useQuery({
     queryKey: ['admin_cliente_conversas', cliente.id, 'historico'],
     queryFn: () => listarConversasClientes({ clienteId: cliente.id, limit: 50 }),
@@ -703,6 +727,84 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
               <Text style={{ color: theme.text, fontSize: 14 }}>
                 Desde {cadastroEm} · {rotuloTempoCadastro(cliente?.created_at)}
               </Text>
+            </View>
+
+            <View style={{ gap: 8 }}>
+              <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>AGENDA</Text>
+              {agendaQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+              {agendaQ.error ? (
+                <Text style={{ color: theme.error }}>{(agendaQ.error as Error).message}</Text>
+              ) : null}
+              {!agendaQ.isLoading && !agendaQ.error ? (
+                <>
+                  <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 13 }}>Futuras</Text>
+                  {agenda.futuras.length === 0 ? (
+                    <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhuma reunião futura marcada.</Text>
+                  ) : (
+                    agenda.futuras.map((ev) => (
+                      <View key={ev.id} style={[styles.historicoItem, { borderColor: theme.border }]}>
+                        <Text style={{ color: theme.headerText, fontWeight: '800' }}>{ev.titulo || '(Sem título)'}</Text>
+                        <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>
+                          {formatDateTimeBR(ev.inicio)}
+                          {ev.fim ? ` — ${formatDateTimeBR(ev.fim)}` : ''}
+                        </Text>
+                      </View>
+                    ))
+                  )}
+                  <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 13, marginTop: 6 }}>
+                    Já realizadas
+                  </Text>
+                  {agenda.passadas.length === 0 ? (
+                    <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhuma reunião passada na agenda.</Text>
+                  ) : (
+                    agenda.passadas.map((ev) => {
+                      const registros = agenda.registroNoDia(ev.inicio);
+                      return (
+                        <View key={ev.id} style={[styles.historicoItem, { borderColor: theme.border, gap: 6 }]}>
+                          <Text style={{ color: theme.headerText, fontWeight: '800' }}>{ev.titulo || '(Sem título)'}</Text>
+                          <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                            {formatDateTimeBR(ev.inicio)}
+                            {ev.fim ? ` — ${formatDateTimeBR(ev.fim)}` : ''}
+                          </Text>
+                          {registros.length === 0 ? (
+                            <Text style={{ color: theme.textMuted, fontSize: 12 }}>Sem registro neste dia.</Text>
+                          ) : (
+                            registros.map((reuniao) => (
+                              <View
+                                key={reuniao.id}
+                                style={{
+                                  borderTopWidth: 1,
+                                  borderTopColor: theme.border,
+                                  paddingTop: 6,
+                                  gap: 2,
+                                }}
+                              >
+                                <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+                                  Registro do mesmo dia
+                                </Text>
+                                <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                                  {formatDateTimeBR(reuniao.created_at)} · {reuniao.admin_email?.trim() || '—'}
+                                </Text>
+                                {reuniao.pendencia?.trim() ? (
+                                  <Text style={{ color: theme.headerText, fontWeight: '700' }}>{reuniao.pendencia}</Text>
+                                ) : null}
+                                {reuniao.pendencia?.trim() ? (
+                                  <Text style={{ color: theme.text, fontSize: 13 }}>
+                                    Retorno: {formatYmdBR(reuniao.data_retorno)}
+                                  </Text>
+                                ) : null}
+                                {reuniao.assuntos?.trim() ? (
+                                  <Text style={{ color: theme.textMuted, fontSize: 13 }}>{reuniao.assuntos}</Text>
+                                ) : null}
+                              </View>
+                            ))
+                          )}
+                        </View>
+                      );
+                    })
+                  )}
+                </>
+              ) : null}
             </View>
 
             <View style={{ gap: 8 }}>

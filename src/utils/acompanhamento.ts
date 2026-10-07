@@ -66,6 +66,33 @@ export function isAcompanhamentoColuna(value: unknown): value is AcompanhamentoC
   return ACOMPANHAMENTO_COLUNAS.some((c) => c.key === value);
 }
 
+function semAcento(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+/** Contas internas que não entram no quadro. A coluna Acompanhamento finalizado continua. */
+const CONTAS_INTERNAS_OCULTAS: Array<{ nome: string; empresa?: string }> = [
+  { nome: 'flavio', empresa: 'camptronic' },
+  { nome: 'otavio ribeiro' },
+  { nome: 'samuel fernandes', empresa: 'azoup tecnologia' },
+  { nome: 'vinicius helama lameu', empresa: 'banco sicoob' },
+];
+
+export function isContaInternaOculta(cliente: { nome?: string | null; empresa_nome?: string | null }): boolean {
+  const nome = semAcento(`${cliente.nome ?? ''}`);
+  const empresa = semAcento(`${cliente.empresa_nome ?? ''}`);
+  return CONTAS_INTERNAS_OCULTAS.some((conta) => {
+    const nomeOk = nome === conta.nome || nome.startsWith(`${conta.nome} `);
+    if (!nomeOk) return false;
+    if (!conta.empresa) return true;
+    return empresa.includes(conta.empresa);
+  });
+}
+
 function diasEntreYmd(inicio: string, fim: string): number {
   const a = Date.parse(`${inicio}T12:00:00`);
   const b = Date.parse(`${fim}T12:00:00`);

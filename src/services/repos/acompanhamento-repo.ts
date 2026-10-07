@@ -4,6 +4,7 @@ import type { AdminAcompanhamentoKanbanRow } from '@/src/types/azoup';
 import {
   agrupamentoAcompanhamentoVazio,
   enriquecerAcompanhamentoCliente,
+  isContaInternaOculta,
   type AcompanhamentoCliente,
   type AcompanhamentoColuna,
   ACOMPANHAMENTO_COLUNAS,
@@ -44,7 +45,9 @@ export async function carregarAcompanhamentoClientes(): Promise<{
   porColuna: AcompanhamentoAgrupado;
 }> {
   const res = await obterAcompanhamentoViaFunction();
-  const baseRows = (res.clientes ?? []).filter(isClienteNoAcompanhamento);
+  const baseRows = (res.clientes ?? []).filter(
+    (row) => isClienteNoAcompanhamento(row) && !isContaInternaOculta(row),
+  );
   const ids = baseRows.map((r) => r.id);
 
   let kanban = new Map<string, AdminAcompanhamentoKanbanRow>();
