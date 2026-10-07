@@ -75,19 +75,22 @@ function PainelConfig({
         </View>
         <FontAwesome name={aberto ? 'chevron-up' : 'chevron-down'} size={12} color={theme.textMuted} />
       </Pressable>
-      {aberto ? (
-        <View
-          style={{
-            gap: 12,
-            paddingHorizontal: 16,
-            paddingBottom: 16,
-            borderTopWidth: 1,
-            borderTopColor: theme.border,
-          }}
-        >
-          {children}
-        </View>
-      ) : null}
+      <View
+        style={
+          aberto
+            ? {
+                gap: 12,
+                paddingHorizontal: 16,
+                paddingBottom: 16,
+                borderTopWidth: 1,
+                borderTopColor: theme.border,
+              }
+            : { display: 'none' }
+        }
+        accessibilityElementsHidden={!aberto}
+      >
+        {children}
+      </View>
     </View>
   );
 }
@@ -104,33 +107,42 @@ function DigisacBoasVindasConfig({ aberto, onPress }: { aberto: boolean; onPress
   const [mensagem, setMensagem] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
-  const editou = useRef(false);
+  const rascunho = useRef(false);
 
   useEffect(() => {
-    if (!q.data || editou.current) return;
+    if (!q.data || rascunho.current) return;
     setHabilitado(q.data.habilitado);
     setMensagem(q.data.mensagem);
-  }, [q.data]);
+  }, [q.data, aberto]);
+
+  useEffect(() => {
+    if (!aberto || rascunho.current) return;
+    void qc.invalidateQueries({ queryKey: ['digisac_boas_vindas'] });
+  }, [aberto, qc]);
 
   const salvar = useMutation({
     mutationFn: async () => {
       const anterior = q.data ?? null;
       const proximo = { habilitado, mensagem };
-      await salvarDigisacBoasVindas(proximo);
+      const salvo = await salvarDigisacBoasVindas(proximo);
       await registrarAuditoria(
         { id: adminProfile?.id, email: adminProfile?.email },
         {
           acao: 'DIGISAC_BOAS_VINDAS_UPDATE',
           entidade: 'admin_digisac_boas_vindas',
           valores_anteriores: (anterior ?? null) as unknown as Record<string, unknown> | null,
-          valores_novos: proximo as unknown as Record<string, unknown>,
+          valores_novos: salvo as unknown as Record<string, unknown>,
         },
       );
+      return salvo;
     },
-    onSuccess: () => {
+    onSuccess: (salvo) => {
+      rascunho.current = false;
+      setHabilitado(salvo.habilitado);
+      setMensagem(salvo.mensagem);
+      qc.setQueryData(['digisac_boas_vindas'], salvo);
       setErro(null);
       setOk('Mensagem automática salva.');
-      void qc.invalidateQueries({ queryKey: ['digisac_boas_vindas'] });
     },
     onError: (e) => {
       setOk(null);
@@ -152,7 +164,7 @@ function DigisacBoasVindasConfig({ aberto, onPress }: { aberto: boolean; onPress
         accessibilityRole="switch"
         accessibilityState={{ checked: habilitado }}
         onPress={() => {
-          editou.current = true;
+          rascunho.current = true;
           setHabilitado((atual) => !atual);
           setOk(null);
         }}
@@ -185,6 +197,7 @@ function DigisacBoasVindasConfig({ aberto, onPress }: { aberto: boolean; onPress
           textAlignVertical="top"
           value={mensagem}
           onChangeText={(valor) => {
+            rascunho.current = true;
             setMensagem(valor);
             setOk(null);
           }}

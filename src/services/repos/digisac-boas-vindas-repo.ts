@@ -33,22 +33,30 @@ export async function lerDigisacBoasVindas(): Promise<DigisacBoasVindasConfig> {
   };
 }
 
-export async function salvarDigisacBoasVindas(config: DigisacBoasVindasConfig): Promise<void> {
-  const { error } = await supabase.from('admin_digisac_boas_vindas').upsert(
-    {
-      id: 1,
-      habilitado: config.habilitado,
-      mensagem: config.mensagem,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'id' },
-  );
+export async function salvarDigisacBoasVindas(config: DigisacBoasVindasConfig): Promise<DigisacBoasVindasConfig> {
+  const { data, error } = await supabase
+    .from('admin_digisac_boas_vindas')
+    .upsert(
+      {
+        id: 1,
+        habilitado: config.habilitado,
+        mensagem: config.mensagem,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' },
+    )
+    .select('habilitado, mensagem')
+    .single();
   if (error) {
     if (tabelaAusente(error.message, 'admin_digisac_boas_vindas')) {
       throw new Error('Execute supabase/sql/admin_digisac_boas_vindas.sql no Supabase.');
     }
     throw new Error(error.message);
   }
+  return {
+    habilitado: Boolean(data?.habilitado),
+    mensagem: `${data?.mensagem ?? ''}`,
+  };
 }
 
 export async function buscarEnvioDigisac(clienteId: string): Promise<DigisacEnvioCliente | null> {
