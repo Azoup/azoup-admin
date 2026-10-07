@@ -90,8 +90,8 @@ export async function definirCalendarioGoogle(calendarId: string) {
   return invoke<{ ok: boolean }>('definir_calendario', { calendar_id: calendarId });
 }
 
-export async function sincronizarGoogleAgenda() {
-  return invoke<{ ok: boolean; synced: number }>('sincronizar');
+export async function sincronizarGoogleAgenda(janela?: { inicio?: string; fim?: string }) {
+  return invoke<{ ok: boolean; synced: number }>('sincronizar', janela ?? {});
 }
 
 export async function listarEventosGoogle(params?: { inicio?: string; fim?: string }) {

@@ -4,6 +4,30 @@ import { dataCalendarioBrasil } from '@/src/utils/format';
 
 export type { GoogleAgendaEvento };
 
+function normalizarEvento(row: GoogleAgendaEvento & { cliente?: GoogleAgendaEvento['cliente'] | GoogleAgendaEvento['cliente'][] }): GoogleAgendaEvento {
+  const cliente = Array.isArray(row.cliente) ? (row.cliente[0] ?? null) : (row.cliente ?? null);
+  return { ...row, cliente };
+}
+
+/** Eventos do mês a partir do cache local. Não chama o Google. */
+export async function listarEventosAgendaCache(inicio: string, fim: string, calendarId?: string | null): Promise<GoogleAgendaEvento[]> {
+  let q = supabase
+    .from('admin_google_agendamentos')
+    .select('id,google_event_id,calendar_id,titulo,descricao,inicio,fim,status,cliente_id,match_tipo,cliente:clientes_azoup(id,nome,email)')
+    .gte('inicio', inicio)
+    .lt('inicio', fim)
+    .order('inicio', { ascending: true });
+  if (calendarId) q = q.eq('calendar_id', calendarId);
+  const { data, error } = await q;
+  if (error) {
+    if (/admin_google_agendamentos|schema cache|does not exist/i.test(error.message)) return [];
+    throw new Error(error.message);
+  }
+  return ((data ?? []) as Array<GoogleAgendaEvento & { cliente?: GoogleAgendaEvento['cliente'] | GoogleAgendaEvento['cliente'][] }>)
+    .map(normalizarEvento)
+    .filter((ev) => `${ev.status ?? ''}` !== 'cancelled');
+}
+
 /** Eventos já sincronizados e vinculados a este cliente. Não chama o Google de novo. */
 export async function listarAgendaDoCliente(clienteId: string): Promise<GoogleAgendaEvento[]> {
   if (!clienteId) return [];

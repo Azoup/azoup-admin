@@ -1,10 +1,11 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
+import { DescricaoAgenda } from '@/components/ui/DescricaoAgenda';
 import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
@@ -25,14 +26,15 @@ import {
   excluirEventoGoogle,
   iniciarOAuthGoogle,
   listarCalendariosGoogle,
-  listarEventosGoogle,
   sincronizarGoogleAgenda,
   statusConexaoGoogle,
   vincularClienteEvento,
   type GoogleAgendaEvento,
 } from '@/src/services/google-calendar-api';
 import { listarClientesParaSelecao } from '@/src/services/repos/conversas-repo';
+import { listarEventosAgendaCache } from '@/src/services/repos/google-agendamentos-repo';
 import type { ClienteAzoupRow } from '@/src/types/azoup';
+import { descricaoTemHtml } from '@/src/utils/agenda-html';
 import { dataCalendarioBrasil, dataHojeBrasil, formatDateTimeBR, formatYmdBR, somarDiasYmd } from '@/src/utils/format';
 
 const SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -52,6 +54,23 @@ function diasNoMes(y: number, m0: number): number {
 
 function primeiroDiaSemana(y: number, m0: number): number {
   return new Date(Date.UTC(y, m0, 1)).getUTCDay();
+}
+
+function deslocarMes(y: number, m0: number, delta: number): { y: number; m0: number } {
+  const d = new Date(Date.UTC(y, m0 + delta, 1));
+  return { y: d.getUTCFullYear(), m0: d.getUTCMonth() };
+}
+
+/** Seis meses para trás e para frente, para a troca de mês não buscar de novo. */
+function janelaEmTorno(y: number, m0: number): { inicio: string; fim: string } {
+  const ini = deslocarMes(y, m0, -6);
+  const fim = deslocarMes(y, m0, 6);
+  const inicioYmd = ymdFromParts(ini.y, ini.m0, 1);
+  const fimYmd = ymdFromParts(fim.y, fim.m0, diasNoMes(fim.y, fim.m0));
+  return {
+    inicio: `${inicioYmd}T00:00:00-03:00`,
+    fim: `${somarDiasYmd(fimYmd, 1)}T00:00:00-03:00`,
+  };
 }
 
 function isoLocalFromYmdHora(ymd: string, hora: string): string {
@@ -198,7 +217,11 @@ function EventoModal({
               />
             </FormField>
             <FormField label="Descrição">
-              <FormInput value={descricao} onChangeText={setDescricao} multiline style={{ minHeight: 80 }} />
+              {descricaoTemHtml(descricao) ? (
+                <DescricaoAgenda html={descricao} color={theme.text} muted={theme.textMuted} link={theme.cadastroAction} />
+              ) : (
+                <FormInput value={descricao} onChangeText={setDescricao} multiline style={{ minHeight: 80 }} />
+              )}
             </FormField>
             <FormField label="Cliente Azoup">
               <ClienteSearchPicker
@@ -239,8 +262,21 @@ export default function AgendamentosScreen() {
   const [vincularEvento, setVincularEvento] = useState<GoogleAgendaEvento | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const inicioMes = ymdFromParts(mesRef.y, mesRef.m0, 1);
-  const fimMes = ymdFromParts(mesRef.y, mesRef.m0, diasNoMes(mesRef.y, mesRef.m0));
+  const [janela, setJanela] = useState(() => janelaEmTorno(mesRef.y, mesRef.m0));
+  const [atualizando, setAtualizando] = useState(false);
+  const syncPedido = useRef(new Set<string>());
+  const syncGeracao = useRef(0);
+
+  useEffect(() => {
+    const precisa = janelaEmTorno(mesRef.y, mesRef.m0);
+    setJanela((atual) => {
+      if (precisa.inicio >= atual.inicio && precisa.fim <= atual.fim) return atual;
+      return {
+        inicio: precisa.inicio < atual.inicio ? precisa.inicio : atual.inicio,
+        fim: precisa.fim > atual.fim ? precisa.fim : atual.fim,
+      };
+    });
+  }, [mesRef]);
 
   const statusQ = useQuery({
     queryKey: ['google_calendar_status'],
@@ -249,14 +285,33 @@ export default function AgendamentosScreen() {
   });
 
   const eventosQ = useQuery({
-    queryKey: ['google_calendar_eventos', inicioMes, fimMes],
-    queryFn: () =>
-      listarEventosGoogle({
-        inicio: `${inicioMes}T00:00:00-03:00`,
-        fim: `${somarDiasYmd(fimMes, 1)}T00:00:00-03:00`,
-      }),
+    queryKey: ['google_calendar_eventos', janela.inicio, janela.fim, statusQ.data?.calendar_id ?? ''],
+    queryFn: () => listarEventosAgendaCache(janela.inicio, janela.fim, statusQ.data?.calendar_id),
     enabled: canAccessScreen('agendamentos') && Boolean(statusQ.data?.connected),
+    placeholderData: (anterior) => anterior,
+    staleTime: 60_000,
   });
+
+  useEffect(() => {
+    if (!statusQ.data?.connected) return;
+    const chave = `${janela.inicio}|${janela.fim}|${statusQ.data.calendar_id ?? ''}`;
+    if (syncPedido.current.has(chave)) return;
+    syncPedido.current.add(chave);
+    const geracao = ++syncGeracao.current;
+    setAtualizando(true);
+    void sincronizarGoogleAgenda({ inicio: janela.inicio, fim: janela.fim })
+      .then(() => {
+        void qc.invalidateQueries({ queryKey: ['google_calendar_eventos'] });
+        void qc.invalidateQueries({ queryKey: ['google_proximas_reunioes'] });
+      })
+      .catch((e) => {
+        syncPedido.current.delete(chave);
+        setMsg(e instanceof Error ? e.message : 'Erro ao atualizar a agenda');
+      })
+      .finally(() => {
+        if (syncGeracao.current === geracao) setAtualizando(false);
+      });
+  }, [statusQ.data?.connected, statusQ.data?.calendar_id, janela.inicio, janela.fim, qc]);
 
   const calendariosQ = useQuery({
     queryKey: ['google_calendar_list'],
@@ -274,7 +329,7 @@ export default function AgendamentosScreen() {
 
   const porDia = useMemo(() => {
     const map = new Map<string, GoogleAgendaEvento[]>();
-    for (const ev of eventosQ.data?.eventos ?? []) {
+    for (const ev of eventosQ.data ?? []) {
       const ymd = dataCalendarioBrasil(ev.inicio);
       if (!ymd) continue;
       const list = map.get(ymd) ?? [];
@@ -295,7 +350,7 @@ export default function AgendamentosScreen() {
   });
 
   const sync = useMutation({
-    mutationFn: sincronizarGoogleAgenda,
+    mutationFn: () => sincronizarGoogleAgenda(janela),
     onSuccess: (r) => {
       setMsg(`Sincronizado: ${r.synced} evento(s).`);
       void qc.invalidateQueries({ queryKey: ['google_calendar_eventos'] });
@@ -486,7 +541,12 @@ export default function AgendamentosScreen() {
                 >
                   <FontAwesome name="chevron-left" size={14} color={theme.textMuted} />
                 </Pressable>
-                <Text style={{ color: theme.headerText, fontWeight: '800', textTransform: 'capitalize' }}>{tituloMes}</Text>
+                <View style={{ alignItems: 'center', gap: 2 }}>
+                  <Text style={{ color: theme.headerText, fontWeight: '800', textTransform: 'capitalize' }}>{tituloMes}</Text>
+                  {atualizando || sync.isPending ? (
+                    <Text style={{ color: theme.textMuted, fontSize: 11 }}>Atualizando agenda…</Text>
+                  ) : null}
+                </View>
                 <Pressable
                   onPress={() =>
                     setMesRef((m) => {
@@ -545,7 +605,7 @@ export default function AgendamentosScreen() {
             </ScreenCard>
 
             <SectionTitle>{formatYmdBR(diaSelecionado)}</SectionTitle>
-            {eventosQ.isLoading ? (
+            {eventosQ.isLoading && !eventosQ.data ? (
               <ActivityIndicator color={theme.cadastroAction} />
             ) : eventosQ.isError ? (
               <Text style={{ color: theme.error, fontWeight: '700' }}>
@@ -576,6 +636,9 @@ export default function AgendamentosScreen() {
                   <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                     {formatDateTimeBR(ev.inicio)} — {horaDeIso(ev.fim)}
                   </Text>
+                  {ev.descricao?.trim() ? (
+                    <DescricaoAgenda html={ev.descricao} color={theme.text} muted={theme.textMuted} link={theme.cadastroAction} />
+                  ) : null}
                   {ev.cliente ? (
                     <Text style={{ color: theme.cadastroAction, fontSize: 12, fontWeight: '700' }}>
                       Cliente: {ev.cliente.nome}

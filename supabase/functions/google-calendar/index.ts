@@ -239,6 +239,34 @@ async function loadEmailMap(supabaseAdmin: ReturnType<typeof createClient>) {
   return map;
 }
 
+function instante(value: string | null | undefined): number {
+  const n = Date.parse(`${value ?? ''}`);
+  return Number.isFinite(n) ? n : 0;
+}
+
+type EventoCache = {
+  google_event_id: string;
+  cliente_id?: string | null;
+  match_tipo?: string | null;
+  titulo?: string | null;
+  descricao?: string | null;
+  inicio?: string | null;
+  fim?: string | null;
+  status?: string | null;
+};
+
+function eventoIgual(prev: EventoCache, next: EventoCache): boolean {
+  return (
+    `${prev.titulo ?? ''}` === `${next.titulo ?? ''}` &&
+    `${prev.descricao ?? ''}` === `${next.descricao ?? ''}` &&
+    instante(prev.inicio) === instante(next.inicio) &&
+    instante(prev.fim) === instante(next.fim) &&
+    `${prev.status ?? ''}` === `${next.status ?? ''}` &&
+    (prev.cliente_id ?? null) === (next.cliente_id ?? null) &&
+    `${prev.match_tipo ?? ''}` === `${next.match_tipo ?? ''}`
+  );
+}
+
 async function syncEvents(
   supabaseAdmin: ReturnType<typeof createClient>,
   accessToken: string,
@@ -247,11 +275,9 @@ async function syncEvents(
   timeMax = new Date(Date.now() + 90 * 86_400_000).toISOString(),
 ) {
   const emailMap = await loadEmailMap(supabaseAdmin);
+  const mapped: ReturnType<typeof mapGoogleEvent>[] = [];
 
   let pageToken: string | undefined;
-  let total = 0;
-  const seenIds: string[] = [];
-
   do {
     const qs = new URLSearchParams({
       singleEvents: 'true',
@@ -267,45 +293,60 @@ async function syncEvents(
       `/calendars/${encodeURIComponent(calendarId)}/events?${qs}`,
     );
     const items = (data.items as Record<string, unknown>[] | undefined) ?? [];
-
     for (const ev of items) {
       if (`${ev.status}` === 'cancelled') continue;
-      const mapped = mapGoogleEvent(ev, calendarId);
-      if (!mapped.inicio || !mapped.fim) continue;
-      seenIds.push(mapped.google_event_id);
-
-      const { data: existing } = await supabaseAdmin
-        .from('admin_google_agendamentos')
-        .select('id,cliente_id,match_tipo')
-        .eq('google_event_id', mapped.google_event_id)
-        .maybeSingle();
-
-      const existingRow = existing as { cliente_id?: string | null; match_tipo?: string } | null;
-      let cliente_id = existingRow?.cliente_id ?? null;
-      let match_tipo = existingRow?.match_tipo ?? 'nenhum';
-
-      if (match_tipo !== 'manual') {
-        const matched = await matchClienteId(supabaseAdmin, mapped, emailMap);
-        cliente_id = matched.cliente_id;
-        match_tipo = matched.match_tipo;
-      }
-
-      const { error } = await supabaseAdmin.from('admin_google_agendamentos').upsert(
-        {
-          ...mapped,
-          cliente_id,
-          match_tipo,
-        },
-        { onConflict: 'google_event_id' },
-      );
-      if (error) throw error;
-      total += 1;
+      const row = mapGoogleEvent(ev, calendarId);
+      if (!row.inicio || !row.fim) continue;
+      mapped.push(row);
     }
-
     pageToken = data.nextPageToken as string | undefined;
   } while (pageToken);
 
-  return { synced: total };
+  const existing = new Map<string, EventoCache>();
+  for (let i = 0; i < mapped.length; i += 200) {
+    const ids = mapped.slice(i, i + 200).map((row) => row.google_event_id);
+    const { data, error } = await supabaseAdmin
+      .from('admin_google_agendamentos')
+      .select('google_event_id,cliente_id,match_tipo,titulo,descricao,inicio,fim,status')
+      .in('google_event_id', ids);
+    if (error) throw error;
+    for (const row of (data ?? []) as EventoCache[]) {
+      existing.set(row.google_event_id, row);
+    }
+  }
+
+  const upserts: Record<string, unknown>[] = [];
+  for (const row of mapped) {
+    const prev = existing.get(row.google_event_id);
+    let cliente_id = prev?.cliente_id ?? null;
+    let match_tipo = prev?.match_tipo ?? 'nenhum';
+    if (match_tipo !== 'manual') {
+      const matched = await matchClienteId(supabaseAdmin, row, emailMap);
+      cliente_id = matched.cliente_id;
+      match_tipo = matched.match_tipo;
+    }
+    const next: EventoCache = {
+      google_event_id: row.google_event_id,
+      titulo: row.titulo,
+      descricao: row.descricao,
+      inicio: row.inicio,
+      fim: row.fim,
+      status: row.status,
+      cliente_id,
+      match_tipo,
+    };
+    if (prev && eventoIgual(prev, next)) continue;
+    upserts.push({ ...row, cliente_id, match_tipo });
+  }
+
+  for (let i = 0; i < upserts.length; i += 100) {
+    const { error } = await supabaseAdmin
+      .from('admin_google_agendamentos')
+      .upsert(upserts.slice(i, i + 100), { onConflict: 'google_event_id' });
+    if (error) throw error;
+  }
+
+  return { synced: mapped.length };
 }
 
 serve(async (req) => {
@@ -477,16 +518,17 @@ serve(async (req) => {
     }
 
     if (op === 'sincronizar') {
-      const result = await syncEvents(supabaseAdmin, accessToken, calendarId);
+      const inicio = `${p.inicio ?? ''}`.trim();
+      const fim = `${p.fim ?? ''}`.trim();
+      const result = inicio && fim
+        ? await syncEvents(supabaseAdmin, accessToken, calendarId, inicio, fim)
+        : await syncEvents(supabaseAdmin, accessToken, calendarId);
       return json({ ok: true, ...result });
     }
 
     if (op === 'listar_eventos') {
       const inicio = `${p.inicio ?? ''}`.trim();
       const fim = `${p.fim ?? ''}`.trim();
-      if (inicio && fim) {
-        await syncEvents(supabaseAdmin, accessToken, calendarId, inicio, fim);
-      }
       let q = supabaseAdmin
         .from('admin_google_agendamentos')
         .select('*, cliente:clientes_azoup(id,nome,email)')
