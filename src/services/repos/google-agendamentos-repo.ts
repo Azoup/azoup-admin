@@ -1,33 +1,26 @@
-import { listarEventosGoogle, type GoogleAgendaEvento } from '@/src/services/google-calendar-api';
+import type { GoogleAgendaEvento } from '@/src/services/google-calendar-api';
 import { supabase } from '@/src/lib/supabase';
 import { dataCalendarioBrasil } from '@/src/utils/format';
 
 export type { GoogleAgendaEvento };
 
-function eventoDoCliente(ev: GoogleAgendaEvento, clienteId: string): boolean {
-  return ev.cliente_id === clienteId && `${ev.status ?? ''}` !== 'cancelled';
-}
-
-/** Eventos da agenda Google já vinculados a este cliente, passados e futuros. */
+/** Eventos já sincronizados e vinculados a este cliente. Não chama o Google de novo. */
 export async function listarAgendaDoCliente(clienteId: string): Promise<GoogleAgendaEvento[]> {
   if (!clienteId) return [];
   const inicio = new Date(Date.now() - 180 * 86_400_000).toISOString();
   const fim = new Date(Date.now() + 180 * 86_400_000).toISOString();
-  try {
-    const { eventos } = await listarEventosGoogle({ inicio, fim });
-    return (eventos ?? []).filter((ev) => eventoDoCliente(ev, clienteId));
-  } catch {
-    const { data, error } = await supabase
-      .from('admin_google_agendamentos')
-      .select('id,google_event_id,calendar_id,titulo,descricao,inicio,fim,status,cliente_id,match_tipo')
-      .eq('cliente_id', clienteId)
-      .order('inicio', { ascending: true });
-    if (error) {
-      if (/admin_google_agendamentos|schema cache|does not exist/i.test(error.message)) return [];
-      throw new Error(error.message);
-    }
-    return ((data ?? []) as GoogleAgendaEvento[]).filter((ev) => eventoDoCliente(ev, clienteId));
+  const { data, error } = await supabase
+    .from('admin_google_agendamentos')
+    .select('id,google_event_id,calendar_id,titulo,descricao,inicio,fim,status,cliente_id,match_tipo')
+    .eq('cliente_id', clienteId)
+    .gte('inicio', inicio)
+    .lte('inicio', fim)
+    .order('inicio', { ascending: true });
+  if (error) {
+    if (/admin_google_agendamentos|schema cache|does not exist/i.test(error.message)) return [];
+    throw new Error(error.message);
   }
+  return ((data ?? []) as GoogleAgendaEvento[]).filter((ev) => `${ev.status ?? ''}` !== 'cancelled');
 }
 
 /** Próximo início (YYYY-MM-DD) por cliente a partir do cache Google. */
