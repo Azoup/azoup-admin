@@ -243,9 +243,9 @@ async function syncEvents(
   supabaseAdmin: ReturnType<typeof createClient>,
   accessToken: string,
   calendarId: string,
+  timeMin = new Date(Date.now() - 30 * 86_400_000).toISOString(),
+  timeMax = new Date(Date.now() + 90 * 86_400_000).toISOString(),
 ) {
-  const timeMin = new Date(Date.now() - 30 * 86_400_000).toISOString();
-  const timeMax = new Date(Date.now() + 90 * 86_400_000).toISOString();
   const emailMap = await loadEmailMap(supabaseAdmin);
 
   let pageToken: string | undefined;
@@ -484,9 +484,13 @@ serve(async (req) => {
     if (op === 'listar_eventos') {
       const inicio = `${p.inicio ?? ''}`.trim();
       const fim = `${p.fim ?? ''}`.trim();
+      if (inicio && fim) {
+        await syncEvents(supabaseAdmin, accessToken, calendarId, inicio, fim);
+      }
       let q = supabaseAdmin
         .from('admin_google_agendamentos')
         .select('*, cliente:clientes_azoup(id,nome,email)')
+        .eq('calendar_id', calendarId)
         .order('inicio', { ascending: true });
       if (inicio) q = q.gte('inicio', inicio);
       if (fim) q = q.lte('inicio', fim);

@@ -20,7 +20,7 @@ No Supabase (Project Settings → Edge Functions → Secrets), defina:
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `GOOGLE_REDIRECT_URI` = o mesmo URI do passo 2.4
-- `PAINEL_PUBLIC_URL` = URL pública do painel (ex.: `https://seu-painel.vercel.app` ou `http://localhost:8081` em dev)
+- `PAINEL_PUBLIC_URL` = `https://admin.confec.azoup.com.br` (sem barra no final; o retorno do OAuth abre `/agendamentos`)
 - Já existentes: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`
 
 ## 4. Deploy

@@ -547,6 +547,10 @@ export default function AgendamentosScreen() {
             <SectionTitle>{formatYmdBR(diaSelecionado)}</SectionTitle>
             {eventosQ.isLoading ? (
               <ActivityIndicator color={theme.cadastroAction} />
+            ) : eventosQ.isError ? (
+              <Text style={{ color: theme.error, fontWeight: '700' }}>
+                {eventosQ.error instanceof Error ? eventosQ.error.message : 'Erro ao carregar a agenda'}
+              </Text>
             ) : doDia.length === 0 ? (
               <Text style={{ color: theme.textMuted }}>Nenhum agendamento neste dia.</Text>
             ) : (
