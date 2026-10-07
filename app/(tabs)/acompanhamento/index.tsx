@@ -20,6 +20,7 @@ import { registrarAuditoria } from '@/src/services/audit';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { listarAlertaContato } from '@/src/services/repos/acompanhamento-alerta-repo';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
+import { listarMensagensAutomaticasEnviadas } from '@/src/services/repos/digisac-boas-vindas-repo';
 import { listarAgendaDoCliente, listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
 import {
   listarChamadosDigisac,
@@ -1312,6 +1313,7 @@ function KanbanCard({
   pendenciasAbertas,
   ultimaReuniao,
   proximaReuniaoGoogle,
+  mensagemAutomatica,
   onAbrir,
   onAbrirPendencias,
   onRegistrarConversa,
@@ -1327,6 +1329,7 @@ function KanbanCard({
   pendenciasAbertas: number;
   ultimaReuniao?: string | null;
   proximaReuniaoGoogle?: string | null;
+  mensagemAutomatica?: boolean;
   onAbrir: () => void;
   onAbrirPendencias: () => void;
   onRegistrarConversa: () => void;
@@ -1406,6 +1409,11 @@ function KanbanCard({
             >
               {rotuloUltimoContato(ultimoContato)}
             </Text>
+            {mensagemAutomatica ? (
+              <Text style={{ color: theme.cadastroAction, fontSize: 11, fontWeight: '800', marginTop: 4 }}>
+                Mensagem automática enviada
+              </Text>
+            ) : null}
           </View>
         </Pressable>
         <SemArraste>
@@ -1528,6 +1536,7 @@ function KanbanColumn({
   onSoltar,
   resumoReunioes,
   proximasGoogle,
+  mensagensEnviadas,
 }: {
   coluna: (typeof ACOMPANHAMENTO_COLUNAS)[number];
   clientes: AcompanhamentoCliente[];
@@ -1535,6 +1544,7 @@ function KanbanColumn({
   diasAlerta: number;
   resumoReunioes: Map<string, ResumoReunioesCliente>;
   proximasGoogle: Map<string, string>;
+  mensagensEnviadas: Set<string>;
   dropOver: boolean;
   altura: number;
   onAbrir: (c: AcompanhamentoCliente) => void;
@@ -1584,6 +1594,7 @@ function KanbanColumn({
               pendenciasAbertas={resumoReunioes.get(item.id)?.abertas ?? 0}
               ultimaReuniao={resumoReunioes.get(item.id)?.ultimaCriacao ?? null}
               proximaReuniaoGoogle={proximasGoogle.get(item.id) ?? null}
+              mensagemAutomatica={coluna.key === 'primeiro_contato' && mensagensEnviadas.has(item.id)}
               onAbrir={() => onAbrir(item)}
               onAbrirPendencias={() => onAbrirPendencias(item)}
               onRegistrarConversa={() => onRegistrarConversa(item)}
@@ -1655,6 +1666,12 @@ export default function AcompanhamentoScreen() {
   const googleProximasQ = useQuery({
     queryKey: ['google_proximas_reunioes', ids.join(',')],
     queryFn: () => listarProximasReunioesGoogle(ids),
+    enabled: canAccessScreen('acompanhamento') && ids.length > 0,
+  });
+
+  const mensagensDigisacQ = useQuery({
+    queryKey: ['digisac_mensagens_enviadas', ids.join(',')],
+    queryFn: () => listarMensagensAutomaticasEnviadas(ids),
     enabled: canAccessScreen('acompanhamento') && ids.length > 0,
   });
 
@@ -1824,6 +1841,7 @@ export default function AcompanhamentoScreen() {
               diasAlerta={alertaQ.data?.[col.key] ?? 7}
               resumoReunioes={abertasQ.data ?? new Map()}
               proximasGoogle={googleProximasQ.data ?? new Map()}
+              mensagensEnviadas={mensagensDigisacQ.data ?? new Set()}
               dropOver={dropOverColuna === col.key}
               altura={alturaColuna}
               onAbrir={(cliente) =>

@@ -59,6 +59,29 @@ export async function salvarDigisacBoasVindas(config: DigisacBoasVindasConfig): 
   };
 }
 
+export async function listarMensagensAutomaticasEnviadas(clienteIds: string[]): Promise<Set<string>> {
+  const enviados = new Set<string>();
+  if (!clienteIds.length) return enviados;
+  const CHUNK = 200;
+  for (let i = 0; i < clienteIds.length; i += CHUNK) {
+    const chunk = clienteIds.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from('admin_digisac_envio')
+      .select('cliente_id')
+      .in('cliente_id', chunk)
+      .eq('status', 'enviado');
+    if (error) {
+      if (tabelaAusente(error.message, 'admin_digisac_envio')) return enviados;
+      throw new Error(error.message);
+    }
+    for (const row of data ?? []) {
+      const id = `${(row as { cliente_id?: string }).cliente_id ?? ''}`;
+      if (id) enviados.add(id);
+    }
+  }
+  return enviados;
+}
+
 export async function buscarEnvioDigisac(clienteId: string): Promise<DigisacEnvioCliente | null> {
   if (!clienteId) return null;
   const { data, error } = await supabase

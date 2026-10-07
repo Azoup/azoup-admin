@@ -273,7 +273,7 @@ async function contatoDoCliente(
 ): Promise<{ situacao: 'sem_telefone' | 'sem_contato' | null; contactId: string | null }> {
   const { data: cliente, error } = await supabaseAdmin
     .from('clientes_azoup')
-    .select('id, telefone, celular')
+    .select('id, telefone')
     .eq('id', clienteId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -290,10 +290,7 @@ async function contatoDoCliente(
     contactIdSalvo = salvo || null;
   }
 
-  const numero = telefoneDigisac(
-    (cliente as { celular?: string | null }).celular,
-    (cliente as { telefone?: string | null }).telefone,
-  );
+  const numero = telefoneDigisac(null, (cliente as { telefone?: string | null }).telefone);
   if (!numero && !contactIdSalvo) return { situacao: 'sem_telefone', contactId: null };
 
   const contactId = await acharContato(numero, contactIdSalvo);

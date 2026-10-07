@@ -264,6 +264,31 @@ async function protocoloDoContato(contactId: string): Promise<{ protocolo: strin
   return { protocolo: protocolo || null, departmentId: departmentId || null };
 }
 
+/** Depois da mensagem, sai da fila de espera e entra em Primeiro contato. */
+async function promoverPrimeiroContato(supabase: SupabaseClient, clienteId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('admin_acompanhamento_kanban')
+    .select('coluna')
+    .eq('cliente_id', clienteId)
+    .maybeSingle();
+  if (error) {
+    console.error('[digisac-boas-vindas] kanban', error.message);
+    return;
+  }
+  const coluna = `${(data as { coluna?: string } | null)?.coluna ?? 'fila_espera'}`;
+  if (coluna !== 'fila_espera') return;
+  const { error: upErr } = await supabase.from('admin_acompanhamento_kanban').upsert(
+    {
+      cliente_id: clienteId,
+      coluna: 'primeiro_contato',
+      admin_email: 'mensagem-automatica',
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'cliente_id' },
+  );
+  if (upErr) console.error('[digisac-boas-vindas] mover primeiro contato', upErr.message);
+}
+
 async function enviar(supabase: SupabaseClient, clienteId: string, empresa: string) {
   const { data: reivindicou, error: claimErr } = await supabase.rpc('admin_digisac_reivindicar_envio', {
     p_cliente_id: clienteId,
@@ -274,16 +299,13 @@ async function enviar(supabase: SupabaseClient, clienteId: string, empresa: stri
   try {
     const { data: cliente, error: cliErr } = await supabase
       .from('clientes_azoup')
-      .select('id, nome, telefone, celular')
+      .select('id, nome, telefone')
       .eq('id', clienteId)
       .maybeSingle();
     if (cliErr) throw new Error(cliErr.message);
     if (!cliente) throw new Error('Cliente não encontrado');
 
-    const numero = telefoneDigisac(
-      (cliente as { celular?: string | null }).celular,
-      (cliente as { telefone?: string | null }).telefone,
-    );
+    const numero = telefoneDigisac(null, (cliente as { telefone?: string | null }).telefone);
     if (!numero) {
       await marcar(supabase, clienteId, { status: 'sem_telefone', erro: 'Cliente sem telefone válido' });
       return { ok: true, skipped: 'sem_telefone' };
@@ -358,6 +380,7 @@ async function enviar(supabase: SupabaseClient, clienteId: string, empresa: stri
       protocolo,
       erro: aviso,
     });
+    await promoverPrimeiroContato(supabase, clienteId);
     return { ok: true, protocolo, contactId };
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erro ao enviar mensagem Digisac';
@@ -413,7 +436,11 @@ serve(async (req) => {
     if (table === 'empresas' && status !== 'aguardando_empresa') {
       return json({ ok: true, skipped: 'sem_pendencia' });
     }
-    if (status === 'enviado' || status === 'sem_telefone' || status === 'erro') {
+    if (status === 'enviado') {
+      await promoverPrimeiroContato(supabase, clienteId);
+      return json({ ok: true, skipped: status });
+    }
+    if (status === 'sem_telefone' || status === 'erro') {
       return json({ ok: true, skipped: status });
     }
     if (status === 'enviando') {
@@ -425,16 +452,13 @@ serve(async (req) => {
 
     const { data: cliente, error: cliErr } = await supabase
       .from('clientes_azoup')
-      .select('id, telefone, celular')
+      .select('id, telefone')
       .eq('id', clienteId)
       .maybeSingle();
     if (cliErr) throw new Error(cliErr.message);
     if (!cliente) return json({ ok: true, skipped: 'cliente_ausente' });
 
-    const numero = telefoneDigisac(
-      (cliente as { celular?: string | null }).celular,
-      (cliente as { telefone?: string | null }).telefone,
-    );
+    const numero = telefoneDigisac(null, (cliente as { telefone?: string | null }).telefone);
     if (!numero) {
       await marcarSeAindaNaoEnviou(supabase, clienteId, 'sem_telefone', 'Cliente sem telefone válido');
       return json({ ok: true, skipped: 'sem_telefone' });
