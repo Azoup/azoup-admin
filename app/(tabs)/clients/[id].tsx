@@ -29,6 +29,7 @@ import {
   descongelarCliente,
 } from '@/src/services/repos/congelamento-repo';
 import { listarConversasClientes } from '@/src/services/repos/conversas-repo';
+import { buscarEnvioDigisac } from '@/src/services/repos/digisac-boas-vindas-repo';
 import {
   gerarCobrancaPdfViaFunction,
   obterAssinaturaStripe,
@@ -73,6 +74,12 @@ export default function ClientDetailScreen() {
   const conversasQ = useQuery({
     queryKey: ['admin_cliente_conversas', id],
     queryFn: () => listarConversasClientes({ clienteId: id }),
+    enabled: Boolean(id),
+  });
+
+  const digisacQ = useQuery({
+    queryKey: ['admin_digisac_envio', id],
+    queryFn: () => buscarEnvioDigisac(id),
     enabled: Boolean(id),
   });
 
@@ -335,6 +342,25 @@ export default function ClientDetailScreen() {
     <Screen scroll>
       <BackLink href="/clients" label="Voltar para clientes" />
       <PageHeader title={nome} subtitle={`E-mail: ${data.email ?? '—'} · ${data.telefone ?? data.celular ?? '—'}`} />
+
+      {digisacQ.data ? (
+        <ScreenCard>
+          <SectionTitle>Digisac</SectionTitle>
+          <Meta label="Protocolo" value={digisacQ.data.protocolo ?? '—'} />
+          {digisacQ.data.status === 'aguardando_empresa' ? (
+            <Text style={{ color: theme.textMuted, fontSize: 12 }}>Aguardando a empresa do cadastro para enviar a mensagem.</Text>
+          ) : null}
+          {digisacQ.data.status === 'sem_telefone' ? (
+            <Text style={{ color: theme.textMuted, fontSize: 12 }}>Cadastro sem telefone válido para a Digisac.</Text>
+          ) : null}
+          {digisacQ.data.status === 'erro' && digisacQ.data.erro ? (
+            <Text style={{ color: theme.error, fontSize: 12 }}>{digisacQ.data.erro}</Text>
+          ) : null}
+          {digisacQ.data.status === 'enviado' && digisacQ.data.erro ? (
+            <Text style={{ color: theme.textMuted, fontSize: 12 }}>{digisacQ.data.erro}</Text>
+          ) : null}
+        </ScreenCard>
+      ) : null}
 
       <ScreenCard style={{ gap: 10 }}>
         <SectionTitle>Congelar / chamar de novo</SectionTitle>

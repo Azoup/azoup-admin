@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { FlatList, Switch, View } from 'react-native';
 
 import { SuporteVideoCard } from '@/components/ui/SuporteVideoCard';
 import { FormField } from '@/components/ui/FormField';
@@ -17,6 +17,10 @@ import {
   salvarAlertaContato,
   type AlertaContatoPorColuna,
 } from '@/src/services/repos/acompanhamento-alerta-repo';
+import {
+  lerDigisacBoasVindas,
+  salvarDigisacBoasVindas,
+} from '@/src/services/repos/digisac-boas-vindas-repo';
 import { SUPORTE_VIDEO_CATEGORIAS, type SuporteVideoCategoria } from '@/src/constants/suporte-video-categorias';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
@@ -26,6 +30,95 @@ import {
   excluirSuporteVideo,
   listarSuporteVideos,
 } from '@/src/services/repos/suporte-videos-repo';
+
+function DigisacBoasVindasConfig() {
+  const { theme } = useTheme();
+  const qc = useQueryClient();
+  const { adminProfile } = useAdminAuth();
+  const q = useQuery({
+    queryKey: ['digisac_boas_vindas'],
+    queryFn: lerDigisacBoasVindas,
+  });
+  const [habilitado, setHabilitado] = useState(false);
+  const [mensagem, setMensagem] = useState('');
+  const [erro, setErro] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!q.data) return;
+    setHabilitado(q.data.habilitado);
+    setMensagem(q.data.mensagem);
+  }, [q.data]);
+
+  const salvar = useMutation({
+    mutationFn: async () => {
+      const anterior = q.data ?? null;
+      const proximo = { habilitado, mensagem };
+      await salvarDigisacBoasVindas(proximo);
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'DIGISAC_BOAS_VINDAS_UPDATE',
+          entidade: 'admin_digisac_boas_vindas',
+          valores_anteriores: (anterior ?? null) as unknown as Record<string, unknown> | null,
+          valores_novos: proximo as unknown as Record<string, unknown>,
+        },
+      );
+    },
+    onSuccess: () => {
+      setErro(null);
+      setOk('Mensagem automática salva.');
+      void qc.invalidateQueries({ queryKey: ['digisac_boas_vindas'] });
+    },
+    onError: (e) => {
+      setOk(null);
+      setErro(e instanceof Error ? e.message : 'Erro ao salvar a mensagem');
+    },
+  });
+
+  return (
+    <ScreenCard style={{ gap: 12 }}>
+      <SectionTitle>Mensagem automática Digisac</SectionTitle>
+      <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+        Quando ligada, todo cliente novo recebe esta mensagem no telefone cadastrado. O contato entra na conexão e no departamento Azoup Confec.
+      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <Text style={{ color: theme.text, fontWeight: '700', flex: 1 }}>Enviar mensagem automática</Text>
+        <Switch
+          value={habilitado}
+          onValueChange={(valor) => {
+            setHabilitado(valor);
+            setOk(null);
+          }}
+          trackColor={{ true: theme.cadastroAction }}
+        />
+      </View>
+      <FormField label="Mensagem" helper="Enviada exatamente como estiver escrita.">
+        <FormInput
+          multiline
+          numberOfLines={5}
+          textAlignVertical="top"
+          value={mensagem}
+          onChangeText={(valor) => {
+            setMensagem(valor);
+            setOk(null);
+          }}
+          placeholder="Olá, seja bem-vindo à Azoup."
+          style={{ minHeight: 120, paddingTop: 10 }}
+        />
+      </FormField>
+      <PrimaryButton
+        label={salvar.isPending ? 'Salvando…' : 'Salvar mensagem'}
+        loading={salvar.isPending}
+        disabled={q.isLoading}
+        onPress={() => salvar.mutate()}
+      />
+      {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando mensagem…</Text> : null}
+      {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
+      {ok ? <Text style={{ color: theme.success, fontWeight: '700' }}>{ok}</Text> : null}
+    </ScreenCard>
+  );
+}
 
 function AlertaContatoConfig() {
   const { theme } = useTheme();
@@ -190,8 +283,9 @@ export default function ConfigSuporteScreen() {
         <View style={{ gap: 12, marginBottom: 4 }}>
           <PageHeader
             title="Config. Suporte"
-            subtitle="Prazos do acompanhamento e vídeos do YouTube para o suporte no app Azoup."
+            subtitle="Prazos do acompanhamento, mensagem da Digisac e vídeos do YouTube para o suporte no app Azoup."
           />
+          <DigisacBoasVindasConfig />
           <AlertaContatoConfig />
 
           {podeGerenciar ? (
