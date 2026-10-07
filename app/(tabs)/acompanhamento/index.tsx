@@ -660,7 +660,13 @@ function ChamadoDigisacModal({
   );
 }
 
-export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoCliente }) {
+export function HistoricoClienteTela({
+  cliente,
+  embutido = false,
+}: {
+  cliente: AcompanhamentoCliente;
+  embutido?: boolean;
+}) {
   const { theme } = useTheme();
   const { adminProfile, canDeleteRecords, papel } = useAdminAuth();
   const podeAlterarDataRegistro = papel === 'owner';
@@ -909,10 +915,10 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
 
   const ocupado = salvarReuniao.isPending || excluirReuniao.isPending || salvarConversa.isPending || excluirConversa.isPending;
 
-  return (
-    <Screen scroll>
-      <BackLink href="/(tabs)/acompanhamento" label="Acompanhamento" />
-      <PageHeader title={cliente.nome} subtitle={cliente.empresa_nome?.trim() || 'Cliente'} />
+  const conteudo = (
+    <>
+      {embutido ? null : <BackLink href="/(tabs)/acompanhamento" label="Acompanhamento" />}
+      {embutido ? null : <PageHeader title={cliente.nome} subtitle={cliente.empresa_nome?.trim() || 'Cliente'} />}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Pressable
           onPress={() => setReuniaoAberta(true)}
@@ -1327,8 +1333,11 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
         onSaved={invalidarHistorico}
       />
       <ChamadoDigisacModal clienteId={cliente.id} chamado={chamadoAberto} onClose={() => setChamadoAberto(null)} />
-    </Screen>
+    </>
   );
+
+  if (embutido) return conteudo;
+  return <Screen scroll>{conteudo}</Screen>;
 }
 
 function PendenciasAbertasModal({

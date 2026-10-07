@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Linking, Platform, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ConversaClienteCard } from '@/components/ui/ConversaClienteCard';
 import { FormField } from '@/components/ui/FormField';
@@ -14,6 +14,7 @@ import { ScreenCard } from '@/components/ui/ScreenCard';
 import { SecondaryButton } from '@/components/ui/SecondaryButton';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
+import { HistoricoClienteTela } from '@/app/(tabs)/acompanhamento';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { registrarAuditoria } from '@/src/services/audit';
@@ -28,6 +29,7 @@ import {
   congelarCliente,
   descongelarCliente,
 } from '@/src/services/repos/congelamento-repo';
+import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
 import { listarConversasClientes } from '@/src/services/repos/conversas-repo';
 import { buscarEnvioDigisac } from '@/src/services/repos/digisac-boas-vindas-repo';
 import {
@@ -36,6 +38,8 @@ import {
   obterCobrancaClienteViaFunction,
   type GerarCobrancaPdfResponse,
 } from '@/src/services/stripe-admin-api';
+import { enriquecerAcompanhamentoCliente, type AcompanhamentoCliente } from '@/src/utils/acompanhamento';
+import type { ClienteAzoupAdminView } from '@/src/types/azoup';
 import { dataCancelamentoAssinatura, rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
 import {
   dataHojeBrasil,
@@ -45,6 +49,33 @@ import {
   formatDateTimeBR,
   formatYmdBR,
 } from '@/src/utils/format';
+
+function clienteParaAcompanhamento(data: ClienteAzoupAdminView): AcompanhamentoCliente {
+  const nome = data.nome?.trim() || data.nome_fantasia?.trim() || data.email?.trim() || 'Cliente';
+  return enriquecerAcompanhamentoCliente({
+    id: data.id,
+    nome,
+    email: data.email,
+    telefone: data.telefone,
+    celular: data.celular,
+    created_at: data.created_at,
+    empresa_nome: data.empresa_matriz_nome,
+    empresa_cnpj: data.empresa_matriz_cnpj,
+    produtos: Number(data.metricas_uso?.produtos_cadastrados) || 0,
+    vendas: Number(data.metricas_uso?.vendas) || 0,
+    ordens_producao: Number(data.metricas_uso?.ordens_producao) || 0,
+    clientes_cadastrados: 0,
+    fornecedores_cadastrados: 0,
+    plano_id: data.assinatura?.plano_id != null ? String(data.assinatura.plano_id) : null,
+    plano_nome: data.plano?.nome ?? null,
+    assinatura_status: data.assinatura?.status ?? null,
+    trial_fim: data.assinatura?.trial_fim ?? null,
+    data_inicio: data.assinatura?.data_inicio ?? null,
+    data_renovacao: data.assinatura?.data_proxima_cobranca ?? null,
+    valor_mensal_atual: data.assinatura?.valor_mensal_atual != null ? Number(data.assinatura.valor_mensal_atual) : null,
+    coluna: 'fila_espera',
+  });
+}
 
 async function copiarTexto(texto: string): Promise<boolean> {
   try {
@@ -63,7 +94,8 @@ export default function ClientDetailScreen() {
   const styles = useMemo(() => getStyles(theme), [theme]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const qc = useQueryClient();
-  const { adminProfile, canEditLimits, session } = useAdminAuth();
+  const { adminProfile, canEditLimits, canAccessScreen, session } = useAdminAuth();
+  const [aba, setAba] = useState<'cliente' | 'acompanhamento'>('cliente');
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['cliente_azoup_admin', id],
@@ -75,6 +107,12 @@ export default function ClientDetailScreen() {
     queryKey: ['admin_cliente_conversas', id],
     queryFn: () => listarConversasClientes({ clienteId: id }),
     enabled: Boolean(id),
+  });
+
+  const acompQ = useQuery({
+    queryKey: ['acompanhamento_clientes'],
+    queryFn: carregarAcompanhamentoClientes,
+    enabled: aba === 'acompanhamento' && canAccessScreen('acompanhamento') && Boolean(id),
   });
 
   const digisacQ = useQuery({
@@ -114,6 +152,7 @@ export default function ClientDetailScreen() {
     setCobrancaPdf(null);
     setCobrancaPdfErro(null);
     setCopiaHint(null);
+    setAba('cliente');
   }, [id]);
 
   useEffect(() => {
@@ -331,6 +370,13 @@ export default function ClientDetailScreen() {
     return cobranca.duracao;
   })();
 
+  const clienteAcomp = useMemo(() => {
+    const doQuadro = (acompQ.data?.clientes ?? []).find((item) => item.id === id);
+    if (doQuadro) return doQuadro;
+    if (acompQ.isLoading || !acompQ.data) return null;
+    return clienteParaAcompanhamento(data);
+  }, [acompQ.data, acompQ.isLoading, data, id]);
+
   const ultimoAcessoLabel =
     metricas?.ultimo_acesso_fonte === 'auth'
       ? 'login no sistema'
@@ -342,7 +388,46 @@ export default function ClientDetailScreen() {
     <Screen scroll>
       <BackLink href="/clients" label="Voltar para clientes" />
       <PageHeader title={nome} subtitle={`E-mail: ${data.email ?? '—'} · ${data.telefone ?? data.celular ?? '—'}`} />
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {(['cliente', 'acompanhamento'] as const).map((chave) => {
+          const ativa = aba === chave;
+          const rotulo = chave === 'cliente' ? 'Cliente' : 'Acompanhamento';
+          return (
+            <Pressable
+              key={chave}
+              onPress={() => setAba(chave)}
+              style={({ pressed }) => ({
+                minHeight: 36,
+                paddingHorizontal: 14,
+                borderRadius: 8,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 1,
+                borderColor: theme.cadastroAction,
+                backgroundColor: ativa ? theme.cadastroAction : theme.surface,
+                opacity: pressed ? 0.88 : 1,
+              })}
+            >
+              <Text style={{ color: ativa ? theme.cadastroActionText : theme.cadastroAction, fontWeight: '800', fontSize: 13 }}>
+                {rotulo}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
 
+      {aba === 'acompanhamento' ? (
+        !canAccessScreen('acompanhamento') ? (
+          <Text style={{ color: theme.warning, fontWeight: '800' }}>Seu perfil não tem acesso a Acompanhamento.</Text>
+        ) : acompQ.isError ? (
+          <Text style={{ color: theme.error }}>{(acompQ.error as Error).message}</Text>
+        ) : acompQ.isLoading || !clienteAcomp ? (
+          <ActivityIndicator color={theme.cadastroAction} />
+        ) : (
+          <HistoricoClienteTela cliente={clienteAcomp} embutido />
+        )
+      ) : (
+      <>
       {digisacQ.data ? (
         <ScreenCard>
           <SectionTitle>Digisac</SectionTitle>
@@ -683,6 +768,8 @@ export default function ClientDetailScreen() {
           </>
         )}
       </ScreenCard>
+      </>
+      )}
     </Screen>
   );
 }
