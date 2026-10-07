@@ -108,6 +108,23 @@ export function formatConversaQuando(data?: string | null, hora?: string | null)
   return h ? `${d} às ${h}` : d;
 }
 
+/** Data e hora em America/Sao_Paulo. YYYY-MM-DD fica só a data. */
+export function formatDataHoraBrasil(iso?: string | null): string {
+  if (!iso) return '—';
+  const t = `${iso}`.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return formatYmdBR(t);
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return formatYmdBR(t);
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(d);
+}
+
 export function formatDateTimeBR(iso?: string | null) {
   if (!iso) return '—';
   try {

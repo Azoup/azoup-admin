@@ -49,6 +49,8 @@ export interface ClienteAzoupRow {
   nome_fantasia?: string | null;
   celular?: string | null;
   documento?: string | null;
+  /** Nome da empresa cadastrada em `empresas` (matriz, ou a primeira). */
+  empresa_matriz_nome?: string | null;
   updated_at?: string | null;
   [key: string]: unknown;
 }

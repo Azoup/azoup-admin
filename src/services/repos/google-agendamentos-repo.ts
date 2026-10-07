@@ -47,7 +47,7 @@ export async function listarAgendaDoCliente(clienteId: string): Promise<GoogleAg
   return ((data ?? []) as GoogleAgendaEvento[]).filter((ev) => `${ev.status ?? ''}` !== 'cancelled');
 }
 
-/** Próximo início (YYYY-MM-DD) por cliente a partir do cache Google. */
+/** Próximo agendamento futuro por cliente, com data e hora. Dia inteiro volta só a data. */
 export async function listarProximasReunioesGoogle(clienteIds: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   if (!clienteIds.length) return map;
@@ -58,7 +58,7 @@ export async function listarProximasReunioesGoogle(clienteIds: string[]): Promis
     const chunk = clienteIds.slice(i, i + CHUNK);
     const { data, error } = await supabase
       .from('admin_google_agendamentos')
-      .select('cliente_id,inicio')
+      .select('cliente_id,inicio,all_day,status')
       .in('cliente_id', chunk)
       .gte('inicio', agora)
       .order('inicio', { ascending: true });
@@ -70,11 +70,20 @@ export async function listarProximasReunioesGoogle(clienteIds: string[]): Promis
       throw new Error(error.message);
     }
 
-    for (const row of (data ?? []) as { cliente_id?: string | null; inicio?: string | null }[]) {
+    for (const row of (data ?? []) as {
+      cliente_id?: string | null;
+      inicio?: string | null;
+      all_day?: boolean | null;
+      status?: string | null;
+    }[]) {
       const cid = `${row.cliente_id ?? ''}`;
-      if (!cid || map.has(cid) || !row.inicio) continue;
-      const ymd = dataCalendarioBrasil(row.inicio);
-      if (ymd) map.set(cid, ymd);
+      if (!cid || map.has(cid) || !row.inicio || `${row.status ?? ''}` === 'cancelled') continue;
+      if (row.all_day) {
+        const ymd = dataCalendarioBrasil(row.inicio);
+        if (ymd) map.set(cid, ymd);
+        continue;
+      }
+      map.set(cid, row.inicio);
     }
   }
   return map;

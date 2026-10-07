@@ -66,6 +66,22 @@ export async function listarUsuariosDoCliente(clienteId: string): Promise<Usuari
   return ((data ?? []) as { id: string; nome: string }[]).filter((u) => u.id && `${u.nome ?? ''}`.trim());
 }
 
+export async function listarPendenciasDoCliente(clienteId: string): Promise<ReuniaoClienteRow[]> {
+  if (!clienteId) return [];
+  const { data, error } = await consultarReunioes(SELECT_REUNIAO, (colunas) =>
+    supabase
+      .from('admin_cliente_reunioes')
+      .select(colunas)
+      .eq('cliente_id', clienteId)
+      .order('data_retorno', { ascending: true }),
+  );
+  if (error) throw new Error(error.message);
+  const ordem: Record<PendenciaColuna, number> = { atrasada: 0, em_andamento: 1, concluida: 2 };
+  return ((data ?? []) as unknown as ReuniaoClienteRow[])
+    .filter((row) => `${row.pendencia ?? ''}`.trim())
+    .sort((a, b) => ordem[colunaPendencia(a)] - ordem[colunaPendencia(b)] || `${a.data_retorno}`.localeCompare(`${b.data_retorno}`));
+}
+
 export async function listarReunioesDoCliente(clienteId: string): Promise<ReuniaoClienteRow[]> {
   if (!clienteId) return [];
   const { data, error } = await consultarReunioes(SELECT_REUNIAO, (colunas) =>

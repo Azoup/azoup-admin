@@ -23,6 +23,53 @@ async function buscarClientesPorIds(ids: string[]): Promise<Map<string, ClienteA
   return map;
 }
 
+function nomeEmpresaCadastrada(empresa: {
+  nome_fantasia?: string | null;
+  razao_social?: string | null;
+}): string {
+  const fantasia = `${empresa.nome_fantasia ?? ''}`.trim();
+  if (fantasia) return fantasia;
+  return `${empresa.razao_social ?? ''}`.trim();
+}
+
+/** Empresa matriz do cliente; se não houver matriz, a primeira cadastrada. */
+async function anexarEmpresaCadastrada(clientes: ClienteAzoupRow[]): Promise<ClienteAzoupRow[]> {
+  if (!clientes.length) return clientes;
+  const escolhida = new Map<string, { nome: string; matriz: boolean }>();
+  const CHUNK = 200;
+  for (let i = 0; i < clientes.length; i += CHUNK) {
+    const ids = clientes.slice(i, i + CHUNK).map((c) => c.id);
+    const { data, error } = await supabase
+      .from('empresas')
+      .select('cliente_id,razao_social,nome_fantasia,empresa_matriz,created_at')
+      .in('cliente_id', ids);
+    if (error) {
+      if (/empresas|schema cache|does not exist/i.test(error.message)) return clientes;
+      throw new Error(error.message);
+    }
+    for (const row of (data ?? []) as {
+      cliente_id?: string;
+      razao_social?: string | null;
+      nome_fantasia?: string | null;
+      empresa_matriz?: boolean | null;
+      created_at?: string | null;
+    }[]) {
+      const clienteId = `${row.cliente_id ?? ''}`;
+      const nome = nomeEmpresaCadastrada(row);
+      if (!clienteId || !nome) continue;
+      const atual = escolhida.get(clienteId);
+      const matriz = Boolean(row.empresa_matriz);
+      if (!atual || (matriz && !atual.matriz)) {
+        escolhida.set(clienteId, { nome, matriz });
+      }
+    }
+  }
+  return clientes.map((cliente) => ({
+    ...cliente,
+    empresa_matriz_nome: escolhida.get(cliente.id)?.nome ?? null,
+  }));
+}
+
 export async function listarClientesParaSelecao(): Promise<ClienteAzoupRow[]> {
   const { data, error } = await supabase
     .from('clientes_azoup')
@@ -30,7 +77,7 @@ export async function listarClientesParaSelecao(): Promise<ClienteAzoupRow[]> {
     .order('nome', { ascending: true });
 
   if (error) throw new Error(error.message);
-  return (data ?? []) as ClienteAzoupRow[];
+  return anexarEmpresaCadastrada((data ?? []) as ClienteAzoupRow[]);
 }
 
 /** Clientes distintos que já possuem ao menos uma conversa registrada. */
@@ -43,10 +90,11 @@ export async function listarClientesComConversas(): Promise<ClienteAzoupRow[]> {
   if (!ids.length) return [];
 
   const map = await buscarClientesPorIds(ids);
-  return ids
+  const clientes = ids
     .map((id) => map.get(id))
     .filter((c): c is ClienteAzoupRow => Boolean(c))
     .sort((a, b) => rotuloCliente(a).localeCompare(rotuloCliente(b), 'pt-BR'));
+  return anexarEmpresaCadastrada(clientes);
 }
 
 export async function listarConversasClientes(params?: {

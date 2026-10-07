@@ -25,8 +25,11 @@ import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
 import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
 import {
   atualizarReuniaoCliente,
+  criarPendenciaAvulsa,
+  definirReuniaoConcluida,
   excluirReuniaoCliente,
   colunaPendencia,
+  listarPendenciasDoCliente,
   listarReunioes,
   listarReunioesDoCliente,
   resumirReunioesPorCliente,
@@ -54,7 +57,7 @@ import {
   useCardPointerDrag,
 } from '@/src/utils/kanban-drag';
 import { agoraHorarioLocal, hojeIsoLocal } from '@/src/utils/conversa-datetime';
-import { dataCalendarioBrasil, formatConversaQuando, formatDateTimeBR, formatYmdBR } from '@/src/utils/format';
+import { dataCalendarioBrasil, formatConversaQuando, formatDataHoraBrasil, formatDateTimeBR, formatYmdBR } from '@/src/utils/format';
 import type { AdminClienteConversaRow } from '@/src/types/azoup';
 import { digitsOnlyPhone } from '@/src/utils/whatsapp';
 
@@ -475,6 +478,74 @@ function EditarConversaBloco({
   );
 }
 
+function NovaPendenciaClienteModal({
+  cliente,
+  visible,
+  onClose,
+  onSaved,
+}: {
+  cliente: AcompanhamentoCliente;
+  visible: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { theme } = useTheme();
+  const { adminProfile, session } = useAdminAuth();
+  const [texto, setTexto] = useState('');
+  const [dataRetorno, setDataRetorno] = useState('');
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    setTexto('');
+    setDataRetorno('');
+    setErro(null);
+  }, [visible, cliente.id]);
+
+  const salvar = useMutation({
+    mutationFn: () =>
+      criarPendenciaAvulsa({
+        clienteId: cliente.id,
+        empresaNome: cliente.empresa_nome?.trim() || cliente.nome,
+        pendencia: texto,
+        dataRetorno,
+        adminEmail: adminProfile?.email ?? session?.user?.email ?? null,
+      }),
+    onSuccess: () => {
+      setErro(null);
+      onSaved();
+      onClose();
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao cadastrar pendência'),
+  });
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[styles.conversaCard, { backgroundColor: theme.surface, borderColor: theme.border, zIndex: 2 }]}>
+          <SectionTitle>Nova pendência</SectionTitle>
+          <Text style={{ color: theme.textMuted, fontSize: 13 }}>{cliente.empresa_nome?.trim() || cliente.nome}</Text>
+          <FormField label="Pendência" required>
+            <FormInput
+              value={texto}
+              onChangeText={setTexto}
+              placeholder="O que precisa ser feito"
+              multiline
+              style={{ minHeight: 88, textAlignVertical: 'top', paddingTop: 10 }}
+            />
+          </FormField>
+          <FormField label="Data do retorno" required>
+            <FormDateInput value={dataRetorno} onChange={setDataRetorno} />
+          </FormField>
+          {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
+          <PrimaryButton label="Salvar pendência" loading={salvar.isPending} onPress={() => salvar.mutate()} />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoCliente }) {
   const { theme } = useTheme();
   const { adminProfile, canDeleteRecords, papel } = useAdminAuth();
@@ -483,6 +554,9 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [reuniaoAberta, setReuniaoAberta] = useState(false);
+  const [conversaAberta, setConversaAberta] = useState(false);
+  const [pendenciaAberta, setPendenciaAberta] = useState(false);
   const telefone = cliente?.telefone?.trim() || '';
   const celular = cliente?.celular?.trim() || '';
   const contato = [telefone, celular && celular !== telefone ? celular : ''].filter(Boolean).join(' · ') || '—';
@@ -517,6 +591,12 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
     };
     return { futuras, passadas, registroNoDia };
   }, [agendaQ.data, reunioesQ.data]);
+
+  const pendenciasQ = useQuery({
+    queryKey: ['admin_cliente_reunioes', cliente.id, 'pendencias-tela'],
+    queryFn: () => listarPendenciasDoCliente(cliente.id),
+    enabled: Boolean(cliente.id),
+  });
 
   const conversasQ = useQuery({
     queryKey: ['admin_cliente_conversas', cliente.id, 'historico'],
@@ -688,12 +768,41 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
     onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao excluir conversa'),
   });
 
+  const concluirPendencia = useMutation({
+    mutationFn: ({ id, concluida }: { id: string; concluida: boolean }) => definirReuniaoConcluida(id, concluida),
+    onSuccess: () => {
+      setErro(null);
+      invalidarHistorico();
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao atualizar pendência'),
+  });
+
   const ocupado = salvarReuniao.isPending || excluirReuniao.isPending || salvarConversa.isPending || excluirConversa.isPending;
 
   return (
     <Screen scroll>
       <BackLink href="/(tabs)/acompanhamento" label="Acompanhamento" />
       <PageHeader title={cliente.nome} subtitle={cliente.empresa_nome?.trim() || 'Cliente'} />
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <Pressable
+          onPress={() => setReuniaoAberta(true)}
+          style={({ pressed }) => [styles.registrarBtn, { paddingHorizontal: 12, borderWidth: 1, borderColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 }]}
+        >
+          <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Registrar reunião</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setConversaAberta(true)}
+          style={({ pressed }) => [styles.registrarBtn, { paddingHorizontal: 12, backgroundColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 }]}
+        >
+          <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 12 }}>Registrar conversa</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setPendenciaAberta(true)}
+          style={({ pressed }) => [styles.registrarBtn, { paddingHorizontal: 12, borderWidth: 1, borderColor: theme.cadastroAction, opacity: pressed ? 0.88 : 1 }]}
+        >
+          <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Nova pendência</Text>
+        </Pressable>
+      </View>
       <View style={{ gap: 14 }}>
             <View style={{ gap: 4 }}>
               <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>CADASTRO</Text>
@@ -727,6 +836,42 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
               <Text style={{ color: theme.text, fontSize: 14 }}>
                 Desde {cadastroEm} · {rotuloTempoCadastro(cliente?.created_at)}
               </Text>
+            </View>
+
+            <View style={{ gap: 8 }}>
+              <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>PENDÊNCIAS</Text>
+              {pendenciasQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+              {pendenciasQ.error ? <Text style={{ color: theme.error }}>{(pendenciasQ.error as Error).message}</Text> : null}
+              {!pendenciasQ.isLoading && !pendenciasQ.error && (pendenciasQ.data ?? []).length === 0 ? (
+                <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhuma pendência deste cliente.</Text>
+              ) : null}
+              {(pendenciasQ.data ?? []).map((item) => {
+                const coluna = colunaPendencia(item);
+                const atrasada = coluna === 'atrasada';
+                const concluida = coluna === 'concluida';
+                return (
+                  <View key={item.id} style={[styles.historicoItem, { borderColor: atrasada ? '#F07167' : theme.border }]}>
+                    <View style={styles.rowBetween}>
+                      <Text style={{ color: atrasada ? '#F07167' : concluida ? theme.textMuted : theme.cadastroAction, fontWeight: '800', fontSize: 12, flex: 1 }}>
+                        {atrasada ? 'Atrasada' : concluida ? 'Concluída' : 'Em andamento'} · {formatYmdBR(item.data_retorno)}
+                      </Text>
+                      <Pressable
+                        onPress={() => concluirPendencia.mutate({ id: item.id, concluida: !concluida })}
+                        hitSlop={6}
+                        disabled={concluirPendencia.isPending}
+                      >
+                        <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+                          {concluida ? 'Reabrir' : 'Concluir'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 4 }}>{item.pendencia}</Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
+                      Escrito por {item.admin_email?.trim() || '—'}
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
 
             <View style={{ gap: 8 }}>
@@ -954,6 +1099,24 @@ export function HistoricoClienteTela({ cliente }: { cliente: AcompanhamentoClien
             <ActivityIndicator color={theme.cadastroAction} />
           ) : null}
       </View>
+      <RegistrarReuniaoModal
+        cliente={cliente}
+        visible={reuniaoAberta}
+        onClose={() => setReuniaoAberta(false)}
+        onSaved={invalidarHistorico}
+      />
+      <ConversaModal
+        cliente={cliente}
+        visible={conversaAberta}
+        onClose={() => setConversaAberta(false)}
+        onSaved={invalidarHistorico}
+      />
+      <NovaPendenciaClienteModal
+        cliente={cliente}
+        visible={pendenciaAberta}
+        onClose={() => setPendenciaAberta(false)}
+        onSaved={invalidarHistorico}
+      />
     </Screen>
   );
 }
@@ -1157,9 +1320,11 @@ function KanbanCard({
           </View>
           <View>
             <Text style={[styles.metaLabel, { color: theme.textMuted }]}>
-              Próxima reunião{proximaDeGoogle ? ' · Google' : ''}
+              Próxima reunião{proximaDeGoogle ? ' · agenda' : ''}
             </Text>
-            <Text style={[styles.metaValor, { color: theme.headerText }]}>{dataOuTraco(proximaReuniao)}</Text>
+            <Text style={[styles.metaValor, { color: theme.headerText }]}>
+              {proximaDeGoogle ? formatDataHoraBrasil(proximaReuniao) : dataOuTraco(proximaReuniao)}
+            </Text>
           </View>
         </Pressable>
         <SemArraste>

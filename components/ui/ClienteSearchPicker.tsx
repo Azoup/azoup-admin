@@ -19,11 +19,15 @@ type Props = {
   mensagemListaVazia?: string;
 };
 
+function nomeEmpresa(cliente: ClienteAzoupRow): string {
+  return `${cliente.empresa_matriz_nome ?? ''}`.trim();
+}
+
 function filtrarPorTexto(clientes: ClienteAzoupRow[], q: string): ClienteAzoupRow[] {
   const termo = q.trim().toLowerCase();
   if (!termo) return clientes;
   return clientes.filter((c) => {
-    const blob = [rotuloCliente(c), c.email, c.nome, c.telefone]
+    const blob = [rotuloCliente(c), nomeEmpresa(c), c.email, c.nome, c.telefone]
       .filter(Boolean)
       .join(' ')
       .toLowerCase();
@@ -37,7 +41,7 @@ export function ClienteSearchPicker({
   value,
   onChange,
   loading,
-  placeholderBusca = 'Buscar por nome, e-mail ou telefone…',
+  placeholderBusca = 'Buscar por nome, empresa, e-mail ou telefone…',
   mensagemListaVazia = 'Nenhum cliente encontrado.',
 }: Props) {
   const { theme } = useTheme();
@@ -58,7 +62,10 @@ export function ClienteSearchPicker({
         <View style={[styles.selecionado, { borderColor: theme.cadastroAction, backgroundColor: theme.surface }]}>
           <View style={{ flex: 1 }}>
             <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: '700' }}>SELECIONADO</Text>
-            <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 2 }}>{rotuloCliente(value)}</Text>
+            <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 2 }}>
+              {rotuloCliente(value)}
+              {nomeEmpresa(value) ? ` — ${nomeEmpresa(value)}` : ''}
+            </Text>
             {value.email ? <Text style={{ color: theme.textMuted, fontSize: 12 }}>{value.email}</Text> : null}
           </View>
           <Pressable onPress={() => onChange(null)} hitSlop={8}>
@@ -111,7 +118,10 @@ export function ClienteSearchPicker({
                     setBusca('');
                   }}
                   style={[styles.option, ativo && { backgroundColor: theme.cadastroAction + '22' }]}>
-                  <Text style={{ color: theme.headerText, fontWeight: ativo ? '800' : '600' }}>{rotuloCliente(item)}</Text>
+                  <Text style={{ color: theme.headerText, fontWeight: ativo ? '800' : '600' }}>
+                    {rotuloCliente(item)}
+                    {nomeEmpresa(item) ? ` — ${nomeEmpresa(item)}` : ''}
+                  </Text>
                   {item.email ? (
                     <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>{item.email}</Text>
                   ) : null}
