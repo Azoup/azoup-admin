@@ -106,6 +106,38 @@ function matchBusca(item: AcompanhamentoCliente, busca: string): boolean {
   return false;
 }
 
+function temProximaReuniao(item: AcompanhamentoCliente, reuniaoGoogle: string | undefined, hoje: string): boolean {
+  if (`${reuniaoGoogle ?? ''}`.trim()) return true;
+  const marcada = `${item.proxima_reuniao ?? ''}`.trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(marcada) && marcada >= hoje;
+}
+
+function FiltroChip({ label, ativo, onPress }: { label: string; ativo: boolean; onPress: () => void }) {
+  const { theme } = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: ativo }}
+      style={({ pressed }) => ({
+        minHeight: 34,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: theme.cadastroAction,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: ativo ? theme.cadastroAction : 'transparent',
+        opacity: pressed ? 0.85 : 1,
+      })}
+    >
+      <Text style={{ color: ativo ? theme.cadastroActionText : theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function dataOuTraco(ymd?: string | null): string {
   const texto = formatYmdBR(ymd);
   return texto === '—' ? '—' : texto;
@@ -1819,6 +1851,8 @@ export default function AcompanhamentoScreen() {
   const { canAccessScreen, session, adminProfile } = useAdminAuth();
   const qc = useQueryClient();
   const [busca, setBusca] = useState('');
+  const [filtroAlerta, setFiltroAlerta] = useState(false);
+  const [filtroSemReuniao, setFiltroSemReuniao] = useState(false);
   const [alturaSlot, setAlturaSlot] = useState(0);
   const alturaColuna = Math.max(alturaSlot - 12 - FOLGA_BARRA_HORIZONTAL, 0);
   const [clientePendencias, setClientePendencias] = useState<AcompanhamentoCliente | null>(null);
@@ -1881,11 +1915,20 @@ export default function AcompanhamentoScreen() {
     const out = agrupamentoAcompanhamentoVazio();
     const base = q.data?.porColuna;
     if (!base) return out;
+    const hoje = hojeIsoLocal();
+    const contatos = contatosQ.data;
+    const alertas = alertaQ.data;
+    const google = googleProximasQ.data;
     for (const col of ACOMPANHAMENTO_COLUNAS) {
-      out[col.key] = (base[col.key] ?? []).filter((c) => matchBusca(c, busca));
+      out[col.key] = (base[col.key] ?? []).filter((c) => {
+        if (!matchBusca(c, busca)) return false;
+        if (filtroAlerta && !contatoAtrasado(contatos?.get(c.id) ?? null, alertas?.[col.key] ?? 7)) return false;
+        if (filtroSemReuniao && temProximaReuniao(c, google?.get(c.id), hoje)) return false;
+        return true;
+      });
     }
     return out;
-  }, [q.data, busca]);
+  }, [q.data, busca, filtroAlerta, filtroSemReuniao, contatosQ.data, alertaQ.data, googleProximasQ.data]);
 
   const adminEmail = adminProfile?.email ?? session?.user?.email ?? null;
 
@@ -2006,6 +2049,15 @@ export default function AcompanhamentoScreen() {
               <FontAwesome name="times-circle" size={14} color={theme.textMuted} />
             </Pressable>
           ) : null}
+        </View>
+
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          <FiltroChip label="Com alerta" ativo={filtroAlerta} onPress={() => setFiltroAlerta((atual) => !atual)} />
+          <FiltroChip
+            label="Sem próxima reunião"
+            ativo={filtroSemReuniao}
+            onPress={() => setFiltroSemReuniao((atual) => !atual)}
+          />
         </View>
 
         {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando Kanban…</Text> : null}
