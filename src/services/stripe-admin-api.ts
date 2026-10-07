@@ -75,6 +75,15 @@ export async function criarCupomStripe(payload: CreateCouponPayload) {
   return invoke<{ coupon: Record<string, unknown>; promotion_code: Record<string, unknown> }>('create_coupon', payload);
 }
 
+export type ServicosStripeContratados = {
+  por_assinatura: Record<string, string[]>;
+  por_customer: Record<string, string[]>;
+};
+
+export async function listarServicosStripeContratados() {
+  return invoke<ServicosStripeContratados>('list_servicos_contratados', {});
+}
+
 export async function obterAssinaturaStripe(payload: StripeSubscriptionPayload) {
   return invoke<{ subscription: Record<string, unknown> }>('get_subscription', payload);
 }

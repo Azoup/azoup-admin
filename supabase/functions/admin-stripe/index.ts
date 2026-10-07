@@ -252,6 +252,90 @@ function soDigitos(raw: string | null | undefined): string {
   return `${raw ?? ''}`.replace(/\D/g, '');
 }
 
+const STATUS_ASSINATURA_CONTRATADA = new Set(['active', 'trialing', 'past_due', 'unpaid']);
+
+function refStripeId(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (value && typeof value === 'object' && 'id' in value) {
+    return `${(value as { id?: unknown }).id ?? ''}`.trim();
+  }
+  return '';
+}
+
+async function listarServicosContratados(
+  stripe: Stripe,
+  supabaseAdmin: ReturnType<typeof createClient>,
+): Promise<{ por_assinatura: Record<string, string[]>; por_customer: Record<string, string[]> }> {
+  const { data: planos, error } = await supabaseAdmin
+    .from('planos_assinatura')
+    .select('stripe_price_id_base, stripe_price_id, stripe_price_id_usuario_adicional, stripe_price_id_empresa_adicional');
+  if (error) throw error;
+
+  const precosPlano = new Set<string>();
+  for (const plano of planos ?? []) {
+    const row = plano as Record<string, unknown>;
+    for (const campo of [
+      'stripe_price_id_base',
+      'stripe_price_id',
+      'stripe_price_id_usuario_adicional',
+      'stripe_price_id_empresa_adicional',
+    ]) {
+      const id = `${row[campo] ?? ''}`.trim();
+      if (id) precosPlano.add(id);
+    }
+  }
+
+  const produtos = new Map<string, string>();
+  let produtoCursor: string | undefined;
+  for (let page = 0; page < 8; page++) {
+    const lista = await stripe.products.list({ limit: 100, starting_after: produtoCursor });
+    for (const produto of lista.data) {
+      const nome = `${produto.name ?? ''}`.trim();
+      if (nome) produtos.set(produto.id, nome);
+    }
+    if (!lista.has_more || !lista.data.length) break;
+    produtoCursor = lista.data[lista.data.length - 1]?.id;
+  }
+
+  const porAssinatura = new Map<string, Set<string>>();
+  const porCustomer = new Map<string, Set<string>>();
+  let cursor: string | undefined;
+  for (let page = 0; page < 20; page++) {
+    const lista = await stripe.subscriptions.list({
+      limit: 100,
+      status: 'all',
+      starting_after: cursor,
+      expand: ['data.items.data.price'],
+    });
+    for (const sub of lista.data) {
+      if (!STATUS_ASSINATURA_CONTRATADA.has(sub.status)) continue;
+      const customerId = refStripeId(sub.customer);
+      const nomes = new Set<string>();
+      for (const item of sub.items?.data ?? []) {
+        const priceId = refStripeId(item.price);
+        if (!priceId || precosPlano.has(priceId)) continue;
+        const productId = refStripeId(item.price?.product);
+        const nome = produtos.get(productId) || `${item.price?.nickname ?? ''}`.trim();
+        if (nome) nomes.add(nome);
+      }
+      if (!nomes.size) continue;
+      porAssinatura.set(sub.id, nomes);
+      if (customerId) {
+        const atual = porCustomer.get(customerId) ?? new Set<string>();
+        for (const nome of nomes) atual.add(nome);
+        porCustomer.set(customerId, atual);
+      }
+    }
+    if (!lista.has_more || !lista.data.length) break;
+    cursor = lista.data[lista.data.length - 1]?.id;
+  }
+
+  const objeto = (map: Map<string, Set<string>>) =>
+    Object.fromEntries([...map.entries()].map(([chave, nomes]) => [chave, [...nomes]]));
+
+  return { por_assinatura: objeto(porAssinatura), por_customer: objeto(porCustomer) };
+}
+
 function unixToIso(unix: number | null | undefined): string | null {
   if (unix == null || !Number.isFinite(unix)) return null;
   return new Date(unix * 1000).toISOString();
@@ -1279,6 +1363,13 @@ serve(async (req) => {
     }
 
     const stripe = new Stripe(stripeSecret, { apiVersion: '2023-10-16' });
+
+    if (body.op === 'list_servicos_contratados') {
+      const servicos = await listarServicosContratados(stripe, supabaseAdmin);
+      return new Response(JSON.stringify(servicos), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     if (body.op === 'get_subscription') {
       const subId = body.payload?.stripe_subscription_id as string | undefined;

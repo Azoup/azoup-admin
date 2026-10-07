@@ -129,6 +129,14 @@ export default function ClientDetailScreen() {
 
   const efetivos = useMemo(() => (data ? resolverLimitesEfetivos(data) : null), [data]);
 
+  const clienteAcomp = useMemo(() => {
+    if (!data) return null;
+    const doQuadro = (acompQ.data?.clientes ?? []).find((item) => item.id === id);
+    if (doQuadro) return doQuadro;
+    if (acompQ.isLoading || !acompQ.data) return null;
+    return clienteParaAcompanhamento(data);
+  }, [acompQ.data, acompQ.isLoading, data, id]);
+
   const [limU, setLimU] = useState('');
   const [limS, setLimS] = useState('');
   const [limT, setLimT] = useState('');
@@ -369,13 +377,6 @@ export default function ClientDetailScreen() {
     }
     return cobranca.duracao;
   })();
-
-  const clienteAcomp = useMemo(() => {
-    const doQuadro = (acompQ.data?.clientes ?? []).find((item) => item.id === id);
-    if (doQuadro) return doQuadro;
-    if (acompQ.isLoading || !acompQ.data) return null;
-    return clienteParaAcompanhamento(data);
-  }, [acompQ.data, acompQ.isLoading, data, id]);
 
   const ultimoAcessoLabel =
     metricas?.ultimo_acesso_fonte === 'auth'
