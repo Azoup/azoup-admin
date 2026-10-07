@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
-import { FlatList, Pressable, View } from 'react-native';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Pressable, RefreshControl, ScrollView, View } from 'react-native';
 
 import { SuporteVideoCard } from '@/components/ui/SuporteVideoCard';
 import { FormField } from '@/components/ui/FormField';
@@ -8,8 +9,6 @@ import { FormInput } from '@/components/ui/FormInput';
 import { FormSelect } from '@/components/ui/FormSelect';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
-import { ScreenCard } from '@/components/ui/ScreenCard';
-import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
 import { ACOMPANHAMENTO_COLUNAS } from '@/src/utils/acompanhamento';
 import {
@@ -31,7 +30,69 @@ import {
   listarSuporteVideos,
 } from '@/src/services/repos/suporte-videos-repo';
 
-function DigisacBoasVindasConfig() {
+type PainelId = 'digisac' | 'alerta' | 'videos';
+
+function PainelConfig({
+  titulo,
+  resumo,
+  aberto,
+  onPress,
+  children,
+}: {
+  titulo: string;
+  resumo: string;
+  aberto: boolean;
+  onPress: () => void;
+  children: ReactNode;
+}) {
+  const { theme } = useTheme();
+  return (
+    <View
+      style={{
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: theme.border,
+        backgroundColor: theme.surface,
+        overflow: 'hidden',
+      }}
+    >
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: aberto }}
+        style={({ pressed }) => ({
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          paddingHorizontal: 16,
+          paddingVertical: 16,
+          opacity: pressed ? 0.82 : 1,
+        })}
+      >
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={{ color: theme.headerText, fontWeight: '700', fontSize: 15 }}>{titulo}</Text>
+          <Text style={{ color: theme.textMuted, fontSize: 12 }}>{resumo}</Text>
+        </View>
+        <FontAwesome name={aberto ? 'chevron-up' : 'chevron-down'} size={12} color={theme.textMuted} />
+      </Pressable>
+      {aberto ? (
+        <View
+          style={{
+            gap: 12,
+            paddingHorizontal: 16,
+            paddingBottom: 16,
+            borderTopWidth: 1,
+            borderTopColor: theme.border,
+          }}
+        >
+          {children}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function DigisacBoasVindasConfig({ aberto, onPress }: { aberto: boolean; onPress: () => void }) {
   const { theme } = useTheme();
   const qc = useQueryClient();
   const { adminProfile } = useAdminAuth();
@@ -78,9 +139,13 @@ function DigisacBoasVindasConfig() {
   });
 
   return (
-    <ScreenCard style={{ gap: 12 }}>
-      <SectionTitle>Mensagem automática Digisac</SectionTitle>
-      <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+    <PainelConfig
+      titulo="Mensagem automática"
+      resumo={q.isLoading ? 'Carregando…' : habilitado ? 'Ligada para clientes novos' : 'Desligada'}
+      aberto={aberto}
+      onPress={onPress}
+    >
+      <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 12 }}>
         Quando ligada, todo cliente novo recebe esta mensagem no telefone cadastrado. O contato entra na conexão e no departamento Azoup Confec.
       </Text>
       <Pressable
@@ -136,11 +201,11 @@ function DigisacBoasVindasConfig() {
       {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando mensagem…</Text> : null}
       {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
       {ok ? <Text style={{ color: theme.success, fontWeight: '700' }}>{ok}</Text> : null}
-    </ScreenCard>
+    </PainelConfig>
   );
 }
 
-function AlertaContatoConfig() {
+function AlertaContatoConfig({ aberto, onPress }: { aberto: boolean; onPress: () => void }) {
   const { theme } = useTheme();
   const qc = useQueryClient();
   const { adminProfile } = useAdminAuth();
@@ -183,9 +248,13 @@ function AlertaContatoConfig() {
   });
 
   return (
-    <ScreenCard style={{ gap: 12 }}>
-      <SectionTitle>Alerta de último contato</SectionTitle>
-      <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+    <PainelConfig
+      titulo="Alerta de último contato"
+      resumo="Dias até o texto do card ficar vermelho"
+      aberto={aberto}
+      onPress={onPress}
+    >
+      <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 12 }}>
         Por coluna do acompanhamento. O texto do card fica branco e só fica vermelho quando o último contato passar dessa quantidade de dias.
       </Text>
       {q.isLoading || !dias ? <Text style={{ color: theme.textMuted }}>Carregando prazos…</Text> : null}
@@ -212,7 +281,7 @@ function AlertaContatoConfig() {
       />
       {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
       {ok ? <Text style={{ color: theme.success, fontWeight: '700' }}>{ok}</Text> : null}
-    </ScreenCard>
+    </PainelConfig>
   );
 }
 
@@ -223,6 +292,7 @@ export default function ConfigSuporteScreen() {
 
   const podeGerenciar = canAccessScreen('config_suporte') && canManageBilling;
 
+  const [painel, setPainel] = useState<PainelId | null>(null);
   const [titulo, setTitulo] = useState('');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [categoria, setCategoria] = useState<SuporteVideoCategoria | null>(null);
@@ -291,32 +361,32 @@ export default function ConfigSuporteScreen() {
     );
   }
 
+  function alternar(id: PainelId) {
+    setPainel((atual) => (atual === id ? null : id));
+  }
+
   return (
-    <FlatList
+    <ScrollView
       style={{ flex: 1, backgroundColor: theme.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 12 }}
-      data={videos}
-      keyExtractor={(item) => item.id}
-      refreshing={q.isRefetching}
-      onRefresh={() => q.refetch()}
-      ListHeaderComponent={
-        <View style={{ gap: 12, marginBottom: 4 }}>
-          <PageHeader
-            title="Config. Suporte"
-            subtitle="Prazos do acompanhamento, mensagem da Digisac e vídeos do YouTube para o suporte no app Azoup."
-          />
-          <DigisacBoasVindasConfig />
-          <AlertaContatoConfig />
-
+      contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 10 }}
+      refreshControl={<RefreshControl refreshing={q.isRefetching} onRefresh={() => q.refetch()} tintColor={theme.cadastroAction} />}
+    >
+      <PageHeader title="Config. Suporte" subtitle="Abra só o que for editar." />
+      <DigisacBoasVindasConfig aberto={painel === 'digisac'} onPress={() => alternar('digisac')} />
+      <AlertaContatoConfig aberto={painel === 'alerta'} onPress={() => alternar('alerta')} />
+      <PainelConfig
+        titulo="Vídeos de suporte"
+        resumo={q.isLoading ? 'Carregando…' : videos.length === 1 ? '1 vídeo' : `${videos.length} vídeos`}
+        aberto={painel === 'videos'}
+        onPress={() => alternar('videos')}
+      >
+        <View style={{ gap: 12, marginTop: 12 }}>
           {podeGerenciar ? (
-            <ScreenCard style={{ gap: 12 }}>
-              <SectionTitle>Novo vídeo</SectionTitle>
-
+            <>
               <FormField label="Título" required>
                 <FormInput value={titulo} onChangeText={setTitulo} placeholder="Ex.: Como emitir NF-e de venda" />
               </FormField>
-
-              <FormField label="Link do YouTube" required helper="Cole a URL completa do vídeo (youtube.com ou youtu.be).">
+              <FormField label="Link do YouTube" required helper="Cole a URL completa do vídeo.">
                 <FormInput
                   value={youtubeUrl}
                   onChangeText={setYoutubeUrl}
@@ -325,7 +395,6 @@ export default function ConfigSuporteScreen() {
                   keyboardType="url"
                 />
               </FormField>
-
               <FormField label="Categoria" required>
                 <FormSelect
                   options={SUPORTE_VIDEO_CATEGORIAS}
@@ -334,12 +403,10 @@ export default function ConfigSuporteScreen() {
                   placeholder="Selecione a categoria"
                 />
               </FormField>
-
               {formErro ? <Text style={{ color: theme.error, fontWeight: '700' }}>{formErro}</Text> : null}
               {criarMutation.isError ? (
                 <Text style={{ color: theme.error, fontWeight: '700' }}>{(criarMutation.error as Error).message}</Text>
               ) : null}
-
               <PrimaryButton
                 label={criarMutation.isPending ? 'Salvando…' : 'Adicionar vídeo'}
                 loading={criarMutation.isPending}
@@ -348,36 +415,31 @@ export default function ConfigSuporteScreen() {
                   criarMutation.mutate();
                 }}
               />
-            </ScreenCard>
+            </>
           ) : (
             <Text style={{ color: theme.textMuted }}>Seu perfil só pode visualizar os vídeos cadastrados.</Text>
           )}
-
-          <SectionTitle>Vídeos cadastrados ({videos.length})</SectionTitle>
+          {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando vídeos…</Text> : null}
+          {q.error ? <Text style={{ color: theme.error }}>{(q.error as Error).message}</Text> : null}
+          {!q.isLoading && !q.error && videos.length === 0 ? (
+            <Text style={{ color: theme.textMuted }}>Nenhum vídeo cadastrado ainda.</Text>
+          ) : null}
+          {videos.map((item) => (
+            <SuporteVideoCard
+              key={item.id}
+              video={item}
+              onExcluir={
+                podeGerenciar
+                  ? () => {
+                      excluirMutation.mutate(item.id);
+                    }
+                  : undefined
+              }
+              excluindo={excluirMutation.isPending && excluirMutation.variables === item.id}
+            />
+          ))}
         </View>
-      }
-      ListEmptyComponent={
-        q.isLoading ? (
-          <Text style={{ color: theme.textMuted }}>Carregando vídeos…</Text>
-        ) : q.error ? (
-          <Text style={{ color: theme.error }}>{(q.error as Error).message}</Text>
-        ) : (
-          <Text style={{ color: theme.textMuted }}>Nenhum vídeo cadastrado ainda.</Text>
-        )
-      }
-      renderItem={({ item }) => (
-        <SuporteVideoCard
-          video={item}
-          onExcluir={
-            podeGerenciar
-              ? () => {
-                  excluirMutation.mutate(item.id);
-                }
-              : undefined
-          }
-          excluindo={excluirMutation.isPending && excluirMutation.variables === item.id}
-        />
-      )}
-    />
+      </PainelConfig>
+    </ScrollView>
   );
 }
