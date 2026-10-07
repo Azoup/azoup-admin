@@ -19,6 +19,8 @@ type Chamado = {
   aberto: boolean;
   inicio: string | null;
   fim: string | null;
+  contactId: string;
+  departmentId: string;
 };
 
 type Mensagem = {
@@ -196,6 +198,8 @@ function mapChamado(row: Record<string, unknown>): Chamado | null {
   const protocolo = `${row.protocol ?? ''}`.trim();
   const inicio = `${row.startedAt ?? row.createdAt ?? ''}`.trim();
   const fim = `${row.endedAt ?? ''}`.trim();
+  const contactId = `${row.contactId ?? ''}`.trim();
+  const departmentId = `${row.departmentId ?? ''}`.trim();
   return {
     id,
     protocolo: protocolo || null,
@@ -203,6 +207,8 @@ function mapChamado(row: Record<string, unknown>): Chamado | null {
     aberto: row.isOpen === true,
     inicio: inicio || null,
     fim: fim || null,
+    contactId,
+    departmentId,
   };
 }
 
@@ -217,7 +223,7 @@ async function consultarTickets(contactId: string, comTopicos: boolean, page: nu
   return digisac(`/api/v1/tickets?query=${encodeURIComponent(JSON.stringify(query))}`);
 }
 
-async function listarTickets(contactId: string): Promise<Chamado[]> {
+async function listarTickets(contactId: string, departmentId: string): Promise<Chamado[]> {
   const vistos = new Set<string>();
   const out: Chamado[] = [];
   let comTopicos = true;
@@ -235,6 +241,7 @@ async function listarTickets(contactId: string): Promise<Chamado[]> {
     for (const row of rows) {
       const chamado = mapChamado(row);
       if (!chamado || vistos.has(chamado.id)) continue;
+      if (chamado.departmentId !== departmentId) continue;
       vistos.add(chamado.id);
       out.push(chamado);
     }
@@ -244,58 +251,194 @@ async function listarTickets(contactId: string): Promise<Chamado[]> {
   return out;
 }
 
-async function acharContato(numero: string | null, contactIdSalvo: string | null): Promise<string | null> {
-  if (contactIdSalvo) {
-    try {
-      const row = await digisac(`/api/v1/contacts/${encodeURIComponent(contactIdSalvo)}`);
-      const id = pickId(row);
-      if (id) return id;
-    } catch (erro) {
-      console.error('[digisac-historico] contato salvo', erro instanceof Error ? erro.message : erro);
-    }
-  }
-  if (!numero) return null;
+function telefonesIguais(contato: string | null, cliente: string | null): boolean {
+  if (!contato || !cliente) return false;
+  if (contato === cliente) return true;
+  const a = contato.replace(/^55/, '');
+  const b = cliente.replace(/^55/, '');
+  return a.length >= 10 && a === b;
+}
 
+function numeroDoContatoDigisac(row: Record<string, unknown>): string | null {
+  return telefoneDigisac(null, `${row.number ?? row.phone ?? ''}`);
+}
+
+/** O nome da Digisac é o da pessoa, o da empresa, ou os dois separados por traço. */
+function nomeCompativel(nomeDigisac: string, alvos: string[]): boolean {
+  const nome = semAcento(nomeDigisac);
+  if (!nome) return false;
+  const partes = nome.split(/\s*-\s*/).map((parte) => parte.trim()).filter((parte) => parte.length >= 3);
+  for (const alvo of alvos) {
+    const comparado = semAcento(alvo);
+    if (comparado.length < 3) continue;
+    if (nome === comparado || partes.some((parte) => parte === comparado)) return true;
+  }
+  return false;
+}
+
+function contatoDoClienteCombina(row: Record<string, unknown>, numeros: string[], nomes: string[]): boolean {
+  const numeroContato = numeroDoContatoDigisac(row);
+  if (numeroContato && numeros.some((numero) => telefonesIguais(numeroContato, numero))) return true;
+  const name = `${row.name ?? ''}`.trim();
+  const internal = `${row.internalName ?? ''}`.trim();
+  if (name && nomeCompativel(name, nomes)) return true;
+  if (internal && internal !== name && nomeCompativel(internal, nomes)) return true;
+  return false;
+}
+
+function contatoUnico(data: unknown): Record<string, unknown> | null {
+  if (!data || typeof data !== 'object') return null;
+  const row = data as Record<string, unknown>;
+  if (row.id) return row;
+  if (row.data && typeof row.data === 'object' && !Array.isArray(row.data)) {
+    return row.data as Record<string, unknown>;
+  }
+  return null;
+}
+
+async function serviceAzoupConfec(): Promise<string> {
   const services = await listarPaginas('/api/v1/services');
   const service = acharPorNome(services, NOME_CONEXAO);
   const serviceId = service ? `${service.id ?? ''}`.trim() : '';
   if (!serviceId) throw new Error('Conexão Azoup Confec não encontrada na Digisac.');
-
-  const found = await digisac(
-    `/api/v1/contacts?number=${encodeURIComponent(numero)}&serviceId=${encodeURIComponent(serviceId)}&perPage=5`,
-  );
-  return pickId(asRows(found)[0]);
+  return serviceId;
 }
 
-async function contatoDoCliente(
+async function departamentoAzoupConfec(): Promise<string> {
+  const departments = await listarPaginas('/api/v1/departments');
+  const department = acharPorNome(departments, NOME_CONEXAO);
+  const departmentId = department ? `${department.id ?? ''}`.trim() : '';
+  if (!departmentId) throw new Error('Departamento Azoup Confec não encontrado na Digisac.');
+  return departmentId;
+}
+
+async function buscarContatosPorNome(serviceId: string, termo: string): Promise<Record<string, unknown>[]> {
+  const like = `%${termo.replace(/[%_\\]/g, '')}%`;
+  const query = encodeURIComponent(JSON.stringify({
+    where: {
+      serviceId,
+      $or: [
+        { name: { $iLike: like } },
+        { internalName: { $iLike: like } },
+      ],
+    },
+    perPage: 30,
+  }));
+  try {
+    return asRows(await digisac(`/api/v1/contacts?query=${query}`));
+  } catch (erro) {
+    console.error('[digisac-historico] busca nome', erro instanceof Error ? erro.message : erro);
+    try {
+      return asRows(await digisac(
+        `/api/v1/contacts?serviceId=${encodeURIComponent(serviceId)}&name=${encodeURIComponent(termo)}&perPage=30`,
+      ));
+    } catch {
+      return [];
+    }
+  }
+}
+
+async function contatosDoCliente(
   supabaseAdmin: ReturnType<typeof createClient>,
   clienteId: string,
-): Promise<{ situacao: 'sem_telefone' | 'sem_contato' | null; contactId: string | null }> {
+): Promise<{ situacao: 'sem_telefone' | 'sem_contato' | null; contactIds: string[] }> {
   const { data: cliente, error } = await supabaseAdmin
     .from('clientes_azoup')
-    .select('id, telefone')
+    .select('id, nome, telefone')
     .eq('id', clienteId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!cliente) falha('Cliente não encontrado', 404);
 
-  let contactIdSalvo: string | null = null;
+  const { data: empresas, error: empErr } = await supabaseAdmin
+    .from('empresas')
+    .select('nome_fantasia, razao_social, empresa_matriz')
+    .eq('cliente_id', clienteId)
+    .limit(20);
+  if (empErr) throw new Error(empErr.message);
+
+  const nomes = new Set<string>();
+  const pessoa = `${(cliente as { nome?: string | null }).nome ?? ''}`.trim();
+  if (pessoa) nomes.add(pessoa);
+  const empresasOrd = [...(empresas ?? [])].sort((a, b) => {
+    const am = (a as { empresa_matriz?: boolean | null }).empresa_matriz ? 0 : 1;
+    const bm = (b as { empresa_matriz?: boolean | null }).empresa_matriz ? 0 : 1;
+    return am - bm;
+  });
+  for (const empresa of empresasOrd) {
+    const row = empresa as { nome_fantasia?: string | null; razao_social?: string | null };
+    const fantasia = `${row.nome_fantasia ?? ''}`.trim();
+    const razao = `${row.razao_social ?? ''}`.trim();
+    if (fantasia) nomes.add(fantasia);
+    if (razao) nomes.add(razao);
+  }
+  const alvos = [...nomes];
+  const numeros = new Set<string>();
+  const principal = telefoneDigisac(null, (cliente as { telefone?: string | null }).telefone);
+  if (principal) numeros.add(principal);
+
+  const extras = await supabaseAdmin
+    .from('admin_digisac_telefones')
+    .select('telefone')
+    .eq('cliente_id', clienteId);
+  if (extras.error) {
+    if (!/admin_digisac_telefones|schema cache/i.test(extras.error.message)) throw new Error(extras.error.message);
+  } else {
+    for (const row of extras.data ?? []) {
+      const extra = telefoneDigisac(null, (row as { telefone?: string | null }).telefone);
+      if (extra) numeros.add(extra);
+    }
+  }
+  const listaNumeros = [...numeros];
+  if (!listaNumeros.length && !alvos.length) return { situacao: 'sem_telefone', contactIds: [] };
+
+  const serviceId = await serviceAzoupConfec();
+  const candidatos: Record<string, unknown>[] = [];
+
   const envio = await supabaseAdmin
     .from('admin_digisac_envio')
     .select('contact_id')
     .eq('cliente_id', clienteId)
     .maybeSingle();
-  if (!envio.error) {
-    const salvo = `${(envio.data as { contact_id?: string | null } | null)?.contact_id ?? ''}`.trim();
-    contactIdSalvo = salvo || null;
+  const salvo = !envio.error
+    ? `${(envio.data as { contact_id?: string | null } | null)?.contact_id ?? ''}`.trim()
+    : '';
+  if (salvo) {
+    try {
+      const row = contatoUnico(await digisac(`/api/v1/contacts/${encodeURIComponent(salvo)}`));
+      if (row) candidatos.push(row);
+    } catch (erro) {
+      console.error('[digisac-historico] contato salvo', erro instanceof Error ? erro.message : erro);
+    }
   }
 
-  const numero = telefoneDigisac(null, (cliente as { telefone?: string | null }).telefone);
-  if (!numero && !contactIdSalvo) return { situacao: 'sem_telefone', contactId: null };
+  for (const numero of listaNumeros.slice(0, 12)) {
+    try {
+      candidatos.push(...asRows(await digisac(
+        `/api/v1/contacts?number=${encodeURIComponent(numero)}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`,
+      )));
+    } catch (erro) {
+      console.error('[digisac-historico] busca telefone', erro instanceof Error ? erro.message : erro);
+    }
+  }
+  for (const nome of alvos.slice(0, 12)) {
+    candidatos.push(...await buscarContatosPorNome(serviceId, nome));
+  }
 
-  const contactId = await acharContato(numero, contactIdSalvo);
-  if (!contactId) return { situacao: 'sem_contato', contactId: null };
-  return { situacao: null, contactId };
+  const ids = new Set<string>();
+  for (const row of candidatos) {
+    const id = pickId(row);
+    if (!id || ids.has(id)) continue;
+    const serviceDoContato = `${row.serviceId ?? ''}`.trim();
+    if (serviceDoContato && serviceDoContato !== serviceId) continue;
+    if (!contatoDoClienteCombina(row, listaNumeros, alvos)) continue;
+    ids.add(id);
+    if (ids.size >= 15) break;
+  }
+
+  const contactIds = [...ids];
+  if (!contactIds.length) return { situacao: 'sem_contato', contactIds: [] };
+  return { situacao: null, contactIds };
 }
 
 const ROTULO_ARQUIVO: Record<string, string> = {
@@ -331,11 +474,14 @@ function mapMensagem(row: Record<string, unknown>, ticketId: string): Mensagem |
   };
 }
 
-async function listarMensagens(contactId: string, ticketId: string): Promise<Mensagem[]> {
+async function listarMensagens(contactIds: string[], ticketId: string, departmentId: string): Promise<Mensagem[]> {
   const ticket = await digisac(`/api/v1/tickets/${encodeURIComponent(ticketId)}`);
   const row = (ticket && typeof ticket === 'object' ? ticket : {}) as Record<string, unknown>;
   const dono = `${row.contactId ?? ''}`.trim();
-  if (!pickId(ticket) || dono !== contactId) falha('Chamado não encontrado para este cliente', 404);
+  const department = `${row.departmentId ?? ''}`.trim();
+  if (!pickId(ticket) || !contactIds.includes(dono) || department !== departmentId) {
+    falha('Chamado não encontrado para este cliente', 404);
+  }
 
   const vistos = new Set<string>();
   const out: Mensagem[] = [];
@@ -365,6 +511,69 @@ async function listarMensagens(contactId: string, ticketId: string): Promise<Men
   return out;
 }
 
+function chamadoPublico(chamado: Chamado) {
+  return {
+    id: chamado.id,
+    protocolo: chamado.protocolo,
+    assunto: chamado.assunto,
+    aberto: chamado.aberto,
+    inicio: chamado.inicio,
+    fim: chamado.fim,
+  };
+}
+
+async function gravarChamados(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+  chamados: Chamado[],
+): Promise<void> {
+  const agora = new Date().toISOString();
+  if (chamados.length) {
+    const { error } = await supabaseAdmin.from('admin_digisac_chamados').upsert(
+      chamados.map((chamado) => ({
+        cliente_id: clienteId,
+        ticket_id: chamado.id,
+        contact_id: chamado.contactId || null,
+        protocolo: chamado.protocolo,
+        assunto: chamado.assunto,
+        aberto: chamado.aberto,
+        inicio: chamado.inicio,
+        fim: chamado.fim,
+        department_id: chamado.departmentId || null,
+        updated_at: agora,
+      })),
+      { onConflict: 'cliente_id,ticket_id' },
+    );
+    if (error) {
+      if (/admin_digisac_chamados|schema cache/i.test(error.message)) {
+        console.error('[digisac-historico] tabela de chamados ausente');
+        return;
+      }
+      throw new Error(error.message);
+    }
+  }
+
+  const { data: atuais, error: listErr } = await supabaseAdmin
+    .from('admin_digisac_chamados')
+    .select('ticket_id')
+    .eq('cliente_id', clienteId);
+  if (listErr) {
+    if (/admin_digisac_chamados|schema cache/i.test(listErr.message)) return;
+    throw new Error(listErr.message);
+  }
+  const manter = new Set(chamados.map((chamado) => chamado.id));
+  const remover = (atuais ?? [])
+    .map((row) => `${(row as { ticket_id?: string }).ticket_id ?? ''}`)
+    .filter((id) => id && !manter.has(id));
+  if (!remover.length) return;
+  const { error: delErr } = await supabaseAdmin
+    .from('admin_digisac_chamados')
+    .delete()
+    .eq('cliente_id', clienteId)
+    .in('ticket_id', remover);
+  if (delErr) throw new Error(delErr.message);
+}
+
 function clienteIdDoPayload(payload: Record<string, unknown>): string {
   const clienteId = `${payload.clienteId ?? ''}`.trim();
   if (!/^[0-9a-f-]{36}$/i.test(clienteId)) falha('Cliente inválido');
@@ -383,12 +592,32 @@ serve(async (req) => {
 
     if (op === 'listar_chamados') {
       const clienteId = clienteIdDoPayload(payload);
-      const contato = await contatoDoCliente(supabaseAdmin, clienteId);
-      if (contato.situacao) return json({ situacao: contato.situacao, chamados: [] });
-      const chamados = await listarTickets(contato.contactId!);
+      const [contato, departmentId] = await Promise.all([
+        contatosDoCliente(supabaseAdmin, clienteId),
+        departamentoAzoupConfec(),
+      ]);
+      if (contato.situacao) {
+        if (contato.situacao === 'sem_contato') await gravarChamados(supabaseAdmin, clienteId, []);
+        return json({ situacao: contato.situacao, chamados: [] });
+      }
+      const vistos = new Set<string>();
+      const chamados: Chamado[] = [];
+      for (const contactId of contato.contactIds) {
+        for (const chamado of await listarTickets(contactId, departmentId)) {
+          if (vistos.has(chamado.id)) continue;
+          vistos.add(chamado.id);
+          chamados.push(chamado);
+        }
+      }
+      chamados.sort((a, b) => {
+        const ta = a.inicio ? Date.parse(a.inicio) : 0;
+        const tb = b.inicio ? Date.parse(b.inicio) : 0;
+        return tb - ta;
+      });
+      await gravarChamados(supabaseAdmin, clienteId, chamados);
       return json({
         situacao: chamados.length ? 'ok' : 'sem_chamados',
-        chamados,
+        chamados: chamados.map(chamadoPublico),
       });
     }
 
@@ -396,9 +625,12 @@ serve(async (req) => {
       const clienteId = clienteIdDoPayload(payload);
       const ticketId = `${payload.ticketId ?? ''}`.trim();
       if (!ticketId || ticketId.length > 80) falha('Chamado inválido');
-      const contato = await contatoDoCliente(supabaseAdmin, clienteId);
-      if (contato.situacao || !contato.contactId) falha('Chamado não encontrado para este cliente', 404);
-      const mensagens = await listarMensagens(contato.contactId, ticketId);
+      const [contato, departmentId] = await Promise.all([
+        contatosDoCliente(supabaseAdmin, clienteId),
+        departamentoAzoupConfec(),
+      ]);
+      if (contato.situacao || !contato.contactIds.length) falha('Chamado não encontrado para este cliente', 404);
+      const mensagens = await listarMensagens(contato.contactIds, ticketId, departmentId);
       return json({ mensagens });
     }
 

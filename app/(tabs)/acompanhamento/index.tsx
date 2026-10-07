@@ -21,6 +21,11 @@ import { useTheme } from '@/src/contexts/ThemeContext';
 import { listarAlertaContato } from '@/src/services/repos/acompanhamento-alerta-repo';
 import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhamento-repo';
 import { listarMensagensAutomaticasEnviadas } from '@/src/services/repos/digisac-boas-vindas-repo';
+import {
+  adicionarTelefoneDigisac,
+  listarTelefonesDigisac,
+  removerTelefoneDigisac,
+} from '@/src/services/repos/digisac-telefones-repo';
 import { listarAgendaDoCliente, listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
 import {
   listarChamadosDigisac,
@@ -552,6 +557,13 @@ function NovaPendenciaClienteModal({
   );
 }
 
+function exibirTelefone(digits: string): string {
+  const local = digits.startsWith('55') && digits.length > 11 ? digits.slice(2) : digits;
+  if (local.length === 11) return `(${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`;
+  if (local.length === 10) return `(${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`;
+  return digits;
+}
+
 function tituloChamado(chamado: DigisacChamado): string {
   const assunto = chamado.assunto?.trim();
   if (assunto) return assunto;
@@ -568,8 +580,8 @@ function detalheChamado(chamado: DigisacChamado): string {
 
 const VAZIO_CHAMADOS: Record<string, string> = {
   sem_telefone: 'Este cliente não tem telefone para buscar na Digisac.',
-  sem_contato: 'Nenhum contato deste telefone na Digisac.',
-  sem_chamados: 'Nenhum chamado na Digisac.',
+  sem_contato: 'Nenhum contato no departamento Azoup Confec com o nome da empresa, o nome do cliente ou os telefones.',
+  sem_chamados: 'Nenhum chamado deste cliente no departamento Azoup Confec.',
 };
 
 function textoBusca(value: string): string {
@@ -713,6 +725,8 @@ export function HistoricoClienteTela({
   const [buscaAssunto, setBuscaAssunto] = useState('');
   const [periodoDe, setPeriodoDe] = useState('');
   const [periodoAte, setPeriodoAte] = useState('');
+  const [novoTelefone, setNovoTelefone] = useState('');
+  const [erroTelefone, setErroTelefone] = useState<string | null>(null);
   const telefone = cliente?.telefone?.trim() || '';
   const celular = cliente?.celular?.trim() || '';
   const contato = [telefone, celular && celular !== telefone ? celular : ''].filter(Boolean).join(' · ') || '—';
@@ -776,6 +790,33 @@ export function HistoricoClienteTela({
     const lista = chamadosQ.data?.chamados ?? [];
     return lista.filter((chamado) => chamadoCombina(chamado, buscaAssunto, periodoDe, periodoAte));
   }, [chamadosQ.data, buscaAssunto, periodoDe, periodoAte]);
+
+  const telefonesQ = useQuery({
+    queryKey: ['admin_digisac_telefones', cliente.id],
+    queryFn: () => listarTelefonesDigisac(cliente.id),
+    enabled: Boolean(cliente.id),
+  });
+
+  const adicionarTelefone = useMutation({
+    mutationFn: () => adicionarTelefoneDigisac(cliente.id, novoTelefone),
+    onSuccess: () => {
+      setNovoTelefone('');
+      setErroTelefone(null);
+      void qc.invalidateQueries({ queryKey: ['admin_digisac_telefones', cliente.id] });
+      void qc.invalidateQueries({ queryKey: ['digisac_chamados', cliente.id] });
+    },
+    onError: (e) => setErroTelefone(e instanceof Error ? e.message : 'Erro ao adicionar telefone'),
+  });
+
+  const removerTelefone = useMutation({
+    mutationFn: (id: string) => removerTelefoneDigisac(id),
+    onSuccess: () => {
+      setErroTelefone(null);
+      void qc.invalidateQueries({ queryKey: ['admin_digisac_telefones', cliente.id] });
+      void qc.invalidateQueries({ queryKey: ['digisac_chamados', cliente.id] });
+    },
+    onError: (e) => setErroTelefone(e instanceof Error ? e.message : 'Erro ao remover telefone'),
+  });
 
   function invalidarHistorico() {
     void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
@@ -964,6 +1005,56 @@ export function HistoricoClienteTela({
               <Text style={{ color: theme.text, fontSize: 14 }}>
                 Telefone: <Text style={{ fontWeight: '800' }}>{contato}</Text>
               </Text>
+              <View style={{ gap: 6 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                  Outros telefones da mesma empresa no departamento Azoup Confec
+                </Text>
+                {(telefonesQ.data ?? []).map((item) => (
+                  <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ color: theme.text, fontSize: 14, fontWeight: '800', flex: 1 }}>
+                      {exibirTelefone(item.telefone)}
+                    </Text>
+                    <Pressable
+                      onPress={() => removerTelefone.mutate(item.id)}
+                      hitSlop={8}
+                      disabled={removerTelefone.isPending}
+                    >
+                      <FontAwesome name="times" size={14} color={theme.textMuted} />
+                    </Pressable>
+                  </View>
+                ))}
+                {telefonesQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+                {telefonesQ.error ? (
+                  <Text style={{ color: theme.error, fontSize: 12 }}>{(telefonesQ.error as Error).message}</Text>
+                ) : null}
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                  <View style={{ flex: 1 }}>
+                    <FormInput
+                      value={novoTelefone}
+                      onChangeText={setNovoTelefone}
+                      placeholder="DDD e número"
+                      keyboardType="phone-pad"
+                      autoCorrect={false}
+                    />
+                  </View>
+                  <Pressable
+                    onPress={() => adicionarTelefone.mutate()}
+                    disabled={adicionarTelefone.isPending || !novoTelefone.trim()}
+                    style={({ pressed }) => ({
+                      minHeight: 40,
+                      paddingHorizontal: 12,
+                      borderRadius: 8,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      backgroundColor: theme.cadastroAction,
+                      opacity: adicionarTelefone.isPending || !novoTelefone.trim() ? 0.55 : pressed ? 0.85 : 1,
+                    })}
+                  >
+                    <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 13 }}>Adicionar</Text>
+                  </Pressable>
+                </View>
+                {erroTelefone ? <Text style={{ color: theme.error, fontSize: 12 }}>{erroTelefone}</Text> : null}
+              </View>
               <Text style={{ color: theme.text, fontSize: 14 }}>
                 Empresa: <Text style={{ fontWeight: '800' }}>{cliente?.empresa_nome?.trim() || '—'}</Text>
               </Text>
