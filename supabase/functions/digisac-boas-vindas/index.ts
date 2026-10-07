@@ -34,6 +34,22 @@ function env(name: string): string {
   return v;
 }
 
+function envAny(names: string[]): string {
+  for (const name of names) {
+    const v = Deno.env.get(name)?.trim() ?? '';
+    if (v) return v;
+  }
+  throw new Error(`Secret ${names[0]} ausente`);
+}
+
+function digisacBase(): string {
+  return envAny(['DIGISAC_BASE_URL', 'DIGISAC_API_URL']).replace(/\/$/, '').replace(/\/api\/v1$/i, '');
+}
+
+function digisacToken(): string {
+  return envAny(['DIGISAC_TOKEN', 'DIGISAC_API_TOKEN']);
+}
+
 function semAcento(value: string): string {
   return value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
 }
@@ -95,8 +111,8 @@ function mensagemErro(data: unknown, text: string): string {
 }
 
 async function digisac(path: string, init?: RequestInit): Promise<unknown> {
-  const base = env('DIGISAC_BASE_URL').replace(/\/$/, '');
-  const token = env('DIGISAC_TOKEN');
+  const base = digisacBase();
+  const token = digisacToken();
   const res = await fetch(`${base}${path}`, {
     ...init,
     headers: {

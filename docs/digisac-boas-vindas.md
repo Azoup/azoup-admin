@@ -13,8 +13,8 @@ No SQL Editor do Supabase, execute:
 ## 2. Secrets da Edge Function
 No Supabase (Project Settings → Edge Functions → Secrets), defina:
 
-- `DIGISAC_BASE_URL` = URL da conta, sem barra no final. Exemplo: `https://suaempresa.digisac.app` (Digisac → Conta → Informações)
-- `DIGISAC_TOKEN` = token de acesso pessoal (Digisac → Conta → API → Tokens)
+- `DIGISAC_BASE_URL` ou `DIGISAC_API_URL` = URL da API. Exemplo: `https://azoup.digisac.io/api/v1`
+- `DIGISAC_TOKEN` ou `DIGISAC_API_TOKEN` = token de acesso pessoal (Digisac → Conta → API → Tokens)
 - `DIGISAC_WEBHOOK_SECRET` = uma senha longa, a mesma enviada no header do webhook
 - Já existentes: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 
