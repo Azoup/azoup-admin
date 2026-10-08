@@ -98,6 +98,16 @@ export async function listarEventosGoogle(params?: { inicio?: string; fim?: stri
   return invoke<{ eventos: GoogleAgendaEvento[] }>('listar_eventos', params ?? {});
 }
 
+export async function resumirAnotacaoReuniao(clienteId: string, data?: string | null) {
+  return invoke<{
+    assuntos: string;
+    proxima_acao: string;
+    pendencias: string[];
+    google_event_id: string;
+    titulo: string;
+  }>('resumir_anotacao_reuniao', { clienteId, data: data ?? null });
+}
+
 export async function criarEventoGoogle(payload: {
   titulo: string;
   descricao?: string;

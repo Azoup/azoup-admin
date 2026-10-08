@@ -12,8 +12,9 @@ import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
 import { criarPendenciasReuniao, listarUsuariosDoCliente } from '@/src/services/repos/reunioes-repo';
+import { resumirAnotacaoReuniao } from '@/src/services/google-calendar-api';
 import type { AcompanhamentoCliente } from '@/src/utils/acompanhamento';
-import { dataHojeBrasil } from '@/src/utils/format';
+import { dataHojeBrasil, somarDiasYmd } from '@/src/utils/format';
 
 const AVATAR = '#FF7A1A';
 
@@ -39,6 +40,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
   const [proximaAcao, setProximaAcao] = useState('');
   const [dataRegistro, setDataRegistro] = useState(dataHojeBrasil);
   const [linhas, setLinhas] = useState<LinhaPendencia[]>([linhaVazia()]);
+  const [geradoIa, setGeradoIa] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
   const usuariosQ = useQuery({
@@ -54,6 +56,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
     setProximaAcao('');
     setDataRegistro(dataHojeBrasil());
     setLinhas([linhaVazia()]);
+    setGeradoIa(false);
     setErro(null);
   }, [visible, cliente?.id]);
 
@@ -76,6 +79,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
         participanteIds: selecionados,
         adminEmail: adminProfile?.email ?? session?.user?.email ?? null,
         dataRegistro: podeAlterarData ? dataRegistro : null,
+        geradoIa,
         pendencias: linhas.map((linha) => ({ texto: linha.texto, dataRetorno: linha.dataRetorno })),
       });
       const primeiraData = criadas.map((item) => item.data_retorno).sort()[0] ?? null;
@@ -104,6 +108,31 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
   });
 
   const usuarios = usuariosQ.data ?? [];
+
+  const gerarResumo = useMutation({
+    mutationFn: () =>
+      resumirAnotacaoReuniao(cliente!.id, podeAlterarData ? dataRegistro : null),
+    onSuccess: (resumo) => {
+      const retorno = somarDiasYmd(dataHojeBrasil(), 7);
+      setAssuntos(resumo.assuntos);
+      setProximaAcao(resumo.proxima_acao);
+      setLinhas(
+        resumo.pendencias.length
+          ? resumo.pendencias.map((texto) => ({
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              texto,
+              dataRetorno: retorno,
+            }))
+          : [linhaVazia()],
+      );
+      setGeradoIa(true);
+      setErro(null);
+    },
+    onError: (e) => {
+      setGeradoIa(false);
+      setErro(e instanceof Error ? e.message : 'Erro ao gerar o resumo');
+    },
+  });
 
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
@@ -177,6 +206,28 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
               <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                 {cliente?.empresa_nome?.trim() || cliente?.nome || 'Cliente'}
               </Text>
+              <Pressable
+                disabled={!cliente || gerarResumo.isPending || salvarMutation.isPending}
+                onPress={() => {
+                  if (!cliente) return;
+                  setErro(null);
+                  gerarResumo.mutate();
+                }}
+                style={({ pressed }) => [
+                  styles.adicionar,
+                  { borderColor: theme.cadastroAction, opacity: pressed || gerarResumo.isPending ? 0.7 : 1 },
+                ]}
+              >
+                {gerarResumo.isPending ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+                <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 13 }}>
+                  {gerarResumo.isPending ? 'Gerando resumo…' : 'Gerar resumo da anotação'}
+                </Text>
+              </Pressable>
+              {geradoIa ? (
+                <Text style={{ color: theme.cadastroAction, fontSize: 12, fontWeight: '700' }}>
+                  Resumo da anotação do Gemini. Revise antes de salvar. O registro fica marcado como IA.
+                </Text>
+              ) : null}
 
               {podeAlterarData ? (
                 <FormField label="Data do registro">

@@ -12,6 +12,7 @@ export type ReuniaoClienteRow = {
   participante_ids?: string[] | null;
   concluida?: boolean | null;
   avulsa?: boolean | null;
+  gerado_ia?: boolean | null;
   admin_email?: string | null;
   created_at?: string | null;
 };
@@ -27,6 +28,7 @@ const SELECT_REUNIAO =
   'id,cliente_id,empresa_nome,assuntos,pendencia,proxima_acao,data_retorno,participante_ids,concluida,admin_email,created_at';
 
 let suporteAvulsa: boolean | null = null;
+let suporteGeradoIa: boolean | null = null;
 
 function faltaColunaAvulsa(message: string): boolean {
   return /avulsa/i.test(message);
@@ -36,14 +38,29 @@ async function consultarReunioes<T>(
   colunasBase: string,
   montar: (colunas: string) => PromiseLike<{ data: T; error: { message: string } | null }>,
 ): Promise<{ data: T; error: { message: string } | null }> {
-  const colunas = suporteAvulsa === false ? colunasBase : `${colunasBase},avulsa`;
+  const extras = [
+    suporteAvulsa === false ? '' : 'avulsa',
+    suporteGeradoIa === false ? '' : 'gerado_ia',
+  ].filter(Boolean);
+  const colunas = [colunasBase, ...extras].join(',');
   const primeiro = await montar(colunas);
-  if (primeiro.error && suporteAvulsa !== false && faltaColunaAvulsa(primeiro.error.message)) {
-    suporteAvulsa = false;
-    return montar(colunasBase);
+  if (!primeiro.error) {
+    if (extras.includes('avulsa')) suporteAvulsa = true;
+    if (extras.includes('gerado_ia')) suporteGeradoIa = true;
+    return primeiro;
   }
-  if (!primeiro.error && colunas !== colunasBase) suporteAvulsa = true;
-  return primeiro;
+  const mensagem = primeiro.error.message;
+  let mudou = false;
+  if (suporteAvulsa !== false && faltaColunaAvulsa(mensagem)) {
+    suporteAvulsa = false;
+    mudou = true;
+  }
+  if (suporteGeradoIa !== false && /gerado_ia/i.test(mensagem)) {
+    suporteGeradoIa = false;
+    mudou = true;
+  }
+  if (!mudou) return primeiro;
+  return consultarReunioes(colunasBase, montar);
 }
 
 export function colunaPendencia(row: Pick<ReuniaoClienteRow, 'concluida' | 'data_retorno'>): PendenciaColuna {
@@ -161,6 +178,7 @@ export async function criarPendenciasReuniao(params: {
   adminEmail?: string | null;
   /** YYYY-MM-DD. Só o owner envia; define a data do registro em vez de agora. */
   dataRegistro?: string | null;
+  geradoIa?: boolean;
   pendencias: { texto: string; dataRetorno: string }[];
 }): Promise<ReuniaoClienteRow[]> {
   if (!params.clienteId) throw new Error('Cliente inválido.');
@@ -194,6 +212,7 @@ export async function criarPendenciasReuniao(params: {
       participante_ids: params.participanteIds,
       concluida: false,
       admin_email: params.adminEmail ?? null,
+      ...(params.geradoIa ? { gerado_ia: true } : {}),
       ...(comData && createdAt ? { created_at: createdAt } : {}),
     })) as never;
 
@@ -203,6 +222,9 @@ export async function criarPendenciasReuniao(params: {
   }
 
   if (error) {
+    if (/gerado_ia/i.test(error.message)) {
+      throw new Error('Execute supabase/sql/admin_cliente_reunioes.sql no Supabase.');
+    }
     if (/admin_cliente_reunioes|schema cache/i.test(error.message)) {
       throw new Error('Execute supabase/sql/admin_cliente_reunioes.sql no Supabase.');
     }

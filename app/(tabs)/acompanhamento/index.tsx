@@ -1284,7 +1284,7 @@ export function HistoricoClienteTela({
                                 }}
                               >
                                 <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
-                                  Registro do mesmo dia
+                                  Registro do mesmo dia{reuniao.gerado_ia ? ' · IA' : ''}
                                 </Text>
                                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                                   {formatDateTimeBR(reuniao.created_at)} · {reuniao.admin_email?.trim() || '—'}
@@ -1328,7 +1328,7 @@ export function HistoricoClienteTela({
                           {formatDateTimeBR(reuniao.created_at)}
                         </Text>
                         <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                          Registrado por {reuniao.admin_email?.trim() || '—'}
+                          {reuniao.gerado_ia ? 'Registrado pela IA' : `Registrado por ${reuniao.admin_email?.trim() || '—'}`}
                         </Text>
                       </View>
                       {editandoId === reuniao.id ? null : (

@@ -8,6 +8,7 @@ const corsHeaders = {
 
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/documents.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ');
 
@@ -171,6 +172,187 @@ async function googleFetch(
     );
   }
   return data;
+}
+
+function diaBrasil(iso: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
+}
+
+function idDoDocumento(anexo: Record<string, unknown>): string | null {
+  const fileId = `${anexo.fileId ?? ''}`.trim();
+  if (fileId) return fileId;
+  const url = `${anexo.fileUrl ?? ''}`;
+  const doc = url.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+  const arquivo = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  return doc?.[1] ?? arquivo?.[1] ?? null;
+}
+
+function textoDoDocumento(doc: Record<string, unknown>): string {
+  const partes: string[] = [];
+  const andar = (nos: unknown[]) => {
+    for (const no of nos) {
+      if (!no || typeof no !== 'object') continue;
+      const item = no as Record<string, unknown>;
+      const paragrafo = item.paragraph as { elements?: Array<{ textRun?: { content?: string } }> } | undefined;
+      for (const el of paragrafo?.elements ?? []) {
+        const trecho = el.textRun?.content;
+        if (trecho) partes.push(trecho);
+      }
+      const tabela = item.table as { tableRows?: Array<{ tableCells?: Array<{ content?: unknown[] }> }> } | undefined;
+      for (const linha of tabela?.tableRows ?? []) {
+        for (const celula of linha.tableCells ?? []) andar(celula.content ?? []);
+      }
+    }
+  };
+  const corpo = (doc.body ?? {}) as { content?: unknown[] };
+  andar(corpo.content ?? []);
+  return partes.join('').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+async function textoDaAnotacao(accessToken: string, documentId: string): Promise<string> {
+  const res = await fetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(documentId)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = {};
+  }
+  if (!res.ok) {
+    const mensagem = `${(data.error as { message?: string } | undefined)?.message ?? text}`;
+    if (res.status === 403 || /insufficient authentication scopes|insufficientPermissions/i.test(mensagem)) {
+      throw Object.assign(
+        new Error('Reconecte a agenda em Agendamentos para autorizar a leitura das anotações.'),
+        { status: 403 },
+      );
+    }
+    throw new Error(mensagem || `Docs ${res.status}`);
+  }
+  return textoDoDocumento(data).slice(0, 24000);
+}
+
+async function resumirComChatGpt(anotacao: string): Promise<{
+  assuntos: string;
+  proxima_acao: string;
+  pendencias: string[];
+}> {
+  const chave = Deno.env.get('OPENAI_API_KEY')?.trim() ?? '';
+  if (!chave) throw new Error('Secret OPENAI_API_KEY ausente no Supabase.');
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${chave}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Você resume a anotação de uma reunião. Responda só JSON com as chaves assuntos (string), proxima_acao (string) e pendencias (array de strings). Escreva em português, só com o que estiver no texto. Se não houver pendência, use array vazio.',
+        },
+        { role: 'user', content: anotacao },
+      ],
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    const mensagem = `${(data.error as { message?: string } | undefined)?.message ?? 'Falha ao resumir a anotação'}`;
+    throw new Error(mensagem);
+  }
+  const conteudo = `${(data.choices as Array<{ message?: { content?: string } }> | undefined)?.[0]?.message?.content ?? ''}`;
+  let parsed: { assuntos?: unknown; proxima_acao?: unknown; pendencias?: unknown } = {};
+  try {
+    parsed = JSON.parse(conteudo);
+  } catch {
+    throw new Error('O resumo da IA não veio em JSON.');
+  }
+  const pendencias = Array.isArray(parsed.pendencias)
+    ? parsed.pendencias.map((item) => `${item ?? ''}`.trim()).filter(Boolean).slice(0, 8)
+    : [];
+  return {
+    assuntos: `${parsed.assuntos ?? ''}`.trim(),
+    proxima_acao: `${parsed.proxima_acao ?? ''}`.trim(),
+    pendencias,
+  };
+}
+
+async function resumirAnotacaoReuniao(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  accessToken: string,
+  calendarId: string,
+  clienteId: string,
+  diaEscolhido: string,
+): Promise<Record<string, unknown>> {
+  const desde = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const { data, error } = await supabaseAdmin
+    .from('admin_google_agendamentos')
+    .select('google_event_id,titulo,inicio,status')
+    .eq('cliente_id', clienteId)
+    .eq('calendar_id', calendarId)
+    .gte('inicio', desde)
+    .lt('inicio', new Date().toISOString())
+    .order('inicio', { ascending: false })
+    .limit(30);
+  if (error) throw new Error(error.message);
+
+  let eventos = ((data ?? []) as Array<{ google_event_id?: string; titulo?: string; inicio?: string; status?: string }>).filter(
+    (row) => `${row.status ?? ''}` !== 'cancelled' && `${row.google_event_id ?? ''}`.trim(),
+  );
+  if (/^\d{4}-\d{2}-\d{2}$/.test(diaEscolhido)) {
+    eventos = eventos.filter((row) => diaBrasil(`${row.inicio ?? ''}`) === diaEscolhido);
+  }
+  if (!eventos.length) {
+    throw Object.assign(new Error('Nenhuma reunião recente deste cliente na agenda.'), { status: 404 });
+  }
+
+  for (const evento of eventos.slice(0, 8)) {
+    const eventId = `${evento.google_event_id}`;
+    let detalhe: Record<string, unknown>;
+    try {
+      detalhe = await googleFetch(
+        accessToken,
+        `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+      );
+    } catch {
+      continue;
+    }
+    const anexos = ((detalhe.attachments as Record<string, unknown>[] | undefined) ?? [])
+      .map((anexo) => ({ anexo, id: idDoDocumento(anexo) }))
+      .filter((item): item is { anexo: Record<string, unknown>; id: string } => Boolean(item.id))
+      .sort((a, b) => {
+        const anota = (item: Record<string, unknown>) => (/anota/i.test(`${item.title ?? ''}`) ? 0 : 1);
+        return anota(a.anexo) - anota(b.anexo);
+      });
+    for (const item of anexos) {
+      const mime = `${item.anexo.mimeType ?? ''}`;
+      const tituloAnexo = `${item.anexo.title ?? ''}`;
+      if (mime && mime !== 'application/vnd.google-apps.document' && !/anota/i.test(tituloAnexo)) continue;
+      let anotacao = '';
+      try {
+        anotacao = await textoDaAnotacao(accessToken, item.id);
+      } catch (erro) {
+        if ((erro as { status?: number }).status === 403) throw erro;
+        continue;
+      }
+      if (anotacao.length < 40) continue;
+      const resumo = await resumirComChatGpt(anotacao);
+      return {
+        ...resumo,
+        google_event_id: eventId,
+        titulo: `${evento.titulo ?? ''}`.trim() || 'Reunião',
+      };
+    }
+  }
+
+  throw Object.assign(new Error('Esta reunião não tem anotação do Gemini.'), { status: 404 });
 }
 
 function extractEmailsFromText(...parts: Array<string | null | undefined>): string[] {
@@ -795,6 +977,19 @@ serve(async (req) => {
         if (cid && inicio && !proximas[cid]) proximas[cid] = inicio;
       }
       return json({ proximas });
+    }
+
+    if (op === 'resumir_anotacao_reuniao') {
+      const clienteId = `${p.clienteId ?? ''}`.trim();
+      if (!clienteId) throw new Error('Cliente inválido.');
+      const resumo = await resumirAnotacaoReuniao(
+        supabaseAdmin,
+        accessToken,
+        calendarId,
+        clienteId,
+        `${p.data ?? ''}`.trim(),
+      );
+      return json(resumo);
     }
 
     return json({ error: `Operação desconhecida: ${op}` }, 400);
