@@ -284,6 +284,203 @@ async function resumirComChatGpt(anotacao: string): Promise<{
   };
 }
 
+async function resumoDoEvento(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+): Promise<{ assuntos: string; proxima_acao: string; pendencias: string[] } | null> {
+  let detalhe: Record<string, unknown>;
+  try {
+    detalhe = await googleFetch(
+      accessToken,
+      `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    );
+  } catch {
+    return null;
+  }
+  const anexos = ((detalhe.attachments as Record<string, unknown>[] | undefined) ?? [])
+    .map((anexo) => ({ anexo, id: idDoDocumento(anexo) }))
+    .filter((item): item is { anexo: Record<string, unknown>; id: string } => Boolean(item.id))
+    .sort((a, b) => {
+      const anota = (item: Record<string, unknown>) => (/anota/i.test(`${item.title ?? ''}`) ? 0 : 1);
+      return anota(a.anexo) - anota(b.anexo);
+    });
+  for (const item of anexos) {
+    const mime = `${item.anexo.mimeType ?? ''}`;
+    const tituloAnexo = `${item.anexo.title ?? ''}`;
+    if (mime && mime !== 'application/vnd.google-apps.document' && !/anota/i.test(tituloAnexo)) continue;
+    let anotacao = '';
+    try {
+      anotacao = await textoDaAnotacao(accessToken, item.id);
+    } catch (erro) {
+      if ((erro as { status?: number }).status === 403) throw erro;
+      continue;
+    }
+    if (anotacao.length < 40) continue;
+    return resumirComChatGpt(anotacao);
+  }
+  return null;
+}
+
+function somarDia(ymd: string, dias: number): string {
+  const [ano, mes, dia] = ymd.split('-').map(Number);
+  const data = new Date(Date.UTC(ano, mes - 1, dia));
+  data.setUTCDate(data.getUTCDate() + dias);
+  return data.toISOString().slice(0, 10);
+}
+
+async function gravarResumoIa(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  params: {
+    clienteId: string;
+    empresaNome: string | null;
+    dia: string;
+    adminEmail: string | null;
+    resumo: { assuntos: string; proxima_acao: string; pendencias: string[] };
+  },
+): Promise<void> {
+  const itens = params.resumo.pendencias.length
+    ? params.resumo.pendencias.map((texto) => ({ pendencia: texto, data_retorno: somarDia(params.dia, 7) }))
+    : [{ pendencia: 'Resumo da reunião', data_retorno: somarDia(params.dia, 7) }];
+  const linhas = itens.map((item) => ({
+    cliente_id: params.clienteId,
+    empresa_nome: params.empresaNome,
+    assuntos: params.resumo.assuntos || null,
+    proxima_acao: params.resumo.proxima_acao || null,
+    pendencia: item.pendencia,
+    data_retorno: item.data_retorno,
+    participante_ids: [],
+    concluida: false,
+    avulsa: false,
+    gerado_ia: true,
+    admin_email: params.adminEmail,
+    created_at: `${params.dia}T12:00:00-03:00`,
+  }));
+  const { error } = await supabaseAdmin.from('admin_cliente_reunioes').insert(linhas);
+  if (error) throw new Error(error.message);
+}
+
+async function gerarResumosPendentes(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  accessToken: string,
+  calendarId: string,
+  adminEmail: string | null,
+  ignorar: string[],
+): Promise<Record<string, unknown>> {
+  const desde = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const pular = new Set(ignorar.map((item) => item.trim()).filter(Boolean));
+  const { data, error } = await supabaseAdmin
+    .from('admin_google_agendamentos')
+    .select('google_event_id,titulo,inicio,status,cliente_id')
+    .eq('calendar_id', calendarId)
+    .not('cliente_id', 'is', null)
+    .gte('inicio', desde)
+    .lt('inicio', new Date().toISOString())
+    .order('inicio', { ascending: false })
+    .limit(200);
+  if (error) throw new Error(error.message);
+
+  const registros = await supabaseAdmin
+    .from('admin_cliente_reunioes')
+    .select('cliente_id,created_at,avulsa')
+    .gte('created_at', desde)
+    .limit(2000);
+  let reunioes = (registros.data ?? []) as Array<{ cliente_id?: string; created_at?: string; avulsa?: boolean }>;
+  if (registros.error && /avulsa/i.test(registros.error.message)) {
+    const semAvulsa = await supabaseAdmin
+      .from('admin_cliente_reunioes')
+      .select('cliente_id,created_at')
+      .gte('created_at', desde)
+      .limit(2000);
+    if (semAvulsa.error) throw new Error(semAvulsa.error.message);
+    reunioes = (semAvulsa.data ?? []) as typeof reunioes;
+  } else if (registros.error) {
+    throw new Error(registros.error.message);
+  }
+
+  const cobertas = new Set<string>();
+  for (const row of reunioes) {
+    if (row.avulsa) continue;
+    const clienteId = `${row.cliente_id ?? ''}`.trim();
+    const dia = diaBrasil(`${row.created_at ?? ''}`);
+    if (clienteId && dia) cobertas.add(`${clienteId}|${dia}`);
+  }
+
+  const grupos: Array<{ chave: string; clienteId: string; dia: string; eventId: string; titulo: string }> = [];
+  const vistos = new Set<string>();
+  for (const row of (data ?? []) as Array<{
+    google_event_id?: string;
+    titulo?: string;
+    inicio?: string;
+    status?: string;
+    cliente_id?: string;
+  }>) {
+    if (`${row.status ?? ''}` === 'cancelled') continue;
+    const clienteId = `${row.cliente_id ?? ''}`.trim();
+    const eventId = `${row.google_event_id ?? ''}`.trim();
+    const dia = diaBrasil(`${row.inicio ?? ''}`);
+    if (!clienteId || !eventId || !dia) continue;
+    const chave = `${clienteId}|${dia}`;
+    if (vistos.has(chave) || cobertas.has(chave) || pular.has(chave)) continue;
+    vistos.add(chave);
+    grupos.push({ chave, clienteId, dia, eventId, titulo: `${row.titulo ?? ''}`.trim() || 'Reunião' });
+  }
+
+  const ids = [...new Set(grupos.map((item) => item.clienteId))];
+  const nomes = new Map<string, string>();
+  const empresas = new Map<string, string>();
+  if (ids.length) {
+    const clientes = await supabaseAdmin.from('clientes_azoup').select('id,nome').in('id', ids);
+    for (const row of clientes.data ?? []) {
+      const id = `${(row as { id?: string }).id ?? ''}`;
+      const nome = `${(row as { nome?: string }).nome ?? ''}`.trim();
+      if (id && nome) nomes.set(id, nome);
+    }
+    const emp = await supabaseAdmin
+      .from('empresas')
+      .select('cliente_id,nome_fantasia,empresa_matriz')
+      .in('cliente_id', ids)
+      .limit(400);
+    const linhas = [...(emp.data ?? [])].sort((a, b) => {
+      const am = (a as { empresa_matriz?: boolean }).empresa_matriz ? 0 : 1;
+      const bm = (b as { empresa_matriz?: boolean }).empresa_matriz ? 0 : 1;
+      return am - bm;
+    });
+    for (const row of linhas) {
+      const id = `${(row as { cliente_id?: string }).cliente_id ?? ''}`;
+      const nome = `${(row as { nome_fantasia?: string }).nome_fantasia ?? ''}`.trim();
+      if (id && nome && !empresas.has(id)) empresas.set(id, nome);
+    }
+  }
+
+  const gerados: Array<{ cliente: string; titulo: string }> = [];
+  const ignorados = [...pular];
+  let cursor = 0;
+  for (const grupo of grupos) {
+    if (gerados.length >= 3 || cursor >= 8) break;
+    cursor += 1;
+    const resumo = await resumoDoEvento(accessToken, calendarId, grupo.eventId);
+    if (!resumo) {
+      ignorados.push(grupo.chave);
+      continue;
+    }
+    await gravarResumoIa(supabaseAdmin, {
+      clienteId: grupo.clienteId,
+      empresaNome: empresas.get(grupo.clienteId) ?? nomes.get(grupo.clienteId) ?? null,
+      dia: grupo.dia,
+      adminEmail,
+      resumo,
+    });
+    gerados.push({ cliente: nomes.get(grupo.clienteId) ?? 'Cliente', titulo: grupo.titulo });
+  }
+
+  return {
+    gerados,
+    semAnotacao: ignorados.length - pular.size,
+    ignorar: ignorados,
+    restantes: Math.max(grupos.length - cursor, 0),
+  };
+}
 async function resumirAnotacaoReuniao(
   supabaseAdmin: ReturnType<typeof createClient>,
   accessToken: string,
@@ -314,42 +511,13 @@ async function resumirAnotacaoReuniao(
   }
 
   for (const evento of eventos.slice(0, 8)) {
-    const eventId = `${evento.google_event_id}`;
-    let detalhe: Record<string, unknown>;
-    try {
-      detalhe = await googleFetch(
-        accessToken,
-        `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
-      );
-    } catch {
-      continue;
-    }
-    const anexos = ((detalhe.attachments as Record<string, unknown>[] | undefined) ?? [])
-      .map((anexo) => ({ anexo, id: idDoDocumento(anexo) }))
-      .filter((item): item is { anexo: Record<string, unknown>; id: string } => Boolean(item.id))
-      .sort((a, b) => {
-        const anota = (item: Record<string, unknown>) => (/anota/i.test(`${item.title ?? ''}`) ? 0 : 1);
-        return anota(a.anexo) - anota(b.anexo);
-      });
-    for (const item of anexos) {
-      const mime = `${item.anexo.mimeType ?? ''}`;
-      const tituloAnexo = `${item.anexo.title ?? ''}`;
-      if (mime && mime !== 'application/vnd.google-apps.document' && !/anota/i.test(tituloAnexo)) continue;
-      let anotacao = '';
-      try {
-        anotacao = await textoDaAnotacao(accessToken, item.id);
-      } catch (erro) {
-        if ((erro as { status?: number }).status === 403) throw erro;
-        continue;
-      }
-      if (anotacao.length < 40) continue;
-      const resumo = await resumirComChatGpt(anotacao);
-      return {
-        ...resumo,
-        google_event_id: eventId,
-        titulo: `${evento.titulo ?? ''}`.trim() || 'Reunião',
-      };
-    }
+    const resumo = await resumoDoEvento(accessToken, calendarId, `${evento.google_event_id}`);
+    if (!resumo) continue;
+    return {
+      ...resumo,
+      google_event_id: `${evento.google_event_id}`,
+      titulo: `${evento.titulo ?? ''}`.trim() || 'Reunião',
+    };
   }
 
   throw Object.assign(new Error('Esta reunião não tem anotação do Gemini.'), { status: 404 });
@@ -990,6 +1158,13 @@ serve(async (req) => {
         `${p.data ?? ''}`.trim(),
       );
       return json(resumo);
+    }
+
+    if (op === 'gerar_resumos_reunioes') {
+      const adminEmail = `${p.adminEmail ?? admin.email ?? ''}`.trim() || null;
+      const ignorar = Array.isArray(p.ignorar) ? (p.ignorar as unknown[]).map((item) => `${item}`) : [];
+      const resultado = await gerarResumosPendentes(supabaseAdmin, accessToken, calendarId, adminEmail, ignorar);
+      return json(resultado);
     }
 
     return json({ error: `Operação desconhecida: ${op}` }, 400);

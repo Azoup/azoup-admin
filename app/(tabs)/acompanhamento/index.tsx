@@ -27,6 +27,7 @@ import {
   removerTelefoneDigisac,
 } from '@/src/services/repos/digisac-telefones-repo';
 import { listarAgendaDoCliente, listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
+import { gerarResumosReunioes } from '@/src/services/google-calendar-api';
 import {
   enviarMensagemProntaDigisac,
   listarChamadosDigisac,
@@ -2001,6 +2002,49 @@ export default function AcompanhamentoScreen() {
   });
   const [erroMove, setErroMove] = useState<string | null>(null);
   const [erroFicha, setErroFicha] = useState<string | null>(null);
+  const [avisoResumo, setAvisoResumo] = useState<string | null>(null);
+  const [erroResumo, setErroResumo] = useState<string | null>(null);
+
+  const resumosMutation = useMutation({
+    mutationFn: async () => {
+      const email = adminProfile?.email ?? session?.user?.email ?? null;
+      let ignorar: string[] = [];
+      let gerados = 0;
+      let semAnotacao = 0;
+      const nomes: string[] = [];
+      for (let volta = 0; volta < 20; volta += 1) {
+        const lote = await gerarResumosReunioes({ adminEmail: email, ignorar });
+        gerados += lote.gerados.length;
+        semAnotacao += lote.semAnotacao;
+        for (const item of lote.gerados) nomes.push(item.cliente);
+        ignorar = lote.ignorar;
+        if (lote.restantes <= 0) break;
+      }
+      return { gerados, semAnotacao, nomes };
+    },
+    onSuccess: (resultado) => {
+      setErroResumo(null);
+      const pessoas = [...new Set(resultado.nomes)];
+      if (!resultado.gerados) {
+        setAvisoResumo(
+          resultado.semAnotacao
+            ? 'Nenhuma reunião recente com anotação e sem registro.'
+            : 'Nenhuma reunião recente sem registro.',
+        );
+      } else {
+        setAvisoResumo(
+          `${resultado.gerados} ${resultado.gerados === 1 ? 'resumo gerado' : 'resumos gerados'}${pessoas.length ? `: ${pessoas.join(', ')}` : ''}.`,
+        );
+      }
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
+      void qc.invalidateQueries({ queryKey: ['reunioes_sem_registro'] });
+      void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
+    },
+    onError: (e) => {
+      setAvisoResumo(null);
+      setErroResumo(e instanceof Error ? e.message : 'Erro ao gerar os resumos');
+    },
+  });
 
   const q = useQuery({
     queryKey: ['acompanhamento_clientes'],
@@ -2180,14 +2224,39 @@ export default function AcompanhamentoScreen() {
           ) : null}
         </View>
 
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <FiltroChip label="Com alerta" ativo={filtroAlerta} onPress={() => setFiltroAlerta((atual) => !atual)} />
           <FiltroChip
             label="Sem próxima reunião"
             ativo={filtroSemReuniao}
             onPress={() => setFiltroSemReuniao((atual) => !atual)}
           />
+          <Pressable
+            disabled={resumosMutation.isPending}
+            onPress={() => {
+              setAvisoResumo(null);
+              setErroResumo(null);
+              resumosMutation.mutate();
+            }}
+            style={({ pressed }) => ({
+              minHeight: 34,
+              paddingHorizontal: 12,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: theme.cadastroAction,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed || resumosMutation.isPending ? 0.7 : 1,
+            })}
+          >
+            <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+              {resumosMutation.isPending ? 'Gerando resumos…' : 'Gerar resumos das reuniões'}
+            </Text>
+          </Pressable>
         </View>
+
+        {avisoResumo ? <Text style={{ color: theme.success, fontWeight: '700' }}>{avisoResumo}</Text> : null}
+        {erroResumo ? <Text style={{ color: theme.error }}>{erroResumo}</Text> : null}
 
         {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando Kanban…</Text> : null}
         {q.error ? (

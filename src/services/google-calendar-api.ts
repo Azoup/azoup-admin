@@ -108,6 +108,15 @@ export async function resumirAnotacaoReuniao(clienteId: string, data?: string | 
   }>('resumir_anotacao_reuniao', { clienteId, data: data ?? null });
 }
 
+export async function gerarResumosReunioes(params: { adminEmail?: string | null; ignorar?: string[] }) {
+  return invoke<{
+    gerados: Array<{ cliente: string; titulo: string }>;
+    semAnotacao: number;
+    ignorar: string[];
+    restantes: number;
+  }>('gerar_resumos_reunioes', params);
+}
+
 export async function criarEventoGoogle(payload: {
   titulo: string;
   descricao?: string;
