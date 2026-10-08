@@ -107,3 +107,89 @@ export async function listarProximasReunioesGoogle(clienteIds: string[]): Promis
   }
   return map;
 }
+
+export type ReuniaoSemRegistro = {
+  id: string;
+  clienteId: string;
+  clienteNome: string;
+  titulo: string;
+  inicio: string;
+};
+
+/** Reuniões da agenda que já aconteceram e não têm registro no mesmo dia. */
+export async function listarReunioesPassadasSemRegistro(): Promise<ReuniaoSemRegistro[]> {
+  const agora = new Date();
+  const desde = new Date(agora.getTime() - 90 * 86_400_000).toISOString();
+  const ate = agora.toISOString();
+
+  const { data: eventos, error } = await supabase
+    .from('admin_google_agendamentos')
+    .select('id,titulo,inicio,status,cliente_id,cliente:clientes_azoup(id,nome)')
+    .not('cliente_id', 'is', null)
+    .gte('inicio', desde)
+    .lt('inicio', ate)
+    .order('inicio', { ascending: false })
+    .limit(500);
+  if (error) {
+    if (/admin_google_agendamentos|schema cache|does not exist/i.test(error.message)) return [];
+    throw new Error(error.message);
+  }
+
+  let registros: { cliente_id?: string | null; created_at?: string | null; avulsa?: boolean | null }[] = [];
+  const comAvulsa = await supabase
+    .from('admin_cliente_reunioes')
+    .select('cliente_id,created_at,avulsa')
+    .gte('created_at', desde)
+    .limit(2000);
+  if (comAvulsa.error && /avulsa/i.test(comAvulsa.error.message)) {
+    const semAvulsa = await supabase
+      .from('admin_cliente_reunioes')
+      .select('cliente_id,created_at')
+      .gte('created_at', desde)
+      .limit(2000);
+    if (semAvulsa.error) {
+      if (/admin_cliente_reunioes|schema cache/i.test(semAvulsa.error.message)) return [];
+      throw new Error(semAvulsa.error.message);
+    }
+    registros = (semAvulsa.data ?? []) as typeof registros;
+  } else if (comAvulsa.error) {
+    if (/admin_cliente_reunioes|schema cache/i.test(comAvulsa.error.message)) return [];
+    throw new Error(comAvulsa.error.message);
+  } else {
+    registros = (comAvulsa.data ?? []) as typeof registros;
+  }
+
+  const cobertas = new Set<string>();
+  for (const row of registros) {
+    if (row.avulsa) continue;
+    const clienteId = `${row.cliente_id ?? ''}`.trim();
+    const dia = dataCalendarioBrasil(row.created_at);
+    if (clienteId && dia) cobertas.add(`${clienteId}|${dia}`);
+  }
+
+  const saida: ReuniaoSemRegistro[] = [];
+  for (const row of (eventos ?? []) as Array<{
+    id?: string;
+    titulo?: string | null;
+    inicio?: string | null;
+    status?: string | null;
+    cliente_id?: string | null;
+    cliente?: { nome?: string | null } | { nome?: string | null }[] | null;
+  }>) {
+    if (`${row.status ?? ''}` === 'cancelled') continue;
+    const clienteId = `${row.cliente_id ?? ''}`.trim();
+    const inicio = `${row.inicio ?? ''}`.trim();
+    const dia = dataCalendarioBrasil(inicio);
+    if (!clienteId || !inicio || !dia || cobertas.has(`${clienteId}|${dia}`)) continue;
+    const cliente = Array.isArray(row.cliente) ? row.cliente[0] : row.cliente;
+    const nome = `${cliente?.nome ?? ''}`.trim() || 'Cliente';
+    saida.push({
+      id: `${row.id ?? ''}`,
+      clienteId,
+      clienteNome: nome,
+      titulo: `${row.titulo ?? ''}`.trim() || 'Reunião',
+      inicio,
+    });
+  }
+  return saida.filter((item) => item.id);
+}
