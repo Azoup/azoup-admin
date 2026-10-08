@@ -75,3 +75,7 @@ export async function enviarMensagemProntaDigisac(clienteId: string, texto: stri
 export async function listarMensagensDigisac(clienteId: string, ticketId: string) {
   return invoke<{ mensagens: DigisacMensagem[] }>('listar_mensagens', { clienteId, ticketId });
 }
+
+export async function sincronizarUltimosChamadosDigisac() {
+  return invoke<{ atualizados: number }>('sincronizar_ultimos_chamados');
+}

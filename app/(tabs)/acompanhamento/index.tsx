@@ -32,6 +32,7 @@ import {
   enviarMensagemProntaDigisac,
   listarChamadosDigisac,
   listarMensagensDigisac,
+  sincronizarUltimosChamadosDigisac,
   type DigisacChamado,
 } from '@/src/services/digisac-historico-api';
 import { listarMensagensProntasDigisac } from '@/src/services/repos/digisac-mensagens-prontas-repo';
@@ -822,6 +823,11 @@ export function HistoricoClienteTela({
     queryFn: () => listarChamadosDigisac(cliente.id),
     enabled: Boolean(cliente.id) && historicoAberto,
   });
+
+  useEffect(() => {
+    if (!chamadosQ.isSuccess) return;
+    void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+  }, [chamadosQ.isSuccess, chamadosQ.dataUpdatedAt, qc]);
 
   const chamadosFiltrados = useMemo(() => {
     const lista = chamadosQ.data?.chamados ?? [];
@@ -2051,6 +2057,19 @@ export default function AcompanhamentoScreen() {
     queryFn: carregarAcompanhamentoClientes,
     enabled: canAccessScreen('acompanhamento'),
   });
+
+  const syncChamadosQ = useQuery({
+    queryKey: ['digisac_sync_ultimos_chamados'],
+    queryFn: sincronizarUltimosChamadosDigisac,
+    enabled: canAccessScreen('acompanhamento'),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+
+  useEffect(() => {
+    if (!syncChamadosQ.isSuccess) return;
+    void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+  }, [syncChamadosQ.dataUpdatedAt, syncChamadosQ.isSuccess, qc]);
 
   const ids = useMemo(() => (q.data?.clientes ?? []).map((c) => c.id), [q.data]);
 

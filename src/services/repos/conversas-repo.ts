@@ -1,7 +1,7 @@
 import { supabase } from '@/src/lib/supabase';
 import type { AdminClienteConversaRow, ClienteAzoupRow } from '@/src/types/azoup';
 import { rotuloCliente } from '@/src/utils/cliente-label';
-import { normalizarHorarioInput } from '@/src/utils/conversa-datetime';
+import { dataCalendarioBrasil } from '@/src/utils/format';
 
 export type ClienteConversaComCliente = AdminClienteConversaRow & {
   cliente?: Pick<ClienteAzoupRow, 'id' | 'nome' | 'email' | 'telefone'> | null;
@@ -201,10 +201,16 @@ export async function excluirConversaCliente(id: string): Promise<void> {
   if (error) throw new Error(erroHistorico(error.message, 'admin_cliente_conversas'));
 }
 
-/** Data da conversa mais recente de cada cliente — "Último contato" no card. */
+/** Data da conversa ou do chamado Digisac mais recente de cada cliente. */
 export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   if (!clienteIds.length) return map;
+
+  const guardar = (clienteId: string, data: string | null) => {
+    if (!clienteId || !data) return;
+    const atual = map.get(clienteId);
+    if (!atual || data > atual) map.set(clienteId, data);
+  };
 
   const CHUNK = 200;
   for (let i = 0; i < clienteIds.length; i += CHUNK) {
@@ -218,8 +224,20 @@ export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promi
 
     if (error) throw new Error(error.message);
     for (const row of (data ?? []) as Pick<AdminClienteConversaRow, 'cliente_id' | 'data_conversa'>[]) {
-      if (!row.cliente_id || map.has(row.cliente_id) || !row.data_conversa) continue;
-      map.set(row.cliente_id, row.data_conversa);
+      guardar(row.cliente_id, row.data_conversa ? `${row.data_conversa}`.slice(0, 10) : null);
+    }
+
+    const chamados = await supabase
+      .from('admin_digisac_chamados')
+      .select('cliente_id,inicio')
+      .in('cliente_id', chunk)
+      .order('inicio', { ascending: false });
+    if (chamados.error) {
+      if (!/admin_digisac_chamados|schema cache/i.test(chamados.error.message)) throw new Error(chamados.error.message);
+      continue;
+    }
+    for (const row of (chamados.data ?? []) as { cliente_id?: string; inicio?: string | null }[]) {
+      guardar(`${row.cliente_id ?? ''}`, dataCalendarioBrasil(row.inicio));
     }
   }
   return map;
