@@ -1625,19 +1625,36 @@ function EnviarMensagemProntaModal({
   onClose: () => void;
 }) {
   const { theme } = useTheme();
+  const [escolhaId, setEscolhaId] = useState<string | null>(null);
+  const [texto, setTexto] = useState('');
   const q = useQuery({
     queryKey: ['digisac_mensagens_prontas'],
     queryFn: listarMensagensProntasDigisac,
     enabled: visible,
   });
   const enviar = useMutation({
-    mutationFn: (texto: string) => enviarMensagemProntaDigisac(clienteId, texto),
+    mutationFn: (mensagem: string) => enviarMensagemProntaDigisac(clienteId, mensagem),
   });
   const mensagens = q.data ?? [];
+  const escolha = mensagens.find((item) => item.id === escolhaId) ?? null;
+
+  useEffect(() => {
+    if (visible) return;
+    setEscolhaId(null);
+    setTexto('');
+  }, [visible]);
 
   function fechar() {
     enviar.reset();
+    setEscolhaId(null);
+    setTexto('');
     onClose();
+  }
+
+  function escolher(id: string, descricao: string) {
+    enviar.reset();
+    setEscolhaId(id);
+    setTexto(descricao);
   }
 
   return (
@@ -1658,7 +1675,9 @@ function EnviarMensagemProntaModal({
         >
           <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 16 }}>Enviar mensagem</Text>
           <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-            Escolha uma mensagem pronta para enviar a {clienteNome}.
+            {escolha
+              ? `Edite se quiser. A alteração vale só para ${clienteNome} neste envio.`
+              : `Escolha uma mensagem pronta para enviar a ${clienteNome}.`}
           </Text>
           {enviar.isSuccess ? (
             <Text style={{ color: theme.success, fontWeight: '700' }}>Mensagem enviada no Digisac.</Text>
@@ -1679,28 +1698,53 @@ function EnviarMensagemProntaModal({
               Nenhuma mensagem pronta. Cadastre em Config. Suporte.
             </Text>
           ) : null}
-          <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ gap: 8 }}>
-            {mensagens.map((item) => (
-              <Pressable
-                key={item.id}
-                disabled={enviar.isPending}
-                onPress={() => enviar.mutate(item.descricao)}
-                style={({ hovered, pressed }) => ({
-                  borderWidth: 1,
-                  borderColor: hovered || pressed ? theme.cadastroAction : theme.border,
-                  borderRadius: 10,
-                  padding: 12,
-                  gap: 4,
-                  opacity: enviar.isPending ? 0.6 : 1,
-                })}
-              >
-                <Text style={{ color: theme.headerText, fontWeight: '800' }}>{item.titulo}</Text>
-                <Text style={{ color: theme.textMuted, fontSize: 12 }} numberOfLines={3}>
-                  {item.descricao}
-                </Text>
-              </Pressable>
-            ))}
+          {escolha ? (
+            <FormField label={escolha.titulo}>
+              <FormInput
+                multiline
+                numberOfLines={6}
+                textAlignVertical="top"
+                value={texto}
+                onChangeText={setTexto}
+                style={{ minHeight: 140, paddingTop: 10 }}
+              />
+            </FormField>
+          ) : null}
+          <ScrollView style={{ maxHeight: escolha ? 160 : 360 }} contentContainerStyle={{ gap: 8 }}>
+            {mensagens.map((item) => {
+              const ativo = item.id === escolhaId;
+              return (
+                <Pressable
+                  key={item.id}
+                  disabled={enviar.isPending}
+                  onPress={() => escolher(item.id, item.descricao)}
+                  style={({ hovered, pressed }) => ({
+                    borderWidth: 1,
+                    borderColor: ativo || hovered || pressed ? theme.cadastroAction : theme.border,
+                    borderRadius: 10,
+                    padding: 12,
+                    gap: 4,
+                    opacity: enviar.isPending ? 0.6 : 1,
+                  })}
+                >
+                  <Text style={{ color: theme.headerText, fontWeight: '800' }}>{item.titulo}</Text>
+                  {ativo ? null : (
+                    <Text style={{ color: theme.textMuted, fontSize: 12 }} numberOfLines={3}>
+                      {item.descricao}
+                    </Text>
+                  )}
+                </Pressable>
+              );
+            })}
           </ScrollView>
+          {escolha ? (
+            <PrimaryButton
+              label={enviar.isPending ? 'Enviando…' : 'Enviar'}
+              loading={enviar.isPending}
+              disabled={!texto.trim() || enviar.isPending}
+              onPress={() => enviar.mutate(texto.trim())}
+            />
+          ) : null}
           <Pressable onPress={fechar} hitSlop={6}>
             <Text style={{ color: theme.textMuted, fontWeight: '700' }}>Fechar</Text>
           </Pressable>
