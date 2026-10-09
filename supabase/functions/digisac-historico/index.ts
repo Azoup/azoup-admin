@@ -753,35 +753,90 @@ function clienteDoTicket(row: Record<string, unknown>, porContato: Map<string, s
   return achados[0].id;
 }
 
-async function sincronizarUltimosChamados(supabaseAdmin: ReturnType<typeof createClient>): Promise<number> {
-  const departmentId = await departamentoAzoupConfec();
-  let data: unknown;
-  const base = {
-    order: [['startedAt', 'DESC']],
-    page: 1,
-    perPage: 50,
-  };
-  try {
-    data = await digisac(`/api/v1/tickets?query=${encodeURIComponent(JSON.stringify({ ...base, where: { departmentId }, include: ['contact'] }))}`);
-  } catch {
-    try {
-      data = await digisac(`/api/v1/tickets?query=${encodeURIComponent(JSON.stringify({ ...base, where: { departmentId } }))}`);
-    } catch {
-      data = await digisac(`/api/v1/tickets?query=${encodeURIComponent(JSON.stringify(base))}`);
-    }
+function diaDoChamado(valor: string): string | null {
+  let t = valor.trim();
+  if (!t) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  if (/^\d{4}-\d{2}-\d{2} /.test(t)) t = t.replace(' ', 'T');
+  t = t.replace(/([+-]\d{2})$/, '$1:00');
+  const data = new Date(t);
+  if (Number.isNaN(data.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(data);
+}
+
+async function datasUltimoChamado(
+  supabaseAdmin: ReturnType<typeof createClient>,
+): Promise<Record<string, string>> {
+  const { data, error } = await supabaseAdmin
+    .from('admin_digisac_chamados')
+    .select('cliente_id,inicio')
+    .not('inicio', 'is', null)
+    .order('inicio', { ascending: false })
+    .limit(5000);
+  if (error) {
+    if (/schema cache|does not exist/i.test(error.message)) return {};
+    throw new Error(error.message);
   }
+  const map: Record<string, string> = {};
+  for (const row of data ?? []) {
+    const id = `${(row as { cliente_id?: string }).cliente_id ?? ''}`.trim();
+    if (!id || map[id]) continue;
+    const dia = diaDoChamado(`${(row as { inicio?: string }).inicio ?? ''}`);
+    if (dia) map[id] = dia;
+  }
+  return map;
+}
+
+async function sincronizarUltimosChamados(
+  supabaseAdmin: ReturnType<typeof createClient>,
+): Promise<{ atualizados: number; contatos: Record<string, string> }> {
+  const departmentId = await departamentoAzoupConfec();
+  const base = { order: [['startedAt', 'DESC']] as [string, string][], perPage: 50 };
+  const rows: Record<string, unknown>[] = [];
+  for (let page = 1; page <= 3; page++) {
+    let data: unknown;
+    try {
+      data = await digisac(
+        `/api/v1/tickets?query=${encodeURIComponent(JSON.stringify({ ...base, page, where: { departmentId }, include: ['contact'] }))}`,
+      );
+    } catch {
+      data = await digisac(
+        `/api/v1/tickets?query=${encodeURIComponent(JSON.stringify({ ...base, page, where: { departmentId } }))}`,
+      );
+    }
+    const pagina = asRows(data);
+    rows.push(...pagina);
+    if (pagina.length < 50) break;
+  }
+
   const { porContato, clientes } = await indiceDeClientes(supabaseAdmin);
+  const faltando = [...new Set(rows.map((row) => idCampo(row.contactId)).filter((id) => id && !porContato.get(id)))].slice(0, 40);
+  await Promise.all(
+    faltando.map(async (contactId) => {
+      try {
+        const contato = contatoUnico(await digisac(`/api/v1/contacts/${encodeURIComponent(contactId)}`));
+        if (!contato) return;
+        const achados = clientes.filter((cliente) => contatoDoClienteCombina(contato, cliente.numeros, cliente.nomes));
+        if (achados.length === 1) porContato.set(contactId, achados[0].id);
+      } catch (erro) {
+        console.error('[digisac-historico] contato do chamado', erro instanceof Error ? erro.message : erro);
+      }
+    }),
+  );
+
   const porCliente = new Map<string, Chamado[]>();
-  for (const row of asRows(data)) {
+  for (const row of rows) {
     const chamado = mapChamado(row);
-    if (!chamado || !chamadoNoDepartamento(row, departmentId)) continue;
+    if (!chamado) continue;
+    const departamento = idCampo(row.departmentId) || idCampo(row.department);
+    if (departamento && departamento !== departmentId) continue;
     const clienteId = clienteDoTicket(row, porContato, clientes);
     if (!clienteId) continue;
     const lista = porCliente.get(clienteId) ?? [];
     lista.push(chamado);
     porCliente.set(clienteId, lista);
   }
-  let atualizados = 0;
+
   const agora = new Date().toISOString();
   const linhas = [...porCliente.entries()].flatMap(([clienteId, chamados]) =>
     chamados.map((chamado) => ({
@@ -793,18 +848,15 @@ async function sincronizarUltimosChamados(supabaseAdmin: ReturnType<typeof creat
       aberto: chamado.aberto,
       inicio: chamado.inicio,
       fim: chamado.fim,
-      department_id: chamado.departmentId || null,
+      department_id: chamado.departmentId || departmentId,
       updated_at: agora,
     })),
   );
-  if (!linhas.length) return 0;
-  const { error } = await supabaseAdmin.from('admin_digisac_chamados').upsert(linhas, { onConflict: 'cliente_id,ticket_id' });
-  if (error) {
-    if (/admin_digisac_chamados|schema cache/i.test(error.message)) return 0;
-    throw new Error(error.message);
+  if (linhas.length) {
+    const { error } = await supabaseAdmin.from('admin_digisac_chamados').upsert(linhas, { onConflict: 'cliente_id,ticket_id' });
+    if (error && !/schema cache|does not exist/i.test(error.message)) throw new Error(error.message);
   }
-  atualizados = linhas.length;
-  return atualizados;
+  return { atualizados: linhas.length, contatos: await datasUltimoChamado(supabaseAdmin) };
 }
 
 function clienteIdDoPayload(payload: Record<string, unknown>): string {
@@ -903,8 +955,8 @@ serve(async (req) => {
     }
 
     if (op === 'sincronizar_ultimos_chamados') {
-      const atualizados = await sincronizarUltimosChamados(supabaseAdmin);
-      return json({ atualizados });
+      const resultado = await sincronizarUltimosChamados(supabaseAdmin);
+      return json(resultado);
     }
 
     return json({ error: `Operação desconhecida: ${op}` }, 400);

@@ -233,7 +233,7 @@ export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promi
       .in('cliente_id', chunk)
       .order('inicio', { ascending: false });
     if (chamados.error) {
-      if (!/admin_digisac_chamados|schema cache/i.test(chamados.error.message)) throw new Error(chamados.error.message);
+      if (!/schema cache|does not exist/i.test(chamados.error.message)) throw new Error(chamados.error.message);
       continue;
     }
     for (const row of (chamados.data ?? []) as { cliente_id?: string; inicio?: string | null }[]) {

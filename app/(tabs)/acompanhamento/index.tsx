@@ -2085,6 +2085,17 @@ export default function AcompanhamentoScreen() {
     enabled: canAccessScreen('acompanhamento') && ids.length > 0,
   });
 
+  const contatosComChamado = useMemo(() => {
+    const map = new Map(contatosQ.data ?? []);
+    for (const [id, data] of Object.entries(syncChamadosQ.data?.contatos ?? {})) {
+      const atual = map.get(id);
+      const chamado = `${data ?? ''}`.slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(chamado)) continue;
+      if (!atual || chamado > atual) map.set(id, chamado);
+    }
+    return map;
+  }, [contatosQ.data, syncChamadosQ.data]);
+
   const abertasQ = useQuery({
     queryKey: ['pendencias_abertas', ids.join(',')],
     queryFn: () => resumirReunioesPorCliente(ids),
@@ -2108,7 +2119,7 @@ export default function AcompanhamentoScreen() {
     const base = q.data?.porColuna;
     if (!base) return out;
     const hoje = hojeIsoLocal();
-    const contatos = contatosQ.data;
+    const contatos = contatosComChamado;
     const alertas = alertaQ.data;
     const google = googleProximasQ.data;
     for (const col of ACOMPANHAMENTO_COLUNAS) {
@@ -2120,7 +2131,7 @@ export default function AcompanhamentoScreen() {
       });
     }
     return out;
-  }, [q.data, busca, filtroAlerta, filtroSemReuniao, contatosQ.data, alertaQ.data, googleProximasQ.data]);
+  }, [q.data, busca, filtroAlerta, filtroSemReuniao, contatosComChamado, alertaQ.data, googleProximasQ.data]);
 
   const adminEmail = adminProfile?.email ?? session?.user?.email ?? null;
 
@@ -2308,7 +2319,7 @@ export default function AcompanhamentoScreen() {
               key={col.key}
               coluna={col}
               clientes={porColunaFiltrado[col.key]}
-              ultimosContatos={contatosQ.data ?? new Map()}
+              ultimosContatos={contatosComChamado}
               diasAlerta={alertaQ.data?.[col.key] ?? 7}
               resumoReunioes={abertasQ.data ?? new Map()}
               proximasGoogle={googleProximasQ.data ?? new Map()}
