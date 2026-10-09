@@ -37,7 +37,7 @@ import {
 } from '@/src/services/digisac-historico-api';
 import { listarMensagensProntasDigisac } from '@/src/services/repos/digisac-mensagens-prontas-repo';
 import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
-import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente } from '@/src/services/repos/conversas-repo';
+import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente, registrarUltimoChamadoVisto } from '@/src/services/repos/conversas-repo';
 import {
   atualizarReuniaoCliente,
   criarPendenciaAvulsa,
@@ -825,9 +825,26 @@ export function HistoricoClienteTela({
   });
 
   useEffect(() => {
+    const chamados = chamadosQ.data?.chamados ?? [];
+    let dia: string | null = null;
+    for (const chamado of chamados) {
+      const atual = dataCalendarioBrasil(chamado.inicio);
+      if (atual && (!dia || atual > dia)) dia = atual;
+    }
+    if (dia) {
+      const diaChamado = dia;
+      registrarUltimoChamadoVisto(cliente.id, diaChamado);
+      qc.setQueriesData<Map<string, string>>({ queryKey: ['acompanhamento_ultimos_contatos'] }, (atual) => {
+        if (!(atual instanceof Map)) return atual;
+        const map = new Map(atual);
+        const prev = map.get(cliente.id);
+        if (!prev || diaChamado > prev) map.set(cliente.id, diaChamado);
+        return map;
+      });
+    }
     if (!chamadosQ.isSuccess) return;
     void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
-  }, [chamadosQ.isSuccess, chamadosQ.dataUpdatedAt, qc]);
+  }, [chamadosQ.isSuccess, chamadosQ.dataUpdatedAt, chamadosQ.data, cliente.id, qc]);
 
   const chamadosFiltrados = useMemo(() => {
     const lista = chamadosQ.data?.chamados ?? [];
@@ -2068,8 +2085,11 @@ export default function AcompanhamentoScreen() {
 
   useEffect(() => {
     if (!syncChamadosQ.isSuccess) return;
+    for (const [id, data] of Object.entries(syncChamadosQ.data?.contatos ?? {})) {
+      registrarUltimoChamadoVisto(id, `${data ?? ''}`.slice(0, 10));
+    }
     void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
-  }, [syncChamadosQ.dataUpdatedAt, syncChamadosQ.isSuccess, qc]);
+  }, [syncChamadosQ.dataUpdatedAt, syncChamadosQ.isSuccess, syncChamadosQ.data, qc]);
 
   const ids = useMemo(() => (q.data?.clientes ?? []).map((c) => c.id), [q.data]);
 

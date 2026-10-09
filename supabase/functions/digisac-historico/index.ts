@@ -787,9 +787,9 @@ async function datasUltimoChamado(
   return map;
 }
 
-async function sincronizarUltimosChamados(
+async function importarChamadosRecentes(
   supabaseAdmin: ReturnType<typeof createClient>,
-): Promise<{ atualizados: number; contatos: Record<string, string> }> {
+): Promise<number> {
   const departmentId = await departamentoAzoupConfec();
   const base = { order: [['startedAt', 'DESC']] as [string, string][], perPage: 50 };
   const rows: Record<string, unknown>[] = [];
@@ -856,7 +856,25 @@ async function sincronizarUltimosChamados(
     const { error } = await supabaseAdmin.from('admin_digisac_chamados').upsert(linhas, { onConflict: 'cliente_id,ticket_id' });
     if (error && !/schema cache|does not exist/i.test(error.message)) throw new Error(error.message);
   }
-  return { atualizados: linhas.length, contatos: await datasUltimoChamado(supabaseAdmin) };
+  return linhas.length;
+}
+
+async function sincronizarUltimosChamados(
+  supabaseAdmin: ReturnType<typeof createClient>,
+): Promise<{ atualizados: number; contatos: Record<string, string> }> {
+  let atualizados = 0;
+  try {
+    atualizados = await importarChamadosRecentes(supabaseAdmin);
+  } catch (erro) {
+    console.error('[digisac-historico] sync chamados', erro instanceof Error ? erro.message : erro);
+  }
+  let contatos: Record<string, string> = {};
+  try {
+    contatos = await datasUltimoChamado(supabaseAdmin);
+  } catch (erro) {
+    console.error('[digisac-historico] datas dos chamados', erro instanceof Error ? erro.message : erro);
+  }
+  return { atualizados, contatos };
 }
 
 function clienteIdDoPayload(payload: Record<string, unknown>): string {
@@ -882,7 +900,6 @@ serve(async (req) => {
         departamentoAzoupConfec(),
       ]);
       if (contato.situacao) {
-        if (contato.situacao === 'sem_contato') await gravarChamados(supabaseAdmin, clienteId, []);
         return json({ situacao: contato.situacao, chamados: [] });
       }
       const vistos = new Set<string>();
