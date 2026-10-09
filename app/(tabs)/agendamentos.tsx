@@ -681,20 +681,21 @@ export default function AgendamentosScreen() {
             </View>
             <View
               style={{
-                width: 320,
+                width: 210,
                 maxWidth: '100%',
-                flexGrow: 1,
-                gap: 8,
+                flexGrow: 0,
+                flexShrink: 0,
+                gap: 6,
                 borderWidth: 1,
                 borderColor: theme.border,
-                borderRadius: 16,
-                padding: 12,
+                borderRadius: 12,
+                padding: 8,
                 backgroundColor: theme.surface,
               }}
             >
-              <Text style={{ color: theme.headerText, fontWeight: '800' }}>Sem cliente</Text>
-              <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                Vincule uma vez. Os próximos agendamentos com o mesmo e-mail entram nesse cliente.
+              <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 13 }}>Sem cliente</Text>
+              <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+                Vincule uma vez. Os próximos com o mesmo e-mail entram nesse cliente.
               </Text>
               {semClienteQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
               {semClienteQ.error ? (
@@ -716,17 +717,18 @@ export default function AgendamentosScreen() {
                     style={({ pressed }) => ({
                       borderWidth: 1,
                       borderColor: theme.border,
-                      borderRadius: 10,
-                      padding: 10,
-                      gap: 4,
+                      borderRadius: 8,
+                      paddingHorizontal: 8,
+                      paddingVertical: 6,
+                      gap: 2,
                       opacity: pressed ? 0.85 : 1,
                     })}
                   >
-                    <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 13 }} numberOfLines={2}>
+                    <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 12 }} numberOfLines={1}>
                       {ev.titulo || '(Sem título)'}
                     </Text>
-                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>{formatDateTimeBR(ev.inicio)}</Text>
-                    <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Vincular</Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 11 }}>{formatDateTimeBR(ev.inicio)}</Text>
+                    <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 11 }}>Vincular</Text>
                   </Pressable>
                 ))}
               </ScrollView>
