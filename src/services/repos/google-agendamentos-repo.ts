@@ -112,9 +112,36 @@ export type ReuniaoSemRegistro = {
   id: string;
   clienteId: string;
   clienteNome: string;
+  clienteEmail: string;
+  clienteTelefone: string;
   titulo: string;
+  descricao: string;
   inicio: string;
+  fim: string;
+  diaInteiro: boolean;
+  vinculo: 'email_auto' | 'manual' | 'nenhum';
+  participantes: string[];
+  linkAgenda: string;
 };
+
+function textoParticipantes(valor: unknown): string[] {
+  if (!Array.isArray(valor)) return [];
+  const saida: string[] = [];
+  for (const item of valor) {
+    if (typeof item === 'string') {
+      const email = item.trim();
+      if (email) saida.push(email);
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    const pessoa = item as { email?: string; displayName?: string | null };
+    const email = `${pessoa.email ?? ''}`.trim();
+    const nome = `${pessoa.displayName ?? ''}`.trim();
+    if (nome && email) saida.push(`${nome} (${email})`);
+    else if (nome || email) saida.push(nome || email);
+  }
+  return [...new Set(saida)];
+}
 
 /** Reuniões da agenda que já aconteceram e não têm registro no mesmo dia. */
 export async function listarReunioesPassadasSemRegistro(): Promise<ReuniaoSemRegistro[]> {
@@ -124,7 +151,9 @@ export async function listarReunioesPassadasSemRegistro(): Promise<ReuniaoSemReg
 
   const { data: eventos, error } = await supabase
     .from('admin_google_agendamentos')
-    .select('id,titulo,inicio,status,cliente_id,cliente:clientes_azoup(id,nome)')
+    .select(
+      'id,titulo,descricao,inicio,fim,all_day,status,match_tipo,participantes,html_link,cliente_id,cliente:clientes_azoup(id,nome,email,telefone)',
+    )
     .not('cliente_id', 'is', null)
     .gte('inicio', desde)
     .lt('inicio', ate)
@@ -171,10 +200,19 @@ export async function listarReunioesPassadasSemRegistro(): Promise<ReuniaoSemReg
   for (const row of (eventos ?? []) as Array<{
     id?: string;
     titulo?: string | null;
+    descricao?: string | null;
     inicio?: string | null;
+    fim?: string | null;
+    all_day?: boolean | null;
     status?: string | null;
+    match_tipo?: string | null;
+    participantes?: unknown;
+    html_link?: string | null;
     cliente_id?: string | null;
-    cliente?: { nome?: string | null } | { nome?: string | null }[] | null;
+    cliente?:
+      | { nome?: string | null; email?: string | null; telefone?: string | null }
+      | { nome?: string | null; email?: string | null; telefone?: string | null }[]
+      | null;
   }>) {
     if (`${row.status ?? ''}` === 'cancelled') continue;
     const clienteId = `${row.cliente_id ?? ''}`.trim();
@@ -183,12 +221,21 @@ export async function listarReunioesPassadasSemRegistro(): Promise<ReuniaoSemReg
     if (!clienteId || !inicio || !dia || cobertas.has(`${clienteId}|${dia}`)) continue;
     const cliente = Array.isArray(row.cliente) ? row.cliente[0] : row.cliente;
     const nome = `${cliente?.nome ?? ''}`.trim() || 'Cliente';
+    const vinculo = row.match_tipo === 'email_auto' || row.match_tipo === 'manual' ? row.match_tipo : 'nenhum';
     saida.push({
       id: `${row.id ?? ''}`,
       clienteId,
       clienteNome: nome,
+      clienteEmail: `${cliente?.email ?? ''}`.trim(),
+      clienteTelefone: `${cliente?.telefone ?? ''}`.trim(),
       titulo: `${row.titulo ?? ''}`.trim() || 'Reunião',
+      descricao: `${row.descricao ?? ''}`.trim(),
       inicio,
+      fim: `${row.fim ?? ''}`.trim(),
+      diaInteiro: Boolean(row.all_day),
+      vinculo,
+      participantes: textoParticipantes(row.participantes),
+      linkAgenda: `${row.html_link ?? ''}`.trim(),
     });
   }
   return saida.filter((item) => item.id);
