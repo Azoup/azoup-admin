@@ -12,6 +12,7 @@ import { BackLink } from '@/components/ui/BackLink';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Screen } from '@/components/ui/Screen';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import { ConcluirPendenciaModal } from '@/components/ui/ConcluirPendenciaModal';
 import { RegistrarReuniaoModal } from '@/components/ui/RegistrarReuniaoModal';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
@@ -757,6 +758,7 @@ export function HistoricoClienteTela({
   const [reuniaoAberta, setReuniaoAberta] = useState(false);
   const [conversaAberta, setConversaAberta] = useState(false);
   const [pendenciaAberta, setPendenciaAberta] = useState(false);
+  const [concluirAlvo, setConcluirAlvo] = useState<ReuniaoClienteRow | null>(null);
   const [mensagemAberta, setMensagemAberta] = useState(false);
   const [chamadoAberto, setChamadoAberto] = useState<DigisacChamado | null>(null);
   const [historicoAberto, setHistoricoAberto] = useState(false);
@@ -1054,9 +1056,11 @@ export function HistoricoClienteTela({
   });
 
   const concluirPendencia = useMutation({
-    mutationFn: ({ id, concluida }: { id: string; concluida: boolean }) => definirReuniaoConcluida(id, concluida),
+    mutationFn: ({ id, concluida, comentario }: { id: string; concluida: boolean; comentario?: string }) =>
+      definirReuniaoConcluida(id, concluida, comentario),
     onSuccess: () => {
       setErro(null);
+      setConcluirAlvo(null);
       invalidarHistorico();
     },
     onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao atualizar pendência'),
@@ -1256,7 +1260,13 @@ export function HistoricoClienteTela({
                         {atrasada ? 'Atrasada' : concluida ? 'Concluída' : 'Em andamento'} · {formatYmdBR(item.data_retorno)}
                       </Text>
                       <Pressable
-                        onPress={() => concluirPendencia.mutate({ id: item.id, concluida: !concluida })}
+                        onPress={() => {
+                          if (concluida) {
+                            concluirPendencia.mutate({ id: item.id, concluida: false });
+                            return;
+                          }
+                          setConcluirAlvo(item);
+                        }}
                         hitSlop={6}
                         disabled={concluirPendencia.isPending}
                       >
@@ -1266,6 +1276,11 @@ export function HistoricoClienteTela({
                       </Pressable>
                     </View>
                     <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 4 }}>{item.pendencia}</Text>
+                    {concluida && item.comentario_conclusao?.trim() ? (
+                      <Text style={{ color: theme.text, fontSize: 13, marginTop: 6, lineHeight: 18 }}>
+                        Comentário: {item.comentario_conclusao.trim()}
+                      </Text>
+                    ) : null}
                     <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
                       Escrito por {item.admin_email?.trim() || '—'}
                     </Text>
@@ -1537,6 +1552,22 @@ export function HistoricoClienteTela({
         visible={pendenciaAberta}
         onClose={() => setPendenciaAberta(false)}
         onSaved={invalidarHistorico}
+      />
+      <ConcluirPendenciaModal
+        visible={concluirAlvo != null}
+        pendencia={concluirAlvo?.pendencia ?? ''}
+        comentarioInicial={concluirAlvo?.comentario_conclusao}
+        salvando={concluirPendencia.isPending}
+        erro={concluirAlvo ? erro : null}
+        onClose={() => {
+          if (concluirPendencia.isPending) return;
+          setConcluirAlvo(null);
+          setErro(null);
+        }}
+        onConfirmar={(comentario) => {
+          if (!concluirAlvo) return;
+          concluirPendencia.mutate({ id: concluirAlvo.id, concluida: true, comentario });
+        }}
       />
       <ChamadoDigisacModal clienteId={cliente.id} chamado={chamadoAberto} onClose={() => setChamadoAberto(null)} />
       <EnviarMensagemProntaModal

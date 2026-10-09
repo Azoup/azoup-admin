@@ -13,6 +13,7 @@ export type ReuniaoClienteRow = {
   concluida?: boolean | null;
   avulsa?: boolean | null;
   gerado_ia?: boolean | null;
+  comentario_conclusao?: string | null;
   admin_email?: string | null;
   created_at?: string | null;
 };
@@ -29,6 +30,7 @@ const SELECT_REUNIAO =
 
 let suporteAvulsa: boolean | null = null;
 let suporteGeradoIa: boolean | null = null;
+let suporteComentario: boolean | null = null;
 
 function faltaColunaAvulsa(message: string): boolean {
   return /avulsa/i.test(message);
@@ -41,12 +43,14 @@ async function consultarReunioes<T>(
   const extras = [
     suporteAvulsa === false ? '' : 'avulsa',
     suporteGeradoIa === false ? '' : 'gerado_ia',
+    suporteComentario === false ? '' : 'comentario_conclusao',
   ].filter(Boolean);
   const colunas = [colunasBase, ...extras].join(',');
   const primeiro = await montar(colunas);
   if (!primeiro.error) {
     if (extras.includes('avulsa')) suporteAvulsa = true;
     if (extras.includes('gerado_ia')) suporteGeradoIa = true;
+    if (extras.includes('comentario_conclusao')) suporteComentario = true;
     return primeiro;
   }
   const mensagem = primeiro.error.message;
@@ -57,6 +61,10 @@ async function consultarReunioes<T>(
   }
   if (suporteGeradoIa !== false && /gerado_ia/i.test(mensagem)) {
     suporteGeradoIa = false;
+    mudou = true;
+  }
+  if (suporteComentario !== false && /comentario_conclusao/i.test(mensagem)) {
+    suporteComentario = false;
     mudou = true;
   }
   if (!mudou) return primeiro;
@@ -275,10 +283,19 @@ export async function criarPendenciaAvulsa(params: {
   return data as unknown as ReuniaoClienteRow;
 }
 
-export async function definirReuniaoConcluida(id: string, concluida: boolean): Promise<void> {
+export async function definirReuniaoConcluida(id: string, concluida: boolean, comentario?: string | null): Promise<void> {
   if (!id) throw new Error('Pendência inválida.');
-  const { error } = await supabase.from('admin_cliente_reunioes').update({ concluida } as never).eq('id', id);
-  if (error) throw new Error(error.message);
+  const texto = `${comentario ?? ''}`.trim();
+  if (concluida && !texto) throw new Error('Escreva um comentário para concluir a pendência.');
+  const patch: Record<string, unknown> = { concluida };
+  if (concluida) patch.comentario_conclusao = texto;
+  const { error } = await supabase.from('admin_cliente_reunioes').update(patch as never).eq('id', id);
+  if (error) {
+    if (/comentario_conclusao/i.test(error.message)) {
+      throw new Error('Execute supabase/sql/admin_cliente_reunioes.sql no Supabase para salvar o comentário da conclusão.');
+    }
+    throw new Error(error.message);
+  }
 }
 
 function erroPermissaoReuniao(message: string): string {

@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
+import { ConcluirPendenciaModal } from '@/components/ui/ConcluirPendenciaModal';
 import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
@@ -89,6 +90,11 @@ function PendenciaCard({
         {empresa}
       </Text>
       <Text style={{ color: theme.text, fontSize: 13, lineHeight: 18 }}>{item.pendencia}</Text>
+      {coluna === 'concluida' && item.comentario_conclusao?.trim() ? (
+        <Text style={{ color: theme.text, fontSize: 13, lineHeight: 18 }}>
+          Comentário: {item.comentario_conclusao.trim()}
+        </Text>
+      ) : null}
       <Text style={{ color: theme.textMuted, fontSize: 12 }}>
         Escrito por {item.admin_email?.trim() || '—'}
       </Text>
@@ -209,6 +215,7 @@ export default function PendenciasScreen() {
   const [dropOver, setDropOver] = useState<PendenciaColuna | null>(null);
   const [rotuloArraste, setRotuloArraste] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [concluirAlvo, setConcluirAlvo] = useState<ReuniaoClienteRow | null>(null);
   const [autorFiltro, setAutorFiltro] = useState('');
   const fantasmaRef = useRef<View>(null);
   const posicaoArraste = useRef({ x: 0, y: 0 });
@@ -250,9 +257,11 @@ export default function PendenciasScreen() {
   }, [q.data, autorFiltro]);
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, concluida }: { id: string; concluida: boolean }) => definirReuniaoConcluida(id, concluida),
+    mutationFn: ({ id, concluida, comentario }: { id: string; concluida: boolean; comentario?: string }) =>
+      definirReuniaoConcluida(id, concluida, comentario),
     onSuccess: () => {
       setErro(null);
+      setConcluirAlvo(null);
       void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
       void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
     },
@@ -294,7 +303,7 @@ export default function PendenciasScreen() {
     const onde = colunaPendencia(atual);
     if (onde === coluna) return;
     if (coluna === 'concluida') {
-      statusMutation.mutate({ id, concluida: true });
+      setConcluirAlvo(atual);
       return;
     }
     if (atual.concluida) statusMutation.mutate({ id, concluida: false });
@@ -410,7 +419,7 @@ export default function PendenciasScreen() {
                         key={item.id}
                         item={item}
                         cor={col.cor}
-                        onConcluir={() => statusMutation.mutate({ id: item.id, concluida: true })}
+                        onConcluir={() => setConcluirAlvo(item)}
                         onReabrir={() => statusMutation.mutate({ id: item.id, concluida: false })}
                         onArrastar={(x, y) => aoArrastar(item, x, y)}
                         onSoltar={(x, y) => aoSoltarPonto(item, x, y)}
@@ -424,6 +433,22 @@ export default function PendenciasScreen() {
         </View>
       </ScrollView>
       </View>
+      <ConcluirPendenciaModal
+        visible={concluirAlvo != null}
+        pendencia={concluirAlvo?.pendencia ?? ''}
+        comentarioInicial={concluirAlvo?.comentario_conclusao}
+        salvando={statusMutation.isPending}
+        erro={erro}
+        onClose={() => {
+          if (statusMutation.isPending) return;
+          setConcluirAlvo(null);
+          setErro(null);
+        }}
+        onConfirmar={(comentario) => {
+          if (!concluirAlvo) return;
+          statusMutation.mutate({ id: concluirAlvo.id, concluida: true, comentario });
+        }}
+      />
       <NovaPendenciaModal
         visible={novaAberta}
         adminEmail={adminProfile?.email ?? session?.user?.email ?? null}

@@ -29,6 +29,12 @@ alter table public.admin_cliente_reunioes
 comment on column public.admin_cliente_reunioes.gerado_ia is
   'true = assunto, próxima ação e pendências vieram do resumo da anotação do Gemini.';
 
+alter table public.admin_cliente_reunioes
+  add column if not exists comentario_conclusao text;
+
+comment on column public.admin_cliente_reunioes.comentario_conclusao is
+  'Comentário obrigatório informado ao concluir a pendência.';
+
 create index if not exists idx_admin_cliente_reunioes_cliente
   on public.admin_cliente_reunioes (cliente_id, data_retorno);
 
