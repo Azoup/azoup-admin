@@ -859,6 +859,13 @@ async function importarChamadosRecentes(
   return linhas.length;
 }
 
+async function refletirUltimoChamado(supabaseAdmin: ReturnType<typeof createClient>): Promise<void> {
+  const { error } = await supabaseAdmin.rpc('painel_refletir_ultimo_chamado');
+  if (error && !/schema cache|does not exist|could not find/i.test(error.message)) {
+    console.error('[digisac-historico] refletir último chamado', error.message);
+  }
+}
+
 async function sincronizarUltimosChamados(
   supabaseAdmin: ReturnType<typeof createClient>,
 ): Promise<{ atualizados: number; contatos: Record<string, string> }> {
@@ -874,6 +881,7 @@ async function sincronizarUltimosChamados(
   } catch (erro) {
     console.error('[digisac-historico] datas dos chamados', erro instanceof Error ? erro.message : erro);
   }
+  await refletirUltimoChamado(supabaseAdmin);
   return { atualizados, contatos };
 }
 
@@ -917,6 +925,7 @@ serve(async (req) => {
         return tb - ta;
       });
       await gravarChamados(supabaseAdmin, clienteId, chamados);
+      await refletirUltimoChamado(supabaseAdmin);
       return json({
         situacao: chamados.length ? 'ok' : 'sem_chamados',
         chamados: chamados.map(chamadoPublico),

@@ -117,7 +117,9 @@ export async function listarConversasClientes(params?: {
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  const rows = (data ?? []) as AdminClienteConversaRow[];
+  const rows = ((data ?? []) as AdminClienteConversaRow[]).filter(
+    (row) => row.descricao !== 'Contato pelo último chamado da Digisac',
+  );
   const clienteIds = [...new Set(rows.map((r) => r.cliente_id))];
   const clientesMap = await buscarClientesPorIds(clienteIds);
 
