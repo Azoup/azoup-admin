@@ -222,14 +222,16 @@ function guardarData(map: Map<string, string>, clienteId: string, data: string |
   if (!atual || dia > atual) map.set(id, dia);
 }
 
-/** Data da conversa ou do chamado Digisac mais recente de cada cliente. */
+/** Data do último chamado Digisac. Sem chamado, usa a conversa registrada. */
 export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>();
+  const chamadosPorCliente = new Map<string, string>();
   if (!clienteIds.length) return map;
 
   const CHUNK = 200;
   for (let i = 0; i < clienteIds.length; i += CHUNK) {
     const chunk = clienteIds.slice(i, i + CHUNK);
+    const conversas = new Map<string, string>();
     const { data, error } = await supabase
       .from('admin_cliente_conversas')
       .select('cliente_id,data_conversa,hora_conversa')
@@ -239,13 +241,13 @@ export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promi
 
     if (error) throw new Error(error.message);
     for (const row of (data ?? []) as Pick<AdminClienteConversaRow, 'cliente_id' | 'data_conversa'>[]) {
-      guardarData(map, row.cliente_id, row.data_conversa ? `${row.data_conversa}`.slice(0, 10) : null);
+      guardarData(conversas, row.cliente_id, row.data_conversa ? `${row.data_conversa}`.slice(0, 10) : null);
     }
 
     const rpc = await supabase.rpc('painel_datas_ultimo_chamado', { p_ids: chunk });
     if (!rpc.error) {
       for (const row of (rpc.data ?? []) as { cliente_id?: string; dia?: string | null }[]) {
-        guardarData(map, `${row.cliente_id ?? ''}`, row.dia ?? null);
+        guardarData(chamadosPorCliente, `${row.cliente_id ?? ''}`, row.dia ?? null);
       }
     } else if (!/schema cache|does not exist|could not find the function/i.test(rpc.error.message)) {
       console.warn('[ultimo-contato] painel_datas_ultimo_chamado', rpc.error.message);
@@ -258,13 +260,24 @@ export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promi
       .order('inicio', { ascending: false });
     if (chamados.error) {
       console.warn('[ultimo-contato] admin_digisac_chamados', chamados.error.message);
-      continue;
+    } else {
+      for (const row of (chamados.data ?? []) as { cliente_id?: string; inicio?: string | null }[]) {
+        guardarData(chamadosPorCliente, `${row.cliente_id ?? ''}`, dataCalendarioBrasil(row.inicio));
+      }
     }
-    for (const row of (chamados.data ?? []) as { cliente_id?: string; inicio?: string | null }[]) {
-      guardarData(map, `${row.cliente_id ?? ''}`, dataCalendarioBrasil(row.inicio));
+
+    for (const id of chunk) {
+      const chamado = chamadosPorCliente.get(id);
+      if (chamado) map.set(id, chamado);
+      else {
+        const conversa = conversas.get(id);
+        if (conversa) map.set(id, conversa);
+      }
     }
   }
-  for (const [id, dia] of diasChamadoVistos) guardarData(map, id, dia);
+  for (const [id, dia] of diasChamadoVistos) {
+    if (clienteIds.includes(id)) map.set(id, dia);
+  }
   return map;
 }
 

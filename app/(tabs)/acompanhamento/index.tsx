@@ -2137,10 +2137,9 @@ export default function AcompanhamentoScreen() {
   const contatosComChamado = useMemo(() => {
     const map = new Map(contatosQ.data ?? []);
     for (const [id, data] of Object.entries(syncChamadosQ.data?.contatos ?? {})) {
-      const atual = map.get(id);
       const chamado = `${data ?? ''}`.slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(chamado)) continue;
-      if (!atual || chamado > atual) map.set(id, chamado);
+      map.set(id, chamado);
     }
     return map;
   }, [contatosQ.data, syncChamadosQ.data]);

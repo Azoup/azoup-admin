@@ -229,11 +229,11 @@ async function consultarTickets(contactId: string, comTopicos: boolean, page: nu
   return digisac(`/api/v1/tickets?query=${encodeURIComponent(JSON.stringify(query))}`);
 }
 
-async function listarTickets(contactId: string, departmentId: string): Promise<Chamado[]> {
+async function listarTickets(contactId: string, departmentId: string, maxPaginas = MAX_PAGINAS): Promise<Chamado[]> {
   const vistos = new Set<string>();
   const out: Chamado[] = [];
   let comTopicos = true;
-  for (let page = 1; page <= MAX_PAGINAS; page++) {
+  for (let page = 1; page <= maxPaginas; page++) {
     let data: unknown;
     try {
       data = await consultarTickets(contactId, comTopicos, page);
@@ -793,7 +793,7 @@ async function importarChamadosRecentes(
   const departmentId = await departamentoAzoupConfec();
   const base = { order: [['startedAt', 'DESC']] as [string, string][], perPage: 50 };
   const rows: Record<string, unknown>[] = [];
-  for (let page = 1; page <= 3; page++) {
+  for (let page = 1; page <= 4; page++) {
     let data: unknown;
     try {
       data = await digisac(
@@ -810,7 +810,7 @@ async function importarChamadosRecentes(
   }
 
   const { porContato, clientes } = await indiceDeClientes(supabaseAdmin);
-  const faltando = [...new Set(rows.map((row) => idCampo(row.contactId)).filter((id) => id && !porContato.get(id)))].slice(0, 40);
+  const faltando = [...new Set(rows.map((row) => idCampo(row.contactId)).filter((id) => id && !porContato.get(id)))].slice(0, 80);
   await Promise.all(
     faltando.map(async (contactId) => {
       try {
@@ -859,6 +859,120 @@ async function importarChamadosRecentes(
   return linhas.length;
 }
 
+async function gravarChamadosSemApagar(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+  chamados: Chamado[],
+  departmentId: string,
+): Promise<void> {
+  if (!chamados.length) return;
+  const agora = new Date().toISOString();
+  const { error } = await supabaseAdmin.from('admin_digisac_chamados').upsert(
+    chamados.map((chamado) => ({
+      cliente_id: clienteId,
+      ticket_id: chamado.id,
+      contact_id: chamado.contactId || null,
+      protocolo: chamado.protocolo,
+      assunto: chamado.assunto,
+      aberto: chamado.aberto,
+      inicio: chamado.inicio,
+      fim: chamado.fim,
+      department_id: chamado.departmentId || departmentId,
+      updated_at: agora,
+    })),
+    { onConflict: 'cliente_id,ticket_id' },
+  );
+  if (error && !/schema cache|does not exist/i.test(error.message)) throw new Error(error.message);
+}
+
+async function marcarBuscaDigisac(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+  situacao: string,
+): Promise<void> {
+  const { error } = await supabaseAdmin.from('admin_digisac_busca').upsert(
+    { cliente_id: clienteId, situacao, verificado_em: new Date().toISOString() },
+    { onConflict: 'cliente_id' },
+  );
+  if (error && !/schema cache|does not exist|admin_digisac_busca/i.test(error.message)) {
+    console.error('[digisac-historico] busca', error.message);
+  }
+}
+
+/** Clientes que ainda não têm chamado gravado: busca o último de cada um na Digisac. */
+async function importarChamadosFaltantes(
+  supabaseAdmin: ReturnType<typeof createClient>,
+): Promise<number> {
+  const departmentId = await departamentoAzoupConfec();
+  const [pessoas, ja, buscas] = await Promise.all([
+    supabaseAdmin.from('clientes_azoup').select('id').limit(3000),
+    supabaseAdmin.from('admin_digisac_chamados').select('cliente_id').limit(5000),
+    supabaseAdmin.from('admin_digisac_busca').select('cliente_id,verificado_em').limit(3000),
+  ]);
+  if (pessoas.error) throw new Error(pessoas.error.message);
+  const comChamado = new Set((ja.data ?? []).map((row) => `${(row as { cliente_id?: string }).cliente_id ?? ''}`));
+  const limiteBusca = Date.now() - 12 * 3_600_000;
+  const buscado = new Set(
+    (buscas.error ? [] : buscas.data ?? [])
+      .filter((row) => Date.parse(`${(row as { verificado_em?: string }).verificado_em ?? ''}`) > limiteBusca)
+      .map((row) => `${(row as { cliente_id?: string }).cliente_id ?? ''}`),
+  );
+  const fila = (pessoas.data ?? [])
+    .map((row) => `${(row as { id?: string }).id ?? ''}`)
+    .filter((id) => id && !comChamado.has(id) && !buscado.has(id))
+    .slice(0, 12);
+
+  let gravados = 0;
+  for (const clienteId of fila) {
+    try {
+      const contato = await contatosDoCliente(supabaseAdmin, clienteId);
+      if (contato.situacao || !contato.contactIds.length) {
+        await marcarBuscaDigisac(supabaseAdmin, clienteId, contato.situacao ?? 'sem_contato');
+        continue;
+      }
+      const chamados: Chamado[] = [];
+      const vistos = new Set<string>();
+      for (const contactId of contato.contactIds.slice(0, 3)) {
+        for (const chamado of await listarTickets(contactId, departmentId, 2)) {
+          if (vistos.has(chamado.id)) continue;
+          vistos.add(chamado.id);
+          chamados.push(chamado);
+        }
+      }
+      if (!chamados.length) {
+        await marcarBuscaDigisac(supabaseAdmin, clienteId, 'sem_chamados');
+        continue;
+      }
+      await gravarChamadosSemApagar(supabaseAdmin, clienteId, chamados, departmentId);
+      await marcarBuscaDigisac(supabaseAdmin, clienteId, 'ok');
+      gravados += 1;
+    } catch (erro) {
+      console.error('[digisac-historico] cliente sem chamado', erro instanceof Error ? erro.message : erro);
+      await marcarBuscaDigisac(supabaseAdmin, clienteId, 'erro');
+    }
+  }
+  return gravados;
+}
+
+async function pendentesDeChamado(supabaseAdmin: ReturnType<typeof createClient>): Promise<number> {
+  const [pessoas, ja, buscas] = await Promise.all([
+    supabaseAdmin.from('clientes_azoup').select('id').limit(3000),
+    supabaseAdmin.from('admin_digisac_chamados').select('cliente_id').limit(5000),
+    supabaseAdmin.from('admin_digisac_busca').select('cliente_id,verificado_em').limit(3000),
+  ]);
+  if (pessoas.error) return 0;
+  const comChamado = new Set((ja.data ?? []).map((row) => `${(row as { cliente_id?: string }).cliente_id ?? ''}`));
+  const limiteBusca = Date.now() - 12 * 3_600_000;
+  const buscado = new Set(
+    (buscas.error ? [] : buscas.data ?? [])
+      .filter((row) => Date.parse(`${(row as { verificado_em?: string }).verificado_em ?? ''}`) > limiteBusca)
+      .map((row) => `${(row as { cliente_id?: string }).cliente_id ?? ''}`),
+  );
+  return (pessoas.data ?? [])
+    .map((row) => `${(row as { id?: string }).id ?? ''}`)
+    .filter((id) => id && !comChamado.has(id) && !buscado.has(id)).length;
+}
+
 async function refletirUltimoChamado(supabaseAdmin: ReturnType<typeof createClient>): Promise<void> {
   const { error } = await supabaseAdmin.rpc('painel_refletir_ultimo_chamado');
   if (error && !/schema cache|does not exist|could not find/i.test(error.message)) {
@@ -868,12 +982,17 @@ async function refletirUltimoChamado(supabaseAdmin: ReturnType<typeof createClie
 
 async function sincronizarUltimosChamados(
   supabaseAdmin: ReturnType<typeof createClient>,
-): Promise<{ atualizados: number; contatos: Record<string, string> }> {
+): Promise<{ atualizados: number; contatos: Record<string, string>; pendentes: number }> {
   let atualizados = 0;
   try {
     atualizados = await importarChamadosRecentes(supabaseAdmin);
   } catch (erro) {
     console.error('[digisac-historico] sync chamados', erro instanceof Error ? erro.message : erro);
+  }
+  try {
+    atualizados += await importarChamadosFaltantes(supabaseAdmin);
+  } catch (erro) {
+    console.error('[digisac-historico] chamados faltantes', erro instanceof Error ? erro.message : erro);
   }
   let contatos: Record<string, string> = {};
   try {
@@ -882,7 +1001,13 @@ async function sincronizarUltimosChamados(
     console.error('[digisac-historico] datas dos chamados', erro instanceof Error ? erro.message : erro);
   }
   await refletirUltimoChamado(supabaseAdmin);
-  return { atualizados, contatos };
+  let pendentes = 0;
+  try {
+    pendentes = await pendentesDeChamado(supabaseAdmin);
+  } catch (erro) {
+    console.error('[digisac-historico] pendentes', erro instanceof Error ? erro.message : erro);
+  }
+  return { atualizados, contatos, pendentes };
 }
 
 function clienteIdDoPayload(payload: Record<string, unknown>): string {

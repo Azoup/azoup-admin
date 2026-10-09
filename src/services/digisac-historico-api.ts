@@ -77,5 +77,20 @@ export async function listarMensagensDigisac(clienteId: string, ticketId: string
 }
 
 export async function sincronizarUltimosChamadosDigisac() {
-  return invoke<{ atualizados: number; contatos: Record<string, string> }>('sincronizar_ultimos_chamados');
+  let ultimo: { atualizados: number; contatos: Record<string, string>; pendentes?: number } = {
+    atualizados: 0,
+    contatos: {},
+    pendentes: 1,
+  };
+  for (let volta = 0; volta < 4 && (ultimo.pendentes ?? 0) > 0; volta += 1) {
+    const lote = await invoke<{ atualizados: number; contatos: Record<string, string>; pendentes?: number }>(
+      'sincronizar_ultimos_chamados',
+    );
+    ultimo = {
+      atualizados: ultimo.atualizados + (lote.atualizados ?? 0),
+      contatos: { ...ultimo.contatos, ...(lote.contatos ?? {}) },
+      pendentes: lote.pendentes ?? 0,
+    };
+  }
+  return ultimo;
 }

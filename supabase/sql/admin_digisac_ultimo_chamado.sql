@@ -34,6 +34,17 @@ using (public.painel_admin_ativo());
 
 notify pgrst, 'reload schema';
 
+create table if not exists public.admin_digisac_busca (
+  cliente_id uuid primary key references public.clientes_azoup(id) on delete cascade,
+  situacao text not null,
+  verificado_em timestamptz not null default now()
+);
+
+alter table public.admin_digisac_busca enable row level security;
+
+comment on table public.admin_digisac_busca is
+  'Controle da busca do último chamado na Digisac para não repetir cliente sem contato.';
+
 -- A tela publicada lê o último contato em admin_cliente_conversas.
 -- Esta função grava o dia do chamado mais recente para o card acompanhar,
 -- sem alterar as conversas registradas pela equipe.
