@@ -27,7 +27,7 @@ import {
   removerTelefoneDigisac,
 } from '@/src/services/repos/digisac-telefones-repo';
 import { listarAgendaDoCliente, listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
-import { gerarResumosReunioes, gerarResumoDoEvento } from '@/src/services/google-calendar-api';
+import { gerarResumoDoEvento, gerarTodosResumosReunioes } from '@/src/services/google-calendar-api';
 import {
   enviarMensagemProntaDigisac,
   listarChamadosDigisac,
@@ -2065,32 +2065,23 @@ export default function AcompanhamentoScreen() {
   const [erroFicha, setErroFicha] = useState<string | null>(null);
   const [avisoResumo, setAvisoResumo] = useState<string | null>(null);
   const [erroResumo, setErroResumo] = useState<string | null>(null);
+  const emailResumo = adminProfile?.email ?? session?.user?.email ?? null;
+  const autoResumo = useQuery({
+    queryKey: ['resumos_ia_automaticos', emailResumo],
+    queryFn: () => gerarTodosResumosReunioes(emailResumo),
+    enabled: false,
+  });
 
   const resumosMutation = useMutation({
-    mutationFn: async () => {
-      const email = adminProfile?.email ?? session?.user?.email ?? null;
-      let ignorar: string[] = [];
-      let gerados = 0;
-      let semAnotacao = 0;
-      const nomes: string[] = [];
-      for (let volta = 0; volta < 20; volta += 1) {
-        const lote = await gerarResumosReunioes({ adminEmail: email, ignorar });
-        gerados += lote.gerados.length;
-        semAnotacao += lote.semAnotacao;
-        for (const item of lote.gerados) nomes.push(item.cliente);
-        ignorar = lote.ignorar;
-        if (lote.restantes <= 0) break;
-      }
-      return { gerados, semAnotacao, nomes };
-    },
+    mutationFn: () => gerarTodosResumosReunioes(adminProfile?.email ?? session?.user?.email ?? null),
     onSuccess: (resultado) => {
       setErroResumo(null);
       const pessoas = [...new Set(resultado.nomes)];
       if (!resultado.gerados) {
         setAvisoResumo(
           resultado.semAnotacao
-            ? 'Nenhuma reunião recente com anotação e sem registro.'
-            : 'Nenhuma reunião recente sem registro.',
+            ? 'Nenhuma reunião encerrada com anotação e sem registro.'
+            : 'Nenhuma reunião encerrada sem registro.',
         );
       } else {
         setAvisoResumo(
@@ -2343,8 +2334,14 @@ export default function AcompanhamentoScreen() {
           </Pressable>
         </View>
 
+        {autoResumo.isFetching || resumosMutation.isPending ? (
+          <Text style={{ color: theme.textMuted }}>Gerando os registros das reuniões que já terminaram…</Text>
+        ) : null}
         {avisoResumo ? <Text style={{ color: theme.success, fontWeight: '700' }}>{avisoResumo}</Text> : null}
         {erroResumo ? <Text style={{ color: theme.error }}>{erroResumo}</Text> : null}
+        {autoResumo.error ? (
+          <Text style={{ color: theme.error }}>{(autoResumo.error as Error).message}</Text>
+        ) : null}
 
         {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando Kanban…</Text> : null}
         {q.error ? (

@@ -396,18 +396,27 @@ async function resumoDoEvento(
   ids.push(...idsDeDocumentosNoTexto(`${detalhe.description ?? ''}`));
   const codigo = codigoMeet(detalhe);
   const inicioEvento = inicio || `${((detalhe.start ?? {}) as { dateTime?: string }).dateTime ?? ''}`;
-  if (codigo) ids.unshift(...(await documentosDasNotasGemini(accessToken, codigo, inicioEvento)));
-
-  for (const id of [...new Set(ids)]) {
-    let anotacao = '';
-    try {
-      anotacao = await textoDaAnotacao(accessToken, id);
-    } catch (erro) {
-      if ((erro as { status?: number }).status === 403) throw erro;
-      continue;
+  const lidos = new Set<string>();
+  const ler = async (lista: string[]) => {
+    for (const id of lista) {
+      if (!id || lidos.has(id)) continue;
+      lidos.add(id);
+      let anotacao = '';
+      try {
+        anotacao = await textoDaAnotacao(accessToken, id);
+      } catch (erro) {
+        if ((erro as { status?: number }).status === 403) throw erro;
+        continue;
+      }
+      if (anotacao.length >= 40) return anotacao;
     }
-    if (anotacao.length < 40) continue;
-    return resumirComChatGpt(anotacao);
+    return '';
+  };
+  const doAnexo = await ler(ids);
+  if (doAnexo) return resumirComChatGpt(doAnexo);
+  if (codigo) {
+    const doMeet = await ler(await documentosDasNotasGemini(accessToken, codigo, inicioEvento));
+    if (doMeet) return resumirComChatGpt(doMeet);
   }
   return null;
 }
@@ -457,30 +466,28 @@ async function gerarResumosPendentes(
   adminEmail: string | null,
   ignorar: string[],
 ): Promise<Record<string, unknown>> {
-  const desde = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const agora = new Date().toISOString();
   const pular = new Set(ignorar.map((item) => item.trim()).filter(Boolean));
   const { data, error } = await supabaseAdmin
     .from('admin_google_agendamentos')
-    .select('google_event_id,titulo,inicio,status,cliente_id,calendar_id')
+    .select('google_event_id,titulo,inicio,fim,status,cliente_id,calendar_id')
     .eq('calendar_id', calendarId)
     .not('cliente_id', 'is', null)
-    .gte('inicio', desde)
-    .lt('inicio', new Date().toISOString())
-    .order('inicio', { ascending: false })
-    .limit(200);
+    .lt('fim', agora)
+    .order('fim', { ascending: false })
+    .limit(500);
   if (error) throw new Error(error.message);
 
   const registros = await supabaseAdmin
     .from('admin_cliente_reunioes')
     .select('cliente_id,created_at,avulsa')
-    .gte('created_at', desde)
-    .limit(2000);
+    .limit(5000);
   let reunioes = (registros.data ?? []) as Array<{ cliente_id?: string; created_at?: string; avulsa?: boolean }>;
   if (registros.error && /avulsa/i.test(registros.error.message)) {
     const semAvulsa = await supabaseAdmin
       .from('admin_cliente_reunioes')
       .select('cliente_id,created_at')
-      .gte('created_at', desde)
+      .gte('created_at', new Date(Date.now() - 800 * 86_400_000).toISOString())
       .limit(2000);
     if (semAvulsa.error) throw new Error(semAvulsa.error.message);
     reunioes = (semAvulsa.data ?? []) as typeof reunioes;
@@ -587,14 +594,14 @@ async function resumirAnotacaoReuniao(
   clienteId: string,
   diaEscolhido: string,
 ): Promise<Record<string, unknown>> {
-  const desde = new Date(Date.now() - 14 * 86_400_000).toISOString();
+  const desde = new Date(Date.now() - 800 * 86_400_000).toISOString();
   const { data, error } = await supabaseAdmin
     .from('admin_google_agendamentos')
     .select('google_event_id,titulo,inicio,status,calendar_id')
     .eq('cliente_id', clienteId)
     .eq('calendar_id', calendarId)
     .gte('inicio', desde)
-    .lt('inicio', new Date().toISOString())
+    .lt('fim', new Date().toISOString())
     .order('inicio', { ascending: false })
     .limit(30);
   if (error) throw new Error(error.message);

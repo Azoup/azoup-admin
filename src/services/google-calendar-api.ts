@@ -131,6 +131,24 @@ export async function gerarResumosReunioes(params: { adminEmail?: string | null;
   }>('gerar_resumos_reunioes', params);
 }
 
+/** Sincroniza a agenda e gera o registro da IA de toda reunião que já terminou e ainda não tem registro. */
+export async function gerarTodosResumosReunioes(adminEmail?: string | null) {
+  await sincronizarGoogleAgenda();
+  let ignorar: string[] = [];
+  let gerados = 0;
+  let semAnotacao = 0;
+  const nomes: string[] = [];
+  for (let volta = 0; volta < 40; volta += 1) {
+    const lote = await gerarResumosReunioes({ adminEmail, ignorar });
+    gerados += lote.gerados.length;
+    semAnotacao += lote.semAnotacao;
+    for (const item of lote.gerados) nomes.push(item.cliente);
+    ignorar = lote.ignorar;
+    if (lote.restantes <= 0) break;
+  }
+  return { gerados, semAnotacao, nomes };
+}
+
 export async function criarEventoGoogle(payload: {
   titulo: string;
   descricao?: string;
