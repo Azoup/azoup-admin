@@ -108,6 +108,20 @@ export async function resumirAnotacaoReuniao(clienteId: string, data?: string | 
   }>('resumir_anotacao_reuniao', { clienteId, data: data ?? null });
 }
 
+export async function gerarResumoDoEvento(params: {
+  clienteId: string;
+  googleEventId: string;
+  adminEmail?: string | null;
+  empresaNome?: string | null;
+}) {
+  return invoke<{ ok: boolean; titulo: string }>('gerar_resumo_evento', {
+    clienteId: params.clienteId,
+    googleEventId: params.googleEventId,
+    adminEmail: params.adminEmail ?? null,
+    empresaNome: params.empresaNome ?? null,
+  });
+}
+
 export async function gerarResumosReunioes(params: { adminEmail?: string | null; ignorar?: string[] }) {
   return invoke<{
     gerados: Array<{ cliente: string; titulo: string }>;

@@ -27,7 +27,7 @@ import {
   removerTelefoneDigisac,
 } from '@/src/services/repos/digisac-telefones-repo';
 import { listarAgendaDoCliente, listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
-import { gerarResumosReunioes } from '@/src/services/google-calendar-api';
+import { gerarResumosReunioes, gerarResumoDoEvento } from '@/src/services/google-calendar-api';
 import {
   enviarMensagemProntaDigisac,
   listarChamadosDigisac,
@@ -782,6 +782,23 @@ export function HistoricoClienteTela({
     enabled: Boolean(cliente.id),
   });
 
+  const gerarResumoEvento = useMutation({
+    mutationFn: (googleEventId: string) =>
+      gerarResumoDoEvento({
+        clienteId: cliente.id,
+        googleEventId,
+        adminEmail: adminProfile?.email ?? null,
+        empresaNome: cliente.empresa_nome ?? null,
+      }),
+    onSuccess: () => {
+      setErro(null);
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
+      void qc.invalidateQueries({ queryKey: ['reunioes_sem_registro'] });
+      void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao gerar o resumo'),
+  });
+
   const agenda = useMemo(() => {
     const agora = Date.now();
     const eventos = agendaQ.data ?? [];
@@ -1295,7 +1312,28 @@ export function HistoricoClienteTela({
                             {ev.fim ? ` — ${formatDateTimeBR(ev.fim)}` : ''}
                           </Text>
                           {registros.length === 0 ? (
-                            <Text style={{ color: theme.textMuted, fontSize: 12 }}>Sem registro neste dia.</Text>
+                            <View style={{ gap: 6 }}>
+                              <Text style={{ color: theme.textMuted, fontSize: 12 }}>Sem registro neste dia.</Text>
+                              <Pressable
+                                disabled={gerarResumoEvento.isPending}
+                                onPress={() => gerarResumoEvento.mutate(ev.google_event_id)}
+                                style={({ pressed }) => ({
+                                  alignSelf: 'flex-start',
+                                  borderWidth: 1,
+                                  borderColor: theme.cadastroAction,
+                                  borderRadius: 8,
+                                  paddingHorizontal: 10,
+                                  paddingVertical: 6,
+                                  opacity: pressed || gerarResumoEvento.isPending ? 0.7 : 1,
+                                })}
+                              >
+                                <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+                                  {gerarResumoEvento.isPending && gerarResumoEvento.variables === ev.google_event_id
+                                    ? 'Gerando resumo…'
+                                    : 'Gerar resumo da IA'}
+                                </Text>
+                              </Pressable>
+                            </View>
                           ) : (
                             registros.map((reuniao) => (
                               <View

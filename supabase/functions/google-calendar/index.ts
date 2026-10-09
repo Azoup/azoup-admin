@@ -9,6 +9,7 @@ const corsHeaders = {
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar',
   'https://www.googleapis.com/auth/documents.readonly',
+  'https://www.googleapis.com/auth/meetings.space.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ');
 
@@ -284,34 +285,123 @@ async function resumirComChatGpt(anotacao: string): Promise<{
   };
 }
 
+async function googleJson(accessToken: string, url: string): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const text = await res.text();
+  let data: Record<string, unknown> = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = {};
+  }
+  return { ok: res.ok, status: res.status, data };
+}
+
+function escopoInsuficiente(status: number, data: Record<string, unknown>): boolean {
+  const mensagem = `${(data.error as { message?: string } | undefined)?.message ?? ''}`;
+  return status === 403 && /insufficient|permission|scope|forbidden/i.test(mensagem);
+}
+
+function idsDeDocumentosNoTexto(texto: string): string[] {
+  return [...texto.matchAll(/\/document\/d\/([a-zA-Z0-9_-]+)/g)].map((item) => item[1]);
+}
+
+function codigoMeet(evento: Record<string, unknown>): string | null {
+  const conf = (evento.conferenceData ?? {}) as Record<string, unknown>;
+  const partes = [
+    `${conf.conferenceId ?? ''}`,
+    `${evento.hangoutLink ?? ''}`,
+    `${evento.location ?? ''}`,
+    `${evento.description ?? ''}`,
+  ];
+  for (const ponto of (conf.entryPoints as Array<Record<string, unknown>> | undefined) ?? []) {
+    partes.push(`${ponto.uri ?? ''}`, `${ponto.label ?? ''}`, `${ponto.meetingCode ?? ''}`);
+  }
+  return partes.join(' ').match(/[a-z]{3}-[a-z]{4}-[a-z]{3}/i)?.[0]?.toLowerCase() ?? null;
+}
+
+function erroReconectarAnotacao(): Error {
+  return Object.assign(
+    new Error('Reconecte a agenda em Agendamentos para autorizar a leitura das anotações do Gemini.'),
+    { status: 403 },
+  );
+}
+
+async function documentosDasNotasGemini(accessToken: string, codigo: string, inicioEvento: string): Promise<string[]> {
+  const filter = `space.meeting_code = "${codigo}"`;
+  const lista = await googleJson(
+    accessToken,
+    `https://meet.googleapis.com/v2/conferenceRecords?pageSize=10&filter=${encodeURIComponent(filter)}`,
+  );
+  if (!lista.ok) {
+    if (escopoInsuficiente(lista.status, lista.data)) throw erroReconectarAnotacao();
+    return [];
+  }
+  const alvo = Date.parse(inicioEvento);
+  const records = ((lista.data.conferenceRecords as Array<Record<string, unknown>> | undefined) ?? [])
+    .map((registro) => ({ registro, instante: Date.parse(`${registro.startTime ?? ''}`) }))
+    .filter((item) => Number.isFinite(item.instante))
+    .sort((a, b) => Math.abs(a.instante - alvo) - Math.abs(b.instante - alvo));
+  const ids: string[] = [];
+  for (const item of records.slice(0, 3)) {
+    if (Number.isFinite(alvo) && Math.abs(item.instante - alvo) > 6 * 3_600_000) continue;
+    const nome = `${item.registro.name ?? ''}`;
+    if (!nome.startsWith('conferenceRecords/')) continue;
+    const notas = await googleJson(accessToken, `https://meet.googleapis.com/v2/${nome}/smartNotes?pageSize=10`);
+    if (!notas.ok) {
+      if (escopoInsuficiente(notas.status, notas.data)) throw erroReconectarAnotacao();
+      continue;
+    }
+    for (const nota of (notas.data.smartNotes as Array<Record<string, unknown>> | undefined) ?? []) {
+      const destino = (nota.docsDestination ?? {}) as Record<string, unknown>;
+      const documento = `${destino.document ?? ''}`.trim();
+      const id = documento.split('/').filter(Boolean).pop() ?? '';
+      if (id && !id.startsWith('http')) ids.push(id);
+      ids.push(...idsDeDocumentosNoTexto(`${destino.exportUri ?? ''}`));
+    }
+  }
+  return ids;
+}
+
 async function resumoDoEvento(
   accessToken: string,
   calendarId: string,
   eventId: string,
+  inicio?: string,
 ): Promise<{ assuntos: string; proxima_acao: string; pendencias: string[] } | null> {
   let detalhe: Record<string, unknown>;
   try {
     detalhe = await googleFetch(
       accessToken,
-      `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+      `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?conferenceDataVersion=1`,
     );
   } catch {
     return null;
   }
+  const ids: string[] = [];
   const anexos = ((detalhe.attachments as Record<string, unknown>[] | undefined) ?? [])
     .map((anexo) => ({ anexo, id: idDoDocumento(anexo) }))
-    .filter((item): item is { anexo: Record<string, unknown>; id: string } => Boolean(item.id))
-    .sort((a, b) => {
-      const anota = (item: Record<string, unknown>) => (/anota/i.test(`${item.title ?? ''}`) ? 0 : 1);
-      return anota(a.anexo) - anota(b.anexo);
-    });
+    .filter((item): item is { anexo: Record<string, unknown>; id: string } => Boolean(item.id));
+  anexos.sort((a, b) => {
+    const nota = (item: Record<string, unknown>) => (/anota|gemini|notas|notes/i.test(`${item.title ?? ''}`) ? 0 : 1);
+    return nota(a.anexo) - nota(b.anexo);
+  });
   for (const item of anexos) {
     const mime = `${item.anexo.mimeType ?? ''}`;
     const tituloAnexo = `${item.anexo.title ?? ''}`;
-    if (mime && mime !== 'application/vnd.google-apps.document' && !/anota/i.test(tituloAnexo)) continue;
+    const pareceNota = /anota|gemini|notas|notes/i.test(tituloAnexo) || !mime || mime === 'application/vnd.google-apps.document';
+    if (!pareceNota) continue;
+    ids.push(item.id);
+  }
+  ids.push(...idsDeDocumentosNoTexto(`${detalhe.description ?? ''}`));
+  const codigo = codigoMeet(detalhe);
+  const inicioEvento = inicio || `${((detalhe.start ?? {}) as { dateTime?: string }).dateTime ?? ''}`;
+  if (codigo) ids.unshift(...(await documentosDasNotasGemini(accessToken, codigo, inicioEvento)));
+
+  for (const id of [...new Set(ids)]) {
     let anotacao = '';
     try {
-      anotacao = await textoDaAnotacao(accessToken, item.id);
+      anotacao = await textoDaAnotacao(accessToken, id);
     } catch (erro) {
       if ((erro as { status?: number }).status === 403) throw erro;
       continue;
@@ -371,7 +461,7 @@ async function gerarResumosPendentes(
   const pular = new Set(ignorar.map((item) => item.trim()).filter(Boolean));
   const { data, error } = await supabaseAdmin
     .from('admin_google_agendamentos')
-    .select('google_event_id,titulo,inicio,status,cliente_id')
+    .select('google_event_id,titulo,inicio,status,cliente_id,calendar_id')
     .eq('calendar_id', calendarId)
     .not('cliente_id', 'is', null)
     .gte('inicio', desde)
@@ -406,7 +496,7 @@ async function gerarResumosPendentes(
     if (clienteId && dia) cobertas.add(`${clienteId}|${dia}`);
   }
 
-  const grupos: Array<{ chave: string; clienteId: string; dia: string; eventId: string; titulo: string }> = [];
+  const grupos: Array<{ chave: string; clienteId: string; dia: string; eventId: string; titulo: string; calendarId: string; inicio: string }> = [];
   const vistos = new Set<string>();
   for (const row of (data ?? []) as Array<{
     google_event_id?: string;
@@ -414,6 +504,7 @@ async function gerarResumosPendentes(
     inicio?: string;
     status?: string;
     cliente_id?: string;
+    calendar_id?: string;
   }>) {
     if (`${row.status ?? ''}` === 'cancelled') continue;
     const clienteId = `${row.cliente_id ?? ''}`.trim();
@@ -423,7 +514,15 @@ async function gerarResumosPendentes(
     const chave = `${clienteId}|${dia}`;
     if (vistos.has(chave) || cobertas.has(chave) || pular.has(chave)) continue;
     vistos.add(chave);
-    grupos.push({ chave, clienteId, dia, eventId, titulo: `${row.titulo ?? ''}`.trim() || 'Reunião' });
+    grupos.push({
+      chave,
+      clienteId,
+      dia,
+      eventId,
+      titulo: `${row.titulo ?? ''}`.trim() || 'Reunião',
+      calendarId: `${row.calendar_id ?? ''}`.trim() || calendarId,
+      inicio: `${row.inicio ?? ''}`,
+    });
   }
 
   const ids = [...new Set(grupos.map((item) => item.clienteId))];
@@ -459,7 +558,7 @@ async function gerarResumosPendentes(
   for (const grupo of grupos) {
     if (gerados.length >= 3 || cursor >= 8) break;
     cursor += 1;
-    const resumo = await resumoDoEvento(accessToken, calendarId, grupo.eventId);
+    const resumo = await resumoDoEvento(accessToken, grupo.calendarId, grupo.eventId, grupo.inicio);
     if (!resumo) {
       ignorados.push(grupo.chave);
       continue;
@@ -491,7 +590,7 @@ async function resumirAnotacaoReuniao(
   const desde = new Date(Date.now() - 14 * 86_400_000).toISOString();
   const { data, error } = await supabaseAdmin
     .from('admin_google_agendamentos')
-    .select('google_event_id,titulo,inicio,status')
+    .select('google_event_id,titulo,inicio,status,calendar_id')
     .eq('cliente_id', clienteId)
     .eq('calendar_id', calendarId)
     .gte('inicio', desde)
@@ -500,7 +599,7 @@ async function resumirAnotacaoReuniao(
     .limit(30);
   if (error) throw new Error(error.message);
 
-  let eventos = ((data ?? []) as Array<{ google_event_id?: string; titulo?: string; inicio?: string; status?: string }>).filter(
+  let eventos = ((data ?? []) as Array<{ google_event_id?: string; titulo?: string; inicio?: string; status?: string; calendar_id?: string }>).filter(
     (row) => `${row.status ?? ''}` !== 'cancelled' && `${row.google_event_id ?? ''}`.trim(),
   );
   if (/^\d{4}-\d{2}-\d{2}$/.test(diaEscolhido)) {
@@ -511,7 +610,12 @@ async function resumirAnotacaoReuniao(
   }
 
   for (const evento of eventos.slice(0, 8)) {
-    const resumo = await resumoDoEvento(accessToken, calendarId, `${evento.google_event_id}`);
+    const resumo = await resumoDoEvento(
+      accessToken,
+      `${evento.calendar_id ?? ''}`.trim() || calendarId,
+      `${evento.google_event_id}`,
+      `${evento.inicio ?? ''}`,
+    );
     if (!resumo) continue;
     return {
       ...resumo,
@@ -1165,6 +1269,41 @@ serve(async (req) => {
       const ignorar = Array.isArray(p.ignorar) ? (p.ignorar as unknown[]).map((item) => `${item}`) : [];
       const resultado = await gerarResumosPendentes(supabaseAdmin, accessToken, calendarId, adminEmail, ignorar);
       return json(resultado);
+    }
+
+    if (op === 'gerar_resumo_evento') {
+      const clienteId = `${p.clienteId ?? ''}`.trim();
+      const eventId = `${p.googleEventId ?? ''}`.trim();
+      if (!clienteId || !eventId) throw new Error('Reunião inválida.');
+      const evento = await supabaseAdmin
+        .from('admin_google_agendamentos')
+        .select('google_event_id,titulo,inicio,status,calendar_id')
+        .eq('google_event_id', eventId)
+        .eq('cliente_id', clienteId)
+        .maybeSingle();
+      if (evento.error) throw new Error(evento.error.message);
+      const row = evento.data as { titulo?: string; inicio?: string; status?: string; calendar_id?: string } | null;
+      if (!row || `${row.status ?? ''}` === 'cancelled') {
+        throw Object.assign(new Error('Reunião não encontrada na agenda.'), { status: 404 });
+      }
+      const dia = diaBrasil(`${row.inicio ?? ''}`);
+      if (!dia) throw new Error('Reunião sem data.');
+      const resumo = await resumoDoEvento(
+        accessToken,
+        `${row.calendar_id ?? ''}`.trim() || calendarId,
+        eventId,
+        `${row.inicio ?? ''}`,
+      );
+      if (!resumo) throw Object.assign(new Error('Esta reunião não tem anotação do Gemini.'), { status: 404 });
+      const adminEmail = `${p.adminEmail ?? admin.email ?? ''}`.trim() || null;
+      await gravarResumoIa(supabaseAdmin, {
+        clienteId,
+        empresaNome: `${p.empresaNome ?? ''}`.trim() || null,
+        dia,
+        adminEmail,
+        resumo,
+      });
+      return json({ ok: true, titulo: `${row.titulo ?? ''}`.trim() || 'Reunião' });
     }
 
     return json({ error: `Operação desconhecida: ${op}` }, 400);
