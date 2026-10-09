@@ -306,18 +306,38 @@ function idsDeDocumentosNoTexto(texto: string): string[] {
   return [...texto.matchAll(/\/document\/d\/([a-zA-Z0-9_-]+)/g)].map((item) => item[1]);
 }
 
+function codigoDeTrecho(bruto: string, aceitarSemHifen: boolean): string | null {
+  const hifen = bruto.match(/[a-z]{3}-[a-z]{4}-[a-z]{3}/i);
+  if (hifen) return hifen[0].toLowerCase();
+  if (!aceitarSemHifen) return null;
+  const limpo = bruto.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (/^[a-z]{10}$/.test(limpo)) return `${limpo.slice(0, 3)}-${limpo.slice(3, 7)}-${limpo.slice(7)}`;
+  return null;
+}
+
 function codigoMeet(evento: Record<string, unknown>): string | null {
   const conf = (evento.conferenceData ?? {}) as Record<string, unknown>;
-  const partes = [
-    `${conf.conferenceId ?? ''}`,
-    `${evento.hangoutLink ?? ''}`,
-    `${evento.location ?? ''}`,
-    `${evento.description ?? ''}`,
-  ];
+  const diretos = [`${conf.conferenceId ?? ''}`];
   for (const ponto of (conf.entryPoints as Array<Record<string, unknown>> | undefined) ?? []) {
-    partes.push(`${ponto.uri ?? ''}`, `${ponto.label ?? ''}`, `${ponto.meetingCode ?? ''}`);
+    diretos.push(`${ponto.meetingCode ?? ''}`, `${ponto.uri ?? ''}`, `${ponto.label ?? ''}`);
   }
-  return partes.join(' ').match(/[a-z]{3}-[a-z]{4}-[a-z]{3}/i)?.[0]?.toLowerCase() ?? null;
+  diretos.push(`${evento.hangoutLink ?? ''}`, `${evento.location ?? ''}`);
+  for (const bruto of diretos) {
+    const codigo = codigoDeTrecho(bruto, true);
+    if (codigo) return codigo;
+  }
+  return codigoDeTrecho(`${evento.description ?? ''}`, false);
+}
+
+function idsDoDestinoMeet(destino: Record<string, unknown> | undefined): string[] {
+  if (!destino) return [];
+  const documento = `${destino.document ?? ''}`.trim();
+  const exportUri = `${destino.exportUri ?? ''}`.trim();
+  const ids = [...idsDeDocumentosNoTexto(documento), ...idsDeDocumentosNoTexto(exportUri)];
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(documento)) ids.push(documento);
+  const pedaco = documento.split('/').filter(Boolean).pop() ?? '';
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(pedaco)) ids.push(pedaco);
+  return [...new Set(ids)];
 }
 
 function erroReconectarAnotacao(): Error {
@@ -340,11 +360,14 @@ async function documentosDasNotasGemini(accessToken: string, codigo: string, ini
   const alvo = Date.parse(inicioEvento);
   const records = ((lista.data.conferenceRecords as Array<Record<string, unknown>> | undefined) ?? [])
     .map((registro) => ({ registro, instante: Date.parse(`${registro.startTime ?? ''}`) }))
-    .filter((item) => Number.isFinite(item.instante))
-    .sort((a, b) => Math.abs(a.instante - alvo) - Math.abs(b.instante - alvo));
+    .sort((a, b) => {
+      const da = Number.isFinite(a.instante) ? Math.abs(a.instante - alvo) : Number.MAX_SAFE_INTEGER;
+      const db = Number.isFinite(b.instante) ? Math.abs(b.instante - alvo) : Number.MAX_SAFE_INTEGER;
+      return da - db;
+    });
   const ids: string[] = [];
   for (const item of records.slice(0, 3)) {
-    if (Number.isFinite(alvo) && Math.abs(item.instante - alvo) > 6 * 3_600_000) continue;
+    if (Number.isFinite(alvo) && Number.isFinite(item.instante) && Math.abs(item.instante - alvo) > 36 * 3_600_000) continue;
     const nome = `${item.registro.name ?? ''}`;
     if (!nome.startsWith('conferenceRecords/')) continue;
     const notas = await googleJson(accessToken, `https://meet.googleapis.com/v2/${nome}/smartNotes?pageSize=10`);
@@ -353,11 +376,31 @@ async function documentosDasNotasGemini(accessToken: string, codigo: string, ini
       continue;
     }
     for (const nota of (notas.data.smartNotes as Array<Record<string, unknown>> | undefined) ?? []) {
-      const destino = (nota.docsDestination ?? {}) as Record<string, unknown>;
-      const documento = `${destino.document ?? ''}`.trim();
-      const id = documento.split('/').filter(Boolean).pop() ?? '';
-      if (id && !id.startsWith('http')) ids.push(id);
-      ids.push(...idsDeDocumentosNoTexto(`${destino.exportUri ?? ''}`));
+      ids.push(...idsDoDestinoMeet((nota.docsDestination ?? {}) as Record<string, unknown>));
+    }
+    const transcricoes = await googleJson(accessToken, `https://meet.googleapis.com/v2/${nome}/transcripts?pageSize=5`);
+    if (!transcricoes.ok) {
+      if (escopoInsuficiente(transcricoes.status, transcricoes.data)) throw erroReconectarAnotacao();
+      continue;
+    }
+    for (const transcricao of (transcricoes.data.transcripts as Array<Record<string, unknown>> | undefined) ?? []) {
+      ids.push(...idsDoDestinoMeet((transcricao.docsDestination ?? {}) as Record<string, unknown>));
+      const nomeTranscricao = `${transcricao.name ?? ''}`;
+      if (!nomeTranscricao.startsWith('conferenceRecords/')) continue;
+      const entradas = await googleJson(
+        accessToken,
+        `https://meet.googleapis.com/v2/${nomeTranscricao}/entries?pageSize=200`,
+      );
+      if (!entradas.ok) {
+        if (escopoInsuficiente(entradas.status, entradas.data)) throw erroReconectarAnotacao();
+        continue;
+      }
+      const texto = ((entradas.data.transcriptEntries as Array<Record<string, unknown>> | undefined) ?? [])
+        .map((item) => `${item.text ?? ''}`.trim())
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+      if (texto.length >= 40) ids.push(`texto:${texto.slice(0, 14000)}`);
     }
   }
   return ids;
@@ -375,8 +418,16 @@ async function resumoDoEvento(
       accessToken,
       `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?conferenceDataVersion=1`,
     );
-  } catch {
-    return null;
+  } catch (erro) {
+    const mensagem = erro instanceof Error ? erro.message : '';
+    throw Object.assign(
+      new Error(
+        mensagem && !/^not found$/i.test(mensagem)
+          ? mensagem
+          : 'A reunião não foi encontrada na agenda Google. Sincronize os agendamentos e tente de novo.',
+      ),
+      { status: 422 },
+    );
   }
   const ids: string[] = [];
   const anexos = ((detalhe.attachments as Record<string, unknown>[] | undefined) ?? [])
@@ -401,6 +452,11 @@ async function resumoDoEvento(
     for (const id of lista) {
       if (!id || lidos.has(id)) continue;
       lidos.add(id);
+      if (id.startsWith('texto:')) {
+        const anotacao = id.slice(6).trim();
+        if (anotacao.length >= 40) return anotacao;
+        continue;
+      }
       let anotacao = '';
       try {
         anotacao = await textoDaAnotacao(accessToken, id);
@@ -565,7 +621,14 @@ async function gerarResumosPendentes(
   for (const grupo of grupos) {
     if (gerados.length >= 3 || cursor >= 8) break;
     cursor += 1;
-    const resumo = await resumoDoEvento(accessToken, grupo.calendarId, grupo.eventId, grupo.inicio);
+    let resumo: Awaited<ReturnType<typeof resumoDoEvento>> = null;
+    try {
+      resumo = await resumoDoEvento(accessToken, grupo.calendarId, grupo.eventId, grupo.inicio);
+    } catch (erro) {
+      if ((erro as { status?: number }).status === 403) throw erro;
+      ignorados.push(grupo.chave);
+      continue;
+    }
     if (!resumo) {
       ignorados.push(grupo.chave);
       continue;
@@ -1291,7 +1354,7 @@ serve(async (req) => {
       if (evento.error) throw new Error(evento.error.message);
       const row = evento.data as { titulo?: string; inicio?: string; status?: string; calendar_id?: string } | null;
       if (!row || `${row.status ?? ''}` === 'cancelled') {
-        throw Object.assign(new Error('Reunião não encontrada na agenda.'), { status: 404 });
+        throw Object.assign(new Error('Reunião não encontrada na agenda. Sincronize os agendamentos e tente de novo.'), { status: 422 });
       }
       const dia = diaBrasil(`${row.inicio ?? ''}`);
       if (!dia) throw new Error('Reunião sem data.');
@@ -1301,7 +1364,12 @@ serve(async (req) => {
         eventId,
         `${row.inicio ?? ''}`,
       );
-      if (!resumo) throw Object.assign(new Error('Esta reunião não tem anotação do Gemini.'), { status: 404 });
+      if (!resumo) {
+        throw Object.assign(
+          new Error('Não encontrei a anotação do Gemini nem a transcrição desta reunião. Reconecte a agenda em Agendamentos se o acesso ao Meet ainda não foi autorizado.'),
+          { status: 422 },
+        );
+      }
       const adminEmail = `${p.adminEmail ?? admin.email ?? ''}`.trim() || null;
       await gravarResumoIa(supabaseAdmin, {
         clienteId,
