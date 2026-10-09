@@ -14,7 +14,7 @@ import { salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanha
 import { criarPendenciasReuniao, listarUsuariosDoCliente } from '@/src/services/repos/reunioes-repo';
 import { resumirAnotacaoReuniao } from '@/src/services/google-calendar-api';
 import type { AcompanhamentoCliente } from '@/src/utils/acompanhamento';
-import { dataHojeBrasil, somarDiasYmd } from '@/src/utils/format';
+import { dataHojeBrasil } from '@/src/utils/format';
 
 const AVATAR = '#FF7A1A';
 
@@ -113,18 +113,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
     mutationFn: () =>
       resumirAnotacaoReuniao(cliente!.id, podeAlterarData ? dataRegistro : null),
     onSuccess: (resumo) => {
-      const retorno = somarDiasYmd(dataHojeBrasil(), 7);
       setAssuntos(resumo.assuntos);
-      setProximaAcao(resumo.proxima_acao);
-      setLinhas(
-        resumo.pendencias.length
-          ? resumo.pendencias.map((texto) => ({
-              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              texto,
-              dataRetorno: retorno,
-            }))
-          : [linhaVazia()],
-      );
       setGeradoIa(true);
       setErro(null);
     },

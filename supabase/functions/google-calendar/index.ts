@@ -257,7 +257,7 @@ async function resumirComChatGpt(anotacao: string): Promise<{
         {
           role: 'system',
           content:
-            'Você resume a anotação de uma reunião. Responda só JSON com as chaves assuntos (string), proxima_acao (string) e pendencias (array de strings). Escreva em português, só com o que estiver no texto. Se não houver pendência, use array vazio.',
+            'Você escreve o registro de uma reunião. Responda só JSON com a chave assuntos (string). Em assuntos, descreva em português os assuntos tratados, somente com o que estiver no texto. Não crie pendência nem próxima ação.',
         },
         { role: 'user', content: anotacao },
       ],
@@ -275,13 +275,12 @@ async function resumirComChatGpt(anotacao: string): Promise<{
   } catch {
     throw new Error('O resumo da IA não veio em JSON.');
   }
-  const pendencias = Array.isArray(parsed.pendencias)
-    ? parsed.pendencias.map((item) => `${item ?? ''}`.trim()).filter(Boolean).slice(0, 8)
-    : [];
+  const assuntos = `${parsed.assuntos ?? ''}`.trim();
+  if (!assuntos) throw new Error('O resumo da IA não trouxe os assuntos tratados.');
   return {
-    assuntos: `${parsed.assuntos ?? ''}`.trim(),
-    proxima_acao: `${parsed.proxima_acao ?? ''}`.trim(),
-    pendencias,
+    assuntos,
+    proxima_acao: '',
+    pendencias: [],
   };
 }
 
@@ -477,13 +476,6 @@ async function resumoDoEvento(
   return null;
 }
 
-function somarDia(ymd: string, dias: number): string {
-  const [ano, mes, dia] = ymd.split('-').map(Number);
-  const data = new Date(Date.UTC(ano, mes - 1, dia));
-  data.setUTCDate(data.getUTCDate() + dias);
-  return data.toISOString().slice(0, 10);
-}
-
 async function gravarResumoIa(
   supabaseAdmin: ReturnType<typeof createClient>,
   params: {
@@ -494,24 +486,22 @@ async function gravarResumoIa(
     resumo: { assuntos: string; proxima_acao: string; pendencias: string[] };
   },
 ): Promise<void> {
-  const itens = params.resumo.pendencias.length
-    ? params.resumo.pendencias.map((texto) => ({ pendencia: texto, data_retorno: somarDia(params.dia, 7) }))
-    : [{ pendencia: 'Resumo da reunião', data_retorno: somarDia(params.dia, 7) }];
-  const linhas = itens.map((item) => ({
+  const assuntos = params.resumo.assuntos.trim();
+  if (!assuntos) throw new Error('O resumo da IA não trouxe os assuntos tratados.');
+  const { error } = await supabaseAdmin.from('admin_cliente_reunioes').insert({
     cliente_id: params.clienteId,
     empresa_nome: params.empresaNome,
-    assuntos: params.resumo.assuntos || null,
-    proxima_acao: params.resumo.proxima_acao || null,
-    pendencia: item.pendencia,
-    data_retorno: item.data_retorno,
+    assuntos,
+    proxima_acao: null,
+    pendencia: '',
+    data_retorno: params.dia,
     participante_ids: [],
     concluida: false,
     avulsa: false,
     gerado_ia: true,
     admin_email: params.adminEmail,
     created_at: `${params.dia}T12:00:00-03:00`,
-  }));
-  const { error } = await supabaseAdmin.from('admin_cliente_reunioes').insert(linhas);
+  });
   if (error) throw new Error(error.message);
 }
 
