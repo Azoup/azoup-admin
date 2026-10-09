@@ -1,6 +1,7 @@
 import { supabase } from '@/src/lib/supabase';
 import type { AdminClienteConversaRow, ClienteAzoupRow } from '@/src/types/azoup';
 import { rotuloCliente } from '@/src/utils/cliente-label';
+import { normalizarHorarioInput } from '@/src/utils/conversa-datetime';
 import { dataCalendarioBrasil } from '@/src/utils/format';
 
 export type ClienteConversaComCliente = AdminClienteConversaRow & {
