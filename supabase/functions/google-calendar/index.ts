@@ -257,7 +257,7 @@ async function resumirComChatGpt(anotacao: string): Promise<{
         {
           role: 'system',
           content:
-            'Você escreve o registro de uma reunião. Responda só JSON com a chave assuntos (string). Em assuntos, descreva em português os assuntos tratados, somente com o que estiver no texto. Não crie pendência nem próxima ação.',
+            'Você registra uma reunião em poucas palavras. Responda só JSON com a chave assuntos (string). Em assuntos, escreva no máximo 3 tópicos, um por linha, começando com "• ". Cada tópico tem no máximo 12 palavras, só o ponto principal. Português, sem introdução, sem pendência e sem próxima ação.',
         },
         { role: 'user', content: anotacao },
       ],
@@ -275,13 +275,31 @@ async function resumirComChatGpt(anotacao: string): Promise<{
   } catch {
     throw new Error('O resumo da IA não veio em JSON.');
   }
-  const assuntos = `${parsed.assuntos ?? ''}`.trim();
+  const assuntos = encurtarAssuntos(`${parsed.assuntos ?? ''}`);
   if (!assuntos) throw new Error('O resumo da IA não trouxe os assuntos tratados.');
   return {
     assuntos,
     proxima_acao: '',
     pendencias: [],
   };
+}
+
+function encurtarAssuntos(bruto: string): string {
+  const linhas = bruto
+    .split(/\n+/)
+    .map((linha) => linha.replace(/^[-•*]\s*/, '').trim())
+    .filter(Boolean);
+  const frases = linhas.length > 1
+    ? linhas
+    : bruto.split(/(?<=[.!?])\s+/).map((frase) => frase.trim()).filter(Boolean);
+  return frases
+    .slice(0, 3)
+    .map((frase) => {
+      const palavras = frase.replace(/[.!?]+$/, '').split(/\s+/).filter(Boolean).slice(0, 12);
+      return palavras.length ? `• ${palavras.join(' ')}` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
 }
 
 async function googleJson(accessToken: string, url: string): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
@@ -486,8 +504,18 @@ async function gravarResumoIa(
     resumo: { assuntos: string; proxima_acao: string; pendencias: string[] };
   },
 ): Promise<void> {
-  const assuntos = params.resumo.assuntos.trim();
+  const assuntos = encurtarAssuntos(params.resumo.assuntos);
   if (!assuntos) throw new Error('O resumo da IA não trouxe os assuntos tratados.');
+  const inicio = `${params.dia}T00:00:00-03:00`;
+  const fim = `${params.dia}T23:59:59-03:00`;
+  const anteriores = await supabaseAdmin
+    .from('admin_cliente_reunioes')
+    .delete()
+    .eq('cliente_id', params.clienteId)
+    .eq('gerado_ia', true)
+    .gte('created_at', inicio)
+    .lte('created_at', fim);
+  if (anteriores.error && !/gerado_ia/i.test(anteriores.error.message)) throw new Error(anteriores.error.message);
   const { error } = await supabaseAdmin.from('admin_cliente_reunioes').insert({
     cliente_id: params.clienteId,
     empresa_nome: params.empresaNome,
