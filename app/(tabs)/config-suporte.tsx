@@ -223,10 +223,6 @@ function DigisacBoasVindasConfig({ aberto, onPress }: { aberto: boolean; onPress
   );
 }
 
-    </PainelConfig>
-  );
-}
-
 function MensagensProntasConfig({ aberto, onPress }: { aberto: boolean; onPress: () => void }) {
   const { theme } = useTheme();
   const qc = useQueryClient();
