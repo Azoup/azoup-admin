@@ -23,7 +23,11 @@ alter table public.admin_acompanhamento_kanban
   add column if not exists proxima_reuniao date,
   add column if not exists pendencias_abertas integer not null default 0,
   add column if not exists ultima_dificuldade text,
-  add column if not exists proxima_acao text;
+  add column if not exists proxima_acao text,
+  add column if not exists aguardando_retorno boolean not null default false;
+
+comment on column public.admin_acompanhamento_kanban.aguardando_retorno is
+  'true = o cliente está aguardando retorno no acompanhamento.';
 
 alter table public.admin_acompanhamento_kanban
   drop constraint if exists admin_acompanhamento_kanban_coluna_check;

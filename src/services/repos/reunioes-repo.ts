@@ -121,6 +121,24 @@ export async function listarReunioesDoCliente(clienteId: string): Promise<Reunia
   return ((data ?? []) as unknown as ReuniaoClienteRow[]).filter((row) => !row.avulsa);
 }
 
+/** Registros manuais no período. Pendência avulsa e resumo de IA ficam de fora. */
+export async function listarRegistrosManuaisNoPeriodo(inicio: string, fim: string): Promise<ReuniaoClienteRow[]> {
+  const { data, error } = await consultarReunioes('id,cliente_id,empresa_nome,assuntos,admin_email,created_at', (colunas) =>
+    supabase
+      .from('admin_cliente_reunioes')
+      .select(colunas)
+      .gte('created_at', inicio)
+      .lt('created_at', fim)
+      .order('created_at', { ascending: true })
+      .limit(2000),
+  );
+  if (error) {
+    if (/admin_cliente_reunioes|schema cache/i.test(error.message)) return [];
+    throw new Error(error.message);
+  }
+  return ((data ?? []) as unknown as ReuniaoClienteRow[]).filter((row) => !row.avulsa && !row.gerado_ia);
+}
+
 export async function listarReunioes(): Promise<ReuniaoClienteRow[]> {
   const { data, error } = await consultarReunioes(SELECT_REUNIAO, (colunas) =>
     supabase.from('admin_cliente_reunioes').select(colunas).order('data_retorno', { ascending: true }),

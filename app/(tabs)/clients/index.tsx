@@ -26,6 +26,7 @@ import {
 import { formatBRLFromCentavos, formatBRLFromReais, formatDateBR, formatYmdBR } from '@/src/utils/format';
 import {
   dataCancelamentoAssinatura,
+  dataVencimentoInadimplencia,
   isAssinaturaTrialExpirado,
   rotuloStatusAssinatura,
 } from '@/src/utils/assinatura-status';
@@ -140,6 +141,7 @@ export default function ClientsListScreen() {
           const statusAssinatura = rotuloStatusAssinatura(item.assinatura);
           const trialExpirado = isAssinaturaTrialExpirado(item.assinatura);
           const dataCancelamento = dataCancelamentoAssinatura(item.assinatura);
+          const dataVencimento = dataVencimentoInadimplencia(item.assinatura);
           const servicos = nomesServicosContratados(item, servicosQ.data);
 
           return (
@@ -181,6 +183,11 @@ export default function ClientsListScreen() {
                       >
                         Assinatura: {statusAssinatura} · Falhas: {item.cobrancas_falhas ?? 0}
                       </Text>
+                      {dataVencimento ? (
+                        <Text style={{ color: theme.warning, fontWeight: '700', fontSize: 13 }}>
+                          Venceu em: {formatYmdBR(dataVencimento)}
+                        </Text>
+                      ) : null}
                       {dataCancelamento ? (
                         <Text style={{ color: theme.error, fontWeight: '700', fontSize: 13 }}>
                           Cancelado em: {formatYmdBR(dataCancelamento)}

@@ -8,10 +8,10 @@ import {
 const CHUNK = 200;
 const SELECT_BASE = 'cliente_id,coluna,ordem,admin_email,updated_at';
 const SELECT_FICHA =
-  'ultima_reuniao,proxima_reuniao,pendencias_abertas,ultima_dificuldade,proxima_acao';
+  'ultima_reuniao,proxima_reuniao,pendencias_abertas,ultima_dificuldade,proxima_acao,aguardando_retorno';
 
 function faltaColunaFicha(message: string): boolean {
-  return /ultima_reuniao|proxima_reuniao|pendencias_abertas|ultima_dificuldade|proxima_acao|schema cache/i.test(
+  return /ultima_reuniao|proxima_reuniao|pendencias_abertas|ultima_dificuldade|proxima_acao|aguardando_retorno|schema cache/i.test(
     message,
   );
 }
@@ -119,4 +119,32 @@ export async function salvarFichaAcompanhamento(params: {
     throw new Error(error.message);
   }
   return data as unknown as AdminAcompanhamentoKanbanRow;
+}
+
+export async function definirAguardandoRetorno(params: {
+  clienteId: string;
+  coluna: AcompanhamentoColuna;
+  aguardando: boolean;
+  adminEmail?: string | null;
+}): Promise<void> {
+  if (!params.clienteId) throw new Error('Cliente inválido.');
+  if (!isAcompanhamentoColuna(params.coluna)) throw new Error('Coluna inválida.');
+  const { error } = await supabase
+    .from('admin_acompanhamento_kanban')
+    .upsert(
+      {
+        cliente_id: params.clienteId,
+        coluna: params.coluna,
+        aguardando_retorno: params.aguardando,
+        admin_email: params.adminEmail ?? null,
+        updated_at: new Date().toISOString(),
+      } as never,
+      { onConflict: 'cliente_id' },
+    );
+  if (error) {
+    if (/aguardando_retorno/i.test(error.message)) {
+      throw new Error('Execute supabase/sql/admin_acompanhamento_kanban.sql no Supabase para marcar aguardando retorno.');
+    }
+    throw new Error(error.message);
+  }
 }

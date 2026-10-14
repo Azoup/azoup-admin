@@ -40,7 +40,7 @@ import {
 } from '@/src/services/stripe-admin-api';
 import { enriquecerAcompanhamentoCliente, type AcompanhamentoCliente } from '@/src/utils/acompanhamento';
 import type { ClienteAzoupAdminView } from '@/src/types/azoup';
-import { dataCancelamentoAssinatura, rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
+import { dataCancelamentoAssinatura, dataVencimentoInadimplencia, rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
 import {
   dataHojeBrasil,
   formatBRLFromCentavos,
@@ -353,6 +353,7 @@ export default function ClientDetailScreen() {
   const congelado = Boolean(data.congelamento?.congelado);
   const precisaChamar = clientePrecisaChamar(data.congelamento);
   const dataCancelamento = dataCancelamentoAssinatura(data.assinatura);
+  const dataVencimento = dataVencimentoInadimplencia(data.assinatura);
   const cobranca = cobrancaQ.data?.cobranca;
 
   const rotuloDescontoCupom = (() => {
@@ -541,6 +542,7 @@ export default function ClientDetailScreen() {
           }
         />
         <Meta label="Status" value={rotuloStatusAssinatura(data.assinatura)} />
+        {dataVencimento ? <Meta label="Venceu em" value={formatYmdBR(dataVencimento)} /> : null}
         <Meta label="Início" value={formatDateBR(data.assinatura?.data_inicio)} />
         {dataCancelamento ? <Meta label="Cancelado em" value={formatYmdBR(dataCancelamento)} /> : null}
         <Meta label="Dias como assinante" value={String(data.dias_como_assinante ?? 0)} />

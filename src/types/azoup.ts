@@ -280,6 +280,7 @@ export interface AdminAcompanhamentoKanbanRow {
   pendencias_abertas?: number | null;
   ultima_dificuldade?: string | null;
   proxima_acao?: string | null;
+  aguardando_retorno?: boolean | null;
 }
 
 export interface AdminClienteCongelamentoRow {

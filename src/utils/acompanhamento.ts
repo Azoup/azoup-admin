@@ -44,6 +44,7 @@ export type AcompanhamentoCliente = {
   pendencias_abertas: number;
   ultima_dificuldade?: string | null;
   proxima_acao?: string | null;
+  aguardando_retorno?: boolean;
 };
 
 export const ACOMPANHAMENTO_COLUNAS: {

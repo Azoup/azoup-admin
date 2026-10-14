@@ -17,6 +17,7 @@ export type AssinaturaComStatus = {
   status?: string | null;
   trial_fim?: string | null;
   data_fim?: string | null;
+  periodo_inicio?: string | null;
   atualizado_em?: string | null;
 };
 
@@ -79,6 +80,12 @@ export function isAssinaturaCancelada(row?: AssinaturaComStatus | null): boolean
 export function dataCancelamentoAssinatura(row?: AssinaturaComStatus | null): string | null {
   if (!isAssinaturaCancelada(row)) return null;
   return dataCalendarioBrasil(row?.data_fim) ?? dataCalendarioBrasil(row?.atualizado_em) ?? null;
+}
+
+/** Dia em que a cobrança inadimplente venceu (início do período não pago). */
+export function dataVencimentoInadimplencia(row?: AssinaturaComStatus | null): string | null {
+  if (!isAssinaturaInadimplente(row)) return null;
+  return dataCalendarioBrasil(row?.periodo_inicio);
 }
 
 /** Rotulo amigavel para UI (trial vencido = "Inativo no trial"). */

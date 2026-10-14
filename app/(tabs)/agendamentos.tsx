@@ -33,6 +33,7 @@ import {
 } from '@/src/services/google-calendar-api';
 import { listarClientesParaSelecao } from '@/src/services/repos/conversas-repo';
 import { listarEventosAgendaCache, listarEventosSemCliente } from '@/src/services/repos/google-agendamentos-repo';
+import { listarRegistrosManuaisNoPeriodo } from '@/src/services/repos/reunioes-repo';
 import type { ClienteAzoupRow } from '@/src/types/azoup';
 import { descricaoTemHtml } from '@/src/utils/agenda-html';
 import { dataCalendarioBrasil, dataHojeBrasil, formatDateTimeBR, formatYmdBR, somarDiasYmd } from '@/src/utils/format';
@@ -298,6 +299,13 @@ export default function AgendamentosScreen() {
     enabled: canAccessScreen('agendamentos') && Boolean(statusQ.data?.connected),
   });
 
+  const registrosQ = useQuery({
+    queryKey: ['registros_reuniao_periodo', janela.inicio, janela.fim],
+    queryFn: () => listarRegistrosManuaisNoPeriodo(janela.inicio, janela.fim),
+    enabled: canAccessScreen('agendamentos') && Boolean(statusQ.data?.connected),
+    staleTime: 60_000,
+  });
+
   useEffect(() => {
     if (!statusQ.data?.connected) return;
     const chave = `${janela.inicio}|${janela.fim}|${statusQ.data.calendar_id ?? ''}`;
@@ -347,6 +355,38 @@ export default function AgendamentosScreen() {
   }, [eventosQ.data]);
 
   const doDia = porDia.get(diaSelecionado) ?? [];
+
+  const registrosPorClienteDia = useMemo(() => {
+    const map = new Map<string, { id: string; assuntos: string; autor: string; empresa: string }[]>();
+    for (const row of registrosQ.data ?? []) {
+      const clienteId = `${row.cliente_id ?? ''}`.trim();
+      const dia = dataCalendarioBrasil(row.created_at);
+      if (!clienteId || !dia) continue;
+      const lista = map.get(`${clienteId}|${dia}`) ?? [];
+      lista.push({
+        id: row.id,
+        assuntos: `${row.assuntos ?? ''}`.trim(),
+        autor: `${row.admin_email ?? ''}`.trim(),
+        empresa: `${row.empresa_nome ?? ''}`.trim(),
+      });
+      map.set(`${clienteId}|${dia}`, lista);
+    }
+    return map;
+  }, [registrosQ.data]);
+
+  const clientesNoDia = useMemo(
+    () => new Set(doDia.map((ev) => ev.cliente_id).filter((id): id is string => Boolean(id))),
+    [doDia],
+  );
+  const registrosSemEvento = useMemo(() => {
+    const soltos: { id: string; assuntos: string; autor: string; empresa: string }[] = [];
+    for (const [chave, lista] of registrosPorClienteDia) {
+      const [clienteId, dia] = chave.split('|');
+      if (dia !== diaSelecionado || clientesNoDia.has(clienteId)) continue;
+      soltos.push(...lista);
+    }
+    return soltos;
+  }, [registrosPorClienteDia, diaSelecionado, clientesNoDia]);
 
   const conectar = useMutation({
     mutationFn: iniciarOAuthGoogle,
@@ -623,11 +663,19 @@ export default function AgendamentosScreen() {
               <Text style={{ color: theme.error, fontWeight: '700' }}>
                 {eventosQ.error instanceof Error ? eventosQ.error.message : 'Erro ao carregar a agenda'}
               </Text>
-            ) : doDia.length === 0 ? (
+            ) : doDia.length === 0 && registrosSemEvento.length === 0 ? (
               <Text style={{ color: theme.textMuted }}>Nenhum agendamento neste dia.</Text>
             ) : (
-              doDia.map((ev) => (
-                <ScreenCard key={ev.id} style={{ gap: 6 }}>
+              <>
+              {doDia.map((ev) => {
+                const registros = ev.cliente_id ? (registrosPorClienteDia.get(`${ev.cliente_id}|${diaSelecionado}`) ?? []) : [];
+                const passou = Date.parse(ev.inicio) < Date.now();
+                const semRegistro = passou && registros.length === 0;
+                return (
+                <ScreenCard
+                  key={ev.id}
+                  style={{ gap: 6, borderColor: semRegistro ? theme.warning : theme.border }}
+                >
                   <View style={styles.rowBetween}>
                     <Text style={{ color: theme.headerText, fontWeight: '800', flex: 1 }}>{ev.titulo}</Text>
                     <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -675,8 +723,38 @@ export default function AgendamentosScreen() {
                       <Text style={{ color: theme.textMuted, fontSize: 11 }}>Desvincular</Text>
                     </Pressable>
                   ) : null}
+                  {semRegistro ? (
+                    <Text style={{ color: theme.warning, fontWeight: '800', fontSize: 12 }}>Sem registro</Text>
+                  ) : null}
+                  {registros.length > 0 ? (
+                    <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Com registro</Text>
+                  ) : null}
+                  {registros.map((registro) => (
+                    <View key={registro.id} style={{ gap: 2 }}>
+                      <Text style={{ color: theme.text, fontSize: 13 }}>
+                        {registro.assuntos || 'Registro da reunião'}
+                      </Text>
+                      {registro.autor ? (
+                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>Registrado por {registro.autor}</Text>
+                      ) : null}
+                    </View>
+                  ))}
                 </ScreenCard>
-              ))
+                );
+              })}
+              {registrosSemEvento.map((registro) => (
+                <ScreenCard key={registro.id} style={{ gap: 4, borderColor: theme.cadastroAction }}>
+                  <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Com registro</Text>
+                  <Text style={{ color: theme.headerText, fontWeight: '800' }}>
+                    {registro.empresa || 'Registro da reunião'}
+                  </Text>
+                  <Text style={{ color: theme.text, fontSize: 13 }}>{registro.assuntos || 'Registro da reunião'}</Text>
+                  {registro.autor ? (
+                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>Registrado por {registro.autor}</Text>
+                  ) : null}
+                </ScreenCard>
+              ))}
+              </>
             )}
             </View>
             <View

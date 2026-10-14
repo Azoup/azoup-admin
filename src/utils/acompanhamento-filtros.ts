@@ -2,12 +2,14 @@ export type FiltrosAcompanhamento = {
   busca: string;
   filtroAlerta: boolean;
   filtroSemReuniao: boolean;
+  filtroAguardandoRetorno: boolean;
 };
 
 const VAZIO: FiltrosAcompanhamento = {
   busca: '',
   filtroAlerta: false,
   filtroSemReuniao: false,
+  filtroAguardandoRetorno: false,
 };
 
 const CHAVE = 'acompanhamento_filtros';
@@ -24,6 +26,7 @@ function lerSessao(): FiltrosAcompanhamento | null {
       busca: `${json.busca ?? ''}`,
       filtroAlerta: Boolean(json.filtroAlerta),
       filtroSemReuniao: Boolean(json.filtroSemReuniao),
+      filtroAguardandoRetorno: Boolean(json.filtroAguardandoRetorno),
     };
   } catch {
     return null;

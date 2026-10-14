@@ -52,7 +52,7 @@ import {
   type ResumoReunioesCliente,
   type ReuniaoClienteRow,
 } from '@/src/services/repos/reunioes-repo';
-import { moverClienteKanban, salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
+import { definirAguardandoRetorno, moverClienteKanban, salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
 import { lerFiltrosAcompanhamento, salvarFiltrosAcompanhamento } from '@/src/utils/acompanhamento-filtros';
 import {
   ACOMPANHAMENTO_COLUNAS,
@@ -1800,6 +1800,8 @@ function KanbanCard({
   onRegistrarReuniao,
   onEditarFicha,
   onAbrirMover,
+  onMarcarRetorno,
+  marcandoRetorno,
   onArrastar,
   onSoltar,
 }: {
@@ -1817,6 +1819,8 @@ function KanbanCard({
   onRegistrarReuniao: () => void;
   onEditarFicha: () => void;
   onAbrirMover: () => void;
+  onMarcarRetorno: () => void;
+  marcandoRetorno?: boolean;
   onArrastar: (x: number, y: number) => void;
   onSoltar: (x: number, y: number) => void;
 }) {
@@ -1844,7 +1848,7 @@ function KanbanCard({
         styles.card,
         {
           backgroundColor: theme.surface,
-          borderColor: theme.border,
+          borderColor: item.aguardando_retorno ? theme.warning : theme.border,
         },
       ]}
     >
@@ -1893,6 +1897,11 @@ function KanbanCard({
             {mensagemAutomatica ? (
               <Text style={{ color: theme.cadastroAction, fontSize: 11, fontWeight: '800', marginTop: 4 }}>
                 Mensagem automática enviada
+              </Text>
+            ) : null}
+            {item.aguardando_retorno ? (
+              <Text style={{ color: theme.warning, fontSize: 11, fontWeight: '800', marginTop: 4 }}>
+                Aguardando retorno
               </Text>
             ) : null}
           </View>
@@ -1985,6 +1994,15 @@ function KanbanCard({
       <Pressable onPress={onEditarFicha} hitSlop={6}>
         <Text style={{ color: theme.cadastroAction, fontWeight: '700', fontSize: 12 }}>Editar ficha</Text>
       </Pressable>
+      <Pressable onPress={onMarcarRetorno} disabled={marcandoRetorno} hitSlop={6}>
+        <Text style={{ color: theme.warning, fontWeight: '800', fontSize: 12 }}>
+          {marcandoRetorno
+            ? 'Salvando…'
+            : item.aguardando_retorno
+              ? 'Tirar aguardando retorno'
+              : 'Marcar aguardando retorno'}
+        </Text>
+      </Pressable>
 
       <Pressable
         onPress={onRegistrarConversa}
@@ -2025,6 +2043,8 @@ function KanbanColumn({
   onRegistrarReuniao,
   onEditarFicha,
   onAbrirMover,
+  onMarcarRetorno,
+  marcandoRetornoId,
   onArrastar,
   onSoltar,
   resumoReunioes,
@@ -2047,6 +2067,8 @@ function KanbanColumn({
   onRegistrarReuniao: (c: AcompanhamentoCliente) => void;
   onEditarFicha: (c: AcompanhamentoCliente) => void;
   onAbrirMover: (c: AcompanhamentoCliente) => void;
+  onMarcarRetorno: (c: AcompanhamentoCliente) => void;
+  marcandoRetornoId?: string | null;
   onArrastar: (c: AcompanhamentoCliente, x: number, y: number) => void;
   onSoltar: (c: AcompanhamentoCliente, x: number, y: number) => void;
 }) {
@@ -2096,6 +2118,8 @@ function KanbanColumn({
               onRegistrarReuniao={() => onRegistrarReuniao(item)}
               onEditarFicha={() => onEditarFicha(item)}
               onAbrirMover={() => onAbrirMover(item)}
+              onMarcarRetorno={() => onMarcarRetorno(item)}
+              marcandoRetorno={marcandoRetornoId === item.id}
               onArrastar={(x, y) => onArrastar(item, x, y)}
               onSoltar={(x, y) => onSoltar(item, x, y)}
             />
@@ -2115,9 +2139,10 @@ export default function AcompanhamentoScreen() {
   const [busca, setBusca] = useState(filtrosIniciais.current.busca);
   const [filtroAlerta, setFiltroAlerta] = useState(filtrosIniciais.current.filtroAlerta);
   const [filtroSemReuniao, setFiltroSemReuniao] = useState(filtrosIniciais.current.filtroSemReuniao);
+  const [filtroAguardandoRetorno, setFiltroAguardandoRetorno] = useState(filtrosIniciais.current.filtroAguardandoRetorno);
   useEffect(() => {
-    salvarFiltrosAcompanhamento({ busca, filtroAlerta, filtroSemReuniao });
-  }, [busca, filtroAlerta, filtroSemReuniao]);
+    salvarFiltrosAcompanhamento({ busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno });
+  }, [busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno]);
   const [alturaSlot, setAlturaSlot] = useState(0);
   const alturaColuna = Math.max(alturaSlot - 12 - FOLGA_BARRA_HORIZONTAL, 0);
   const [clientePendencias, setClientePendencias] = useState<AcompanhamentoCliente | null>(null);
@@ -2250,11 +2275,12 @@ export default function AcompanhamentoScreen() {
         if (!matchBusca(c, busca)) return false;
         if (filtroAlerta && !contatoAtrasado(contatos?.get(c.id) ?? null, alertas?.[col.key] ?? 7)) return false;
         if (filtroSemReuniao && temProximaReuniao(c, google?.get(c.id), hoje)) return false;
+        if (filtroAguardandoRetorno && !c.aguardando_retorno) return false;
         return true;
       });
     }
     return out;
-  }, [q.data, busca, filtroAlerta, filtroSemReuniao, contatosComChamado, alertaQ.data, googleProximasQ.data]);
+  }, [q.data, busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno, contatosComChamado, alertaQ.data, googleProximasQ.data]);
 
   const adminEmail = adminProfile?.email ?? session?.user?.email ?? null;
 
@@ -2344,6 +2370,39 @@ export default function AcompanhamentoScreen() {
     },
   });
 
+  const retornoMutation = useMutation({
+    mutationFn: async (cliente: AcompanhamentoCliente) =>
+      definirAguardandoRetorno({
+        clienteId: cliente.id,
+        coluna: cliente.coluna,
+        aguardando: !cliente.aguardando_retorno,
+        adminEmail,
+      }),
+    onMutate: async (cliente) => {
+      setErroMove(null);
+      await qc.cancelQueries({ queryKey: ['acompanhamento_clientes'] });
+      const prev = qc.getQueryData<Board>(['acompanhamento_clientes']);
+      if (prev) {
+        qc.setQueryData(
+          ['acompanhamento_clientes'],
+          recomporBoard(
+            prev.clientes.map((c) =>
+              c.id === cliente.id ? { ...c, aguardando_retorno: !cliente.aguardando_retorno } : c,
+            ),
+          ),
+        );
+      }
+      return { prev };
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['acompanhamento_clientes'], ctx.prev);
+      setErroMove(e instanceof Error ? e.message : 'Erro ao marcar aguardando retorno');
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+    },
+  });
+
   if (!canAccessScreen('acompanhamento')) {
     return (
       <View style={{ flex: 1, padding: 16, backgroundColor: theme.background }}>
@@ -2383,6 +2442,11 @@ export default function AcompanhamentoScreen() {
             label="Sem próxima reunião"
             ativo={filtroSemReuniao}
             onPress={() => setFiltroSemReuniao((atual) => !atual)}
+          />
+          <FiltroChip
+            label="Aguardando retorno"
+            ativo={filtroAguardandoRetorno}
+            onPress={() => setFiltroAguardandoRetorno((atual) => !atual)}
           />
           <Pressable
             disabled={resumosMutation.isPending}
@@ -2470,6 +2534,8 @@ export default function AcompanhamentoScreen() {
                 setClienteFicha(c);
               }}
               onAbrirMover={setClienteMover}
+              onMarcarRetorno={(cliente) => retornoMutation.mutate(cliente)}
+              marcandoRetornoId={retornoMutation.isPending ? retornoMutation.variables?.id : null}
               onArrastar={(item, x, y) => {
                 posicaoArraste.current = { x, y };
                 posicionarFantasma(fantasmaRef.current, x, y, true);
