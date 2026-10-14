@@ -51,6 +51,7 @@ export default function AppLayout() {
         <Stack.Screen name="acompanhamento" />
         <Stack.Screen name="pendencias" />
         <Stack.Screen name="agendamentos" />
+        <Stack.Screen name="kanban-confec" />
         <Stack.Screen name="conversas" />
         <Stack.Screen name="billing" />
         <Stack.Screen name="audit" />

@@ -34,8 +34,10 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.filter((screen) => 
             ? '/(tabs)/acompanhamento'
             : screen.key === 'pendencias'
               ? '/(tabs)/pendencias'
-              : screen.key === 'agendamentos'
-                ? '/(tabs)/agendamentos'
+            : screen.key === 'agendamentos'
+              ? '/(tabs)/agendamentos'
+              : screen.key === 'kanban_confec'
+                ? '/(tabs)/kanban-confec'
               : `/(tabs)/${screen.key}`;
 
   const icon: ComponentProps<typeof FontAwesome>['name'] =
@@ -49,6 +51,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.filter((screen) => 
             ? 'tasks'
             : screen.key === 'agendamentos'
               ? 'calendar'
+              : screen.key === 'kanban_confec'
+                ? 'scissors'
             : screen.key === 'conversas'
             ? 'comments'
             : screen.key === 'billing'
@@ -69,6 +73,7 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.filter((screen) => 
     screen.key === 'acompanhamento' ||
     screen.key === 'pendencias' ||
     screen.key === 'agendamentos' ||
+    screen.key === 'kanban_confec' ||
     screen.key === 'conversas'
       ? 'visao'
       : screen.key === 'billing' || screen.key === 'marketing' || screen.key === 'audit'

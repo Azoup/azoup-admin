@@ -25,6 +25,7 @@ export function podeAcessarTelaAdmin(
 ): boolean {
   const def = telasEfetivasAdmin(profile, papel);
   if (tela === 'pendencias' && def.includes('acompanhamento')) return true;
+  if (tela === 'kanban_confec' && papel === 'owner') return true;
   if (!def.includes(tela)) return false;
   if (tela === 'admins') return papel === 'owner';
   return true;
