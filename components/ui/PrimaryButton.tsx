@@ -7,9 +7,10 @@ type Props = PressableProps & {
   label: string;
   loading?: boolean;
   variant?: 'action' | 'danger';
+  compact?: boolean;
 };
 
-export function PrimaryButton({ label, loading, disabled, variant = 'action', style, ...rest }: Props) {
+export function PrimaryButton({ label, loading, disabled, variant = 'action', compact, style, ...rest }: Props) {
   const { theme } = useTheme();
   const styles = useMemo(() => getStyles(theme), [theme]);
   const bg = variant === 'danger' ? theme.error : theme.cadastroAction;
@@ -18,6 +19,7 @@ export function PrimaryButton({ label, loading, disabled, variant = 'action', st
     <Pressable
       style={({ pressed }) => [
         styles.btn,
+        compact && styles.compact,
         { backgroundColor: bg, opacity: disabled || loading ? 0.55 : pressed ? 0.9 : 1 },
         style,
       ]}
@@ -26,7 +28,7 @@ export function PrimaryButton({ label, loading, disabled, variant = 'action', st
       {loading ? (
         <ActivityIndicator color={theme.cadastroActionText} />
       ) : (
-        <Text style={[styles.label, { color: theme.cadastroActionText }]}>{label}</Text>
+        <Text style={[styles.label, compact && styles.compactLabel, { color: theme.cadastroActionText }]}>{label}</Text>
       )}
     </Pressable>
   );
@@ -42,6 +44,8 @@ function getStyles(theme: ReturnType<typeof useTheme>['theme']) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    compact: { minHeight: 32, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
     label: { fontWeight: '800', fontSize: 15 },
+    compactLabel: { fontSize: 13 },
   });
 }

@@ -1,14 +1,13 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { createElement, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
 import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
 import { FormSelect } from '@/components/ui/FormSelect';
-import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
@@ -61,6 +60,71 @@ import { abrirPdfConcluidosConfec } from '@/src/utils/pdf-kanban-confec';
 const SCROLL = '[data-kanban-scroll="confec"]';
 const CORES = ['#94A3B8', '#4C9AFF', '#F5C542', '#22C55E', '#F07167', '#A78BFA', '#10b981'];
 const VAZIO = '__nenhum__';
+const PERIODOS: Periodo[] = ['ordem', 'recentes', 'antigos', 'mes', '7dias', 'intervalo'];
+const ROTULO_PERIODO: Record<Periodo, string> = {
+  ordem: 'Ordem do quadro',
+  recentes: 'Mais recentes',
+  antigos: 'Mais antigos',
+  mes: 'Mês atual',
+  '7dias': 'Últimos 7 dias',
+  intervalo: 'Intervalo',
+};
+
+function normalizarCor(valor: string): string {
+  const limpo = valor.trim();
+  const cheio = /^#?([0-9a-fA-F]{6})$/.exec(limpo);
+  if (cheio) return `#${cheio[1]}`;
+  const curto = /^#?([0-9a-fA-F]{3})$/.exec(limpo);
+  if (!curto) return '';
+  const [r, g, b] = curto[1].split('');
+  return `#${r}${r}${g}${g}${b}${b}`;
+}
+
+function SeletorCor({ cor, onChange }: { cor: string; onChange: (valor: string) => void }) {
+  const { theme } = useTheme();
+  const hex = normalizarCor(cor) || '#4C9AFF';
+  return (
+    <View style={{ gap: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {Platform.OS === 'web'
+          ? createElement('input', {
+              type: 'color',
+              value: hex,
+              'aria-label': 'Escolher cor',
+              onInput: (event: Event) => onChange((event.target as HTMLInputElement).value),
+              style: { width: 36, height: 32, padding: 0, border: 'none', background: 'transparent', cursor: 'pointer' },
+            })
+          : null}
+        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: hex, borderWidth: 1, borderColor: theme.border }} />
+        <FormInput
+          value={cor}
+          onChangeText={onChange}
+          placeholder="#4C9AFF"
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={{ flex: 1 }}
+        />
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {CORES.map((item) => (
+          <Pressable
+            key={item}
+            onPress={() => onChange(item)}
+            accessibilityLabel={item}
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 11,
+              backgroundColor: item,
+              borderWidth: hex.toLowerCase() === item.toLowerCase() ? 2 : 0,
+              borderColor: theme.headerText,
+            }}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
 
 type Periodo = 'ordem' | 'recentes' | 'antigos' | 'mes' | '7dias' | 'intervalo';
 
@@ -498,17 +562,14 @@ export default function KanbanConfecScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
-      <ScrollView style={styles.filtros} contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 12 }}>
-        <PageHeader
-          title="Kanban Confec"
-          subtitle="Tickets da confecção. Cliente é opcional. O responsável e quem criou são logins do painel."
-        />
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+      <View style={styles.filtros}>
+        <View style={styles.barra}>
+          <Text style={{ color: theme.headerText, fontWeight: '900', fontSize: 18 }}>Kanban Confec</Text>
           <Pressable onPress={() => setPdfAberto(true)} style={[styles.btn, { borderColor: theme.border }]}>
-            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 12 }}>PDF concluídos</Text>
+            <Text style={[styles.btnTexto, { color: theme.headerText }]}>PDF concluídos</Text>
           </Pressable>
           <Pressable onPress={() => setEtiquetasAbertas(true)} style={[styles.btn, { borderColor: theme.border }]}>
-            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 12 }}>Etiquetas</Text>
+            <Text style={[styles.btnTexto, { color: theme.headerText }]}>Etiquetas</Text>
           </Pressable>
           <Pressable
             onPress={() => {
@@ -518,81 +579,61 @@ export default function KanbanConfecScreen() {
             }}
             style={[styles.btn, { borderColor: theme.cadastroAction }]}
           >
-            <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Adicionar lista</Text>
+            <Text style={[styles.btnTexto, { color: theme.cadastroAction }]}>Nova lista</Text>
           </Pressable>
-        </View>
-        <FormInput value={busca} onChangeText={setBusca} placeholder="Buscar número, cliente, título ou observação" />
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          {(
-            [
-              ['ordem', 'Ordem do quadro'],
-              ['recentes', 'Mais recentes'],
-              ['antigos', 'Mais antigos'],
-              ['mes', 'Mês atual'],
-              ['7dias', 'Últimos 7 dias'],
-              ['intervalo', 'Intervalo'],
-            ] as [Periodo, string][]
-          ).map(([valor, rotuloPeriodo]) => (
-            <Pressable
-              key={valor}
-              onPress={() => setPeriodo(valor)}
-              style={[styles.btn, { borderColor: periodo === valor ? theme.cadastroAction : theme.border, backgroundColor: periodo === valor ? theme.cadastroAction : 'transparent' }]}
-            >
-              <Text style={{ color: periodo === valor ? theme.cadastroActionText : theme.text, fontWeight: '700', fontSize: 12 }}>
-                {rotuloPeriodo}
-              </Text>
-            </Pressable>
-          ))}
+          <View style={{ flex: 1.4, minWidth: 180 }}>
+            <FormInput value={busca} onChangeText={setBusca} placeholder="Buscar número, cliente ou título" />
+          </View>
+          <View style={{ width: 168 }}>
+            <FormSelect options={PERIODOS} value={periodo} onChange={setPeriodo} labels={ROTULO_PERIODO} />
+          </View>
+          <View style={{ width: 168 }}>
+            <FormSelect
+              options={emails}
+              value={analista || VAZIO}
+              onChange={(valor) => setAnalista(valor === VAZIO ? '' : valor)}
+              labels={{ [VAZIO]: 'Analista' }}
+            />
+          </View>
+          <View style={{ width: 180 }}>
+            <FormSelect
+              options={emails}
+              value={desenvolvedor || VAZIO}
+              onChange={(valor) => setDesenvolvedor(valor === VAZIO ? '' : valor)}
+              labels={{ [VAZIO]: 'Desenvolvedor' }}
+            />
+          </View>
         </View>
         {periodo === 'intervalo' ? (
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <View style={{ flex: 1 }}>
-              <FormField label="De">
-                <FormDateInput value={de} onChange={setDe} />
-              </FormField>
+            <View style={{ width: 160 }}>
+              <FormDateInput value={de} onChange={setDe} />
             </View>
-            <View style={{ flex: 1 }}>
-              <FormField label="Até">
-                <FormDateInput value={ate} onChange={setAte} />
-              </FormField>
+            <View style={{ width: 160 }}>
+              <FormDateInput value={ate} onChange={setAte} />
             </View>
           </View>
         ) : null}
-        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-          <View style={{ minWidth: 180, flex: 1 }}>
-            <FormField label="Analista">
-              <FormSelect options={emails} value={analista || VAZIO} onChange={(valor) => setAnalista(valor === VAZIO ? '' : valor)} labels={{ [VAZIO]: 'Todos' }} />
-            </FormField>
+        {(quadro?.etiquetas.length ?? 0) > 0 ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {(quadro?.etiquetas ?? []).map((etiqueta) => {
+              const ativa = etiquetaFiltro.includes(etiqueta.id);
+              return (
+                <Pressable
+                  key={etiqueta.id}
+                  onPress={() => setEtiquetaFiltro((atual) => (ativa ? atual.filter((id) => id !== etiqueta.id) : [...atual, etiqueta.id]))}
+                  style={[styles.btn, { borderColor: etiqueta.color, backgroundColor: ativa ? etiqueta.color : 'transparent' }]}
+                >
+                  <Text style={{ color: ativa ? '#1A1408' : etiqueta.color, fontWeight: '800', fontSize: 11 }}>{etiqueta.name}</Text>
+                </Pressable>
+              );
+            })}
           </View>
-          <View style={{ minWidth: 180, flex: 1 }}>
-            <FormField label="Desenvolvedor">
-              <FormSelect
-                options={emails}
-                value={desenvolvedor || VAZIO}
-                onChange={(valor) => setDesenvolvedor(valor === VAZIO ? '' : valor)}
-                labels={{ [VAZIO]: 'Todos' }}
-              />
-            </FormField>
-          </View>
-        </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-          {(quadro?.etiquetas ?? []).map((etiqueta) => {
-            const ativa = etiquetaFiltro.includes(etiqueta.id);
-            return (
-              <Pressable
-                key={etiqueta.id}
-                onPress={() => setEtiquetaFiltro((atual) => (ativa ? atual.filter((id) => id !== etiqueta.id) : [...atual, etiqueta.id]))}
-                style={[styles.btn, { borderColor: etiqueta.color, backgroundColor: ativa ? etiqueta.color : 'transparent' }]}
-              >
-                <Text style={{ color: ativa ? '#1A1408' : etiqueta.color, fontWeight: '800', fontSize: 12 }}>{etiqueta.name}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        ) : null}
         {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
         {quadroQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
         {quadroQ.error ? <Text style={{ color: theme.error }}>{(quadroQ.error as Error).message}</Text> : null}
-      </ScrollView>
+      </View>
       <ScrollView
         horizontal
         style={styles.quadro}
@@ -746,6 +787,7 @@ export default function KanbanConfecScreen() {
                 ))}
                 <FormInput value={checklistTexto} onChangeText={setChecklistTexto} placeholder="Novo item do checklist" />
                 <PrimaryButton
+                  compact
                   label="Adicionar item"
                   onPress={() =>
                     adicionarChecklistConfec(detalhe.id, checklistTexto)
@@ -774,18 +816,22 @@ export default function KanbanConfecScreen() {
                   </View>
                 ))}
                 <FormInput value={comentario} onChangeText={setComentario} placeholder="Comentário" />
-                <PrimaryButton
-                  label="Comentar"
-                  onPress={() =>
-                    adicionarComentarioConfec(detalhe.id, comentario, email)
-                      .then(() => {
-                        setComentario('');
-                        void qc.invalidateQueries({ queryKey: ['confec_kanban'] });
-                      })
-                      .catch((e) => setErro(e instanceof Error ? e.message : 'Erro no comentário'))
-                  }
-                />
-                <PrimaryButton label="Editar" onPress={() => abrirEdicao(detalhe)} />
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <PrimaryButton
+                    compact
+                    label="Comentar"
+                    style={{ flex: 1 }}
+                    onPress={() =>
+                      adicionarComentarioConfec(detalhe.id, comentario, email)
+                        .then(() => {
+                          setComentario('');
+                          void qc.invalidateQueries({ queryKey: ['confec_kanban'] });
+                        })
+                        .catch((e) => setErro(e instanceof Error ? e.message : 'Erro no comentário'))
+                    }
+                  />
+                  <PrimaryButton compact label="Editar" style={{ flex: 1 }} onPress={() => abrirEdicao(detalhe)} />
+                </View>
                 {canDeleteRecords ? (
                   <Pressable
                     onPress={() =>
@@ -905,22 +951,26 @@ export default function KanbanConfecScreen() {
               </View>
             ))}
             <FormInput value={nomeEtiqueta} onChangeText={setNomeEtiqueta} placeholder="Nome da etiqueta" />
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              {CORES.map((cor) => (
-                <Pressable key={cor} onPress={() => setCorEtiqueta(cor)} style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: cor, borderWidth: corEtiqueta === cor ? 2 : 0, borderColor: theme.headerText }} />
-              ))}
-            </View>
+            <SeletorCor cor={corEtiqueta} onChange={setCorEtiqueta} />
+            {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
             <PrimaryButton
               label={etiquetaEdit ? 'Salvar etiqueta' : 'Criar etiqueta'}
-              onPress={() =>
-                salvarEtiquetaConfec({ id: etiquetaEdit?.id, name: nomeEtiqueta, color: corEtiqueta })
+              onPress={() => {
+                const cor = normalizarCor(corEtiqueta);
+                if (!cor) {
+                  setErro('Escolha uma cor no formato #RRGGBB.');
+                  return;
+                }
+                void salvarEtiquetaConfec({ id: etiquetaEdit?.id, name: nomeEtiqueta, color: cor })
                   .then(() => {
                     setNomeEtiqueta('');
                     setEtiquetaEdit(null);
+                    setCorEtiqueta(cor);
+                    setErro(null);
                     void qc.invalidateQueries({ queryKey: ['confec_kanban'] });
                   })
-                  .catch((e) => setErro(e instanceof Error ? e.message : 'Erro na etiqueta'))
-              }
+                  .catch((e) => setErro(e instanceof Error ? e.message : 'Erro na etiqueta'));
+              }}
             />
           </View>
         </View>
@@ -932,15 +982,17 @@ export default function KanbanConfecScreen() {
           <View style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border, width: '100%', maxWidth: 420 }]}>
             <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 18 }}>{colunaEdit ? 'Editar lista' : 'Nova lista'}</Text>
             <FormInput value={nomeLista} onChangeText={setNomeLista} placeholder="Nome" />
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              {CORES.map((cor) => (
-                <Pressable key={cor} onPress={() => setCorLista(cor)} style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: cor, borderWidth: corLista === cor ? 2 : 0, borderColor: theme.headerText }} />
-              ))}
-            </View>
+            <SeletorCor cor={corLista} onChange={setCorLista} />
+            {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
             <PrimaryButton
               label="Salvar lista"
               onPress={() => {
-                const acao = colunaEdit ? atualizarColunaConfec(colunaEdit.id, nomeLista, corLista) : criarColunaConfec(nomeLista, corLista);
+                const cor = normalizarCor(corLista);
+                if (!cor) {
+                  setErro('Escolha uma cor no formato #RRGGBB.');
+                  return;
+                }
+                const acao = colunaEdit ? atualizarColunaConfec(colunaEdit.id, nomeLista, cor) : criarColunaConfec(nomeLista, cor);
                 void acao
                   .then(() => {
                     setNovaLista(false);
@@ -1018,9 +1070,11 @@ export default function KanbanConfecScreen() {
 }
 
 const styles = StyleSheet.create({
-  filtros: { flexGrow: 0, flexShrink: 0, maxHeight: 340 },
+  filtros: { flexGrow: 0, flexShrink: 0, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8, gap: 8, zIndex: 5 },
+  barra: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   quadro: { flex: 1, minHeight: 0 },
-  btn: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  btn: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  btnTexto: { fontWeight: '800', fontSize: 12 },
   coluna: { width: 300, minHeight: 420, height: '100%', borderWidth: 1, borderTopWidth: 4, borderRadius: 12, padding: 10 },
   miniatura: { width: 72, height: 52, borderRadius: 8, backgroundColor: '#111' },
   lightbox: { width: '92%', height: '82%' },
