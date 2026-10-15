@@ -28,20 +28,30 @@ export async function listarEventosAgendaCache(inicio: string, fim: string, cale
     .filter((ev) => `${ev.status ?? ''}` !== 'cancelled');
 }
 
-/** Agendamentos ainda sem cliente, do mais próximo para os passados. */
+/** A lista Sem cliente começa neste dia e segue para frente. */
+export const AGENDA_DESDE_JULHO_2026 = '2026-07-01T00:00:00-03:00';
+
+/** Agendamentos ainda sem cliente, de julho de 2026 em diante. */
 export async function listarEventosSemCliente(): Promise<GoogleAgendaEvento[]> {
-  const { data, error } = await supabase
-    .from('admin_google_agendamentos')
-    .select('id,google_event_id,calendar_id,titulo,descricao,inicio,fim,status,cliente_id,match_tipo,participantes')
-    .is('cliente_id', null)
-    .order('inicio', { ascending: true })
-    .limit(300);
-  if (error) {
-    if (/admin_google_agendamentos|schema cache|does not exist/i.test(error.message)) return [];
-    throw new Error(error.message);
+  const pagina = 500;
+  const lista: GoogleAgendaEvento[] = [];
+  for (let from = 0; from < 4000; from += pagina) {
+    const { data, error } = await supabase
+      .from('admin_google_agendamentos')
+      .select('id,google_event_id,calendar_id,titulo,descricao,inicio,fim,status,cliente_id,match_tipo,participantes')
+      .is('cliente_id', null)
+      .gte('inicio', AGENDA_DESDE_JULHO_2026)
+      .order('inicio', { ascending: true })
+      .range(from, from + pagina - 1);
+    if (error) {
+      if (/admin_google_agendamentos|schema cache|does not exist/i.test(error.message)) return [];
+      throw new Error(error.message);
+    }
+    const rows = ((data ?? []) as GoogleAgendaEvento[]).filter((ev) => `${ev.status ?? ''}` !== 'cancelled');
+    lista.push(...rows);
+    if ((data ?? []).length < pagina) break;
   }
   const agora = Date.now();
-  const lista = ((data ?? []) as GoogleAgendaEvento[]).filter((ev) => `${ev.status ?? ''}` !== 'cancelled');
   const futuros = lista.filter((ev) => Date.parse(ev.inicio) >= agora);
   const passados = lista.filter((ev) => Date.parse(ev.inicio) < agora).reverse();
   return [...futuros, ...passados];

@@ -891,7 +891,7 @@ async function syncEvents(
   supabaseAdmin: ReturnType<typeof createClient>,
   accessToken: string,
   calendarId: string,
-  timeMin = new Date(Date.now() - 30 * 86_400_000).toISOString(),
+  timeMin = '2026-07-01T00:00:00-03:00',
   timeMax = new Date(Date.now() + 90 * 86_400_000).toISOString(),
 ) {
   const emailMap = await loadEmailMap(supabaseAdmin);
