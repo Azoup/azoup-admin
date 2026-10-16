@@ -33,9 +33,16 @@ export default function NotasAtualizacaoScreen() {
   const [de, setDe] = useState(`${dataHojeBrasil().slice(0, 7)}-01`);
   const [ate, setAte] = useState(dataHojeBrasil());
   const [detalhe, setDetalhe] = useState<ConfecCard | null>(null);
+  const [editando, setEditando] = useState(false);
   const [editLinha, setEditLinha] = useState('');
   const [editDetalhe, setEditDetalhe] = useState('');
   const [erro, setErro] = useState<string | null>(null);
+
+  const fecharDetalhe = () => {
+    setDetalhe(null);
+    setEditando(false);
+    setErro(null);
+  };
 
   const q = useQuery({
     queryKey: ['confec_notas_publicadas'],
@@ -83,7 +90,10 @@ export default function NotasAtualizacaoScreen() {
     },
     onSuccess: () => {
       setErro(null);
-      setDetalhe(null);
+      setEditando(false);
+      setDetalhe((atual) =>
+        atual ? { ...atual, nota_linha: editLinha.trim(), nota_detalhe: editDetalhe.trim() } : null,
+      );
       void qc.invalidateQueries({ queryKey: ['confec_notas_publicadas'] });
       void qc.invalidateQueries({ queryKey: ['confec_kanban'] });
     },
@@ -104,6 +114,11 @@ export default function NotasAtualizacaoScreen() {
       if (nota) {
         setEditLinha(nota.linha);
         setEditDetalhe(nota.detalhe);
+        setDetalhe((atual) =>
+          atual
+            ? { ...atual, nota_linha: nota.linha, nota_detalhe: nota.detalhe, nota_gerada_em: nota.nota_gerada_em ?? atual.nota_gerada_em }
+            : null,
+        );
       }
       setErro(null);
       void qc.invalidateQueries({ queryKey: ['confec_notas_publicadas'] });
@@ -160,6 +175,7 @@ export default function NotasAtualizacaoScreen() {
                 key={card.id}
                 onPress={() => {
                   setDetalhe(card);
+                  setEditando(false);
                   setEditLinha(card.nota_linha ?? '');
                   setEditDetalhe(card.nota_detalhe ?? '');
                   setErro(null);
@@ -204,9 +220,9 @@ export default function NotasAtualizacaoScreen() {
         ))}
       </ScrollView>
 
-      <Modal visible={detalhe != null} animationType="fade" transparent onRequestClose={() => setDetalhe(null)}>
+      <Modal visible={detalhe != null} animationType="fade" transparent onRequestClose={fecharDetalhe}>
         <View style={styles.overlay}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setDetalhe(null)} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={fecharDetalhe} />
           {detalhe ? (
             <ScrollView style={styles.modal} keyboardShouldPersistTaps="handled">
               <View style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -217,33 +233,52 @@ export default function NotasAtualizacaoScreen() {
                   {detalhe.secao || 'Sem seção'} · {detalhe.tela || 'Sem tela'}
                   {detalhe.tela_nova ? ' (tela nova)' : ''} · {formatDateTimeBR(detalhe.completed_at)}
                 </Text>
-                <FormField label="Linha da nota">
-                  <FormInput value={editLinha} onChangeText={setEditLinha} multiline style={styles.areaCurta} />
-                </FormField>
-                <FormField label="Detalhe">
-                  <FormInput value={editDetalhe} onChangeText={setEditDetalhe} multiline style={styles.area} />
-                </FormField>
-                <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                  Origem no Kanban — problema: {detalhe.description || '—'}
-                </Text>
-                <Text style={{ color: theme.textMuted, fontSize: 12 }}>Solução DEV: {detalhe.dev_notes || '—'}</Text>
+                {editando ? (
+                  <>
+                    <FormField label="Linha da nota">
+                      <FormInput value={editLinha} onChangeText={setEditLinha} multiline style={styles.areaCurta} />
+                    </FormField>
+                    <FormField label="Detalhe">
+                      <FormInput value={editDetalhe} onChangeText={setEditDetalhe} multiline style={styles.area} />
+                    </FormField>
+                  </>
+                ) : (
+                  <>
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '700' }}>Linha da nota</Text>
+                      <Text style={{ color: theme.text, fontSize: 15, lineHeight: 22 }}>
+                        {detalhe.nota_linha || 'Sem linha publicada'}
+                      </Text>
+                    </View>
+                    <View style={{ gap: 4 }}>
+                      <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '700' }}>Detalhe</Text>
+                      <Text style={{ color: theme.text, fontSize: 14, lineHeight: 21 }}>
+                        {detalhe.nota_detalhe || 'Sem detalhe publicado'}
+                      </Text>
+                    </View>
+                  </>
+                )}
                 {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <PrimaryButton
-                    compact
-                    label={salvar.isPending ? 'Salvando…' : 'Salvar'}
-                    loading={salvar.isPending}
-                    style={{ flex: 1 }}
-                    onPress={() => salvar.mutate()}
-                  />
-                  <PrimaryButton
-                    compact
-                    label={regenerar.isPending ? 'Gerando…' : 'Regenerar IA'}
-                    loading={regenerar.isPending}
-                    style={{ flex: 1 }}
-                    onPress={() => regenerar.mutate()}
-                  />
-                </View>
+                {editando ? (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <PrimaryButton
+                      compact
+                      label={salvar.isPending ? 'Salvando…' : 'Salvar'}
+                      loading={salvar.isPending}
+                      style={{ flex: 1 }}
+                      onPress={() => salvar.mutate()}
+                    />
+                    <PrimaryButton
+                      compact
+                      label={regenerar.isPending ? 'Gerando…' : 'Regenerar IA'}
+                      loading={regenerar.isPending}
+                      style={{ flex: 1 }}
+                      onPress={() => regenerar.mutate()}
+                    />
+                  </View>
+                ) : (
+                  <PrimaryButton compact label="Editar" onPress={() => setEditando(true)} />
+                )}
               </View>
             </ScrollView>
           ) : null}
