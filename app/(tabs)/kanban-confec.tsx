@@ -33,7 +33,6 @@ import {
   excluirAnexoConfec,
   excluirCardConfec,
   excluirChecklistConfec,
-  excluirColunaConfec,
   excluirComentarioConfec,
   excluirEtiquetaConfec,
   listarAdminsAtivos,
@@ -744,17 +743,6 @@ export default function KanbanConfecScreen() {
                   <Pressable onPress={() => { setColunaEdit(coluna); setNomeLista(coluna.title); setCorLista(coluna.color); }}>
                     <Text style={{ color: theme.cadastroAction, fontSize: 12, fontWeight: '700' }}>Editar</Text>
                   </Pressable>
-                  {canDeleteRecords ? (
-                    <Pressable
-                      onPress={() =>
-                        excluirColunaConfec(coluna.id, colunas)
-                          .then(() => qc.invalidateQueries({ queryKey: ['confec_kanban'] }))
-                          .catch((e) => setErro(e instanceof Error ? e.message : 'Erro ao excluir a lista'))
-                      }
-                    >
-                      <Text style={{ color: theme.error, fontSize: 12, fontWeight: '700' }}>Excluir</Text>
-                    </Pressable>
-                  ) : null}
                   <Pressable onPress={() => abrirNovo(coluna.slug)}>
                     <Text style={{ color: theme.headerText, fontSize: 12, fontWeight: '800' }}>Novo card</Text>
                   </Pressable>
