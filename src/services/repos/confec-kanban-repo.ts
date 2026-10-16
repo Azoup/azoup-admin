@@ -1,3 +1,5 @@
+import { ehSecaoConfec, type ConfecSecao } from '@/src/constants/confec-notas';
+import { gerarESalvarNotaConfec } from '@/src/services/confec-notas-api';
 import { supabase } from '@/src/lib/supabase';
 
 export const BUCKET_CONFEC = 'confec-kanban-files';
@@ -74,6 +76,12 @@ export type ConfecCard = {
   status: string;
   position: number;
   completed_at: string | null;
+  secao: ConfecSecao | null;
+  tela: string | null;
+  tela_nova: boolean;
+  nota_linha: string | null;
+  nota_detalhe: string | null;
+  nota_gerada_em: string | null;
   created_at: string;
   etiquetas: ConfecEtiqueta[];
   imagens: ConfecAnexo[];
@@ -90,9 +98,16 @@ export type QuadroConfec = {
 
 function erroTabela(message: string): Error {
   if (/confec_kanban|kanban_card_checklist|schema cache|does not exist/i.test(message)) {
-    return new Error('Execute supabase/sql/admin_confec_kanban.sql no Supabase.');
+    return new Error('Execute supabase/sql/admin_confec_kanban.sql e admin_confec_notas_atualizacao.sql no Supabase.');
   }
   return new Error(message);
+}
+
+export function validarPublicacaoNota(params: { secao?: string | null; tela?: string | null }): void {
+  const secao = `${params.secao ?? ''}`.trim();
+  const tela = `${params.tela ?? ''}`.trim();
+  if (!ehSecaoConfec(secao)) throw new Error('Informe a seção do sistema antes de finalizar.');
+  if (!tela) throw new Error('Informe a tela do sistema antes de finalizar.');
 }
 
 export function normalizarTitulo(valor: string): string {
@@ -157,7 +172,7 @@ export async function carregarQuadroConfec(): Promise<QuadroConfec> {
       supabase
         .from('confec_kanban_cards')
         .select(
-          'id,ticket_number,title,description,dev_notes,cliente_id,analista_email,desenvolvedor_email,created_by_email,status,position,completed_at,created_at,cliente:clientes_azoup(nome)',
+          'id,ticket_number,title,description,dev_notes,cliente_id,analista_email,desenvolvedor_email,created_by_email,status,position,completed_at,secao,tela,tela_nova,nota_linha,nota_detalhe,nota_gerada_em,created_at,cliente:clientes_azoup(nome)',
         )
         .order('position'),
       supabase.from('confec_kanban_labels').select('id,name,color').order('name'),
@@ -219,11 +234,18 @@ export async function carregarQuadroConfec(): Promise<QuadroConfec> {
   const cards = ((cardsRes.data ?? []) as Array<ConfecCard & { cliente?: { nome?: string | null } | { nome?: string | null }[] | null }>).map(
     (row) => {
       const cliente = Array.isArray(row.cliente) ? row.cliente[0] : row.cliente;
+      const secao = `${row.secao ?? ''}`.trim();
       return {
         ...row,
         description: row.description ?? '',
         dev_notes: row.dev_notes ?? '',
         cliente_nome: `${cliente?.nome ?? ''}`.trim() || null,
+        secao: ehSecaoConfec(secao) ? secao : null,
+        tela: `${row.tela ?? ''}`.trim() || null,
+        tela_nova: Boolean(row.tela_nova),
+        nota_linha: `${row.nota_linha ?? ''}`.trim() || null,
+        nota_detalhe: `${row.nota_detalhe ?? ''}`.trim() || null,
+        nota_gerada_em: row.nota_gerada_em ?? null,
         etiquetas: etiquetasPorCard.get(row.id) ?? [],
         imagens: imagensPorCard.get(row.id) ?? [],
         arquivos: arquivosPorCard.get(row.id) ?? [],
@@ -273,10 +295,15 @@ export async function criarCardConfec(params: {
   analistaEmail?: string | null;
   desenvolvedorEmail?: string | null;
   createdByEmail: string;
+  secao?: string | null;
+  tela?: string | null;
+  telaNova?: boolean;
   labelIds?: string[];
 }): Promise<string> {
   const title = normalizarTitulo(params.title);
   if (!title) throw new Error('Informe o título do ticket.');
+  const secao = `${params.secao ?? ''}`.trim();
+  const tela = `${params.tela ?? ''}`.trim();
   const { data: posicao, error: posErro } = await supabase
     .from('confec_kanban_cards')
     .select('position')
@@ -296,6 +323,9 @@ export async function criarCardConfec(params: {
       desenvolvedor_email: params.desenvolvedorEmail?.trim() || null,
       created_by_email: params.createdByEmail,
       status: params.status,
+      secao: ehSecaoConfec(secao) ? secao : null,
+      tela: tela || null,
+      tela_nova: Boolean(params.telaNova) && Boolean(tela),
       position: Number.isFinite(position) ? Number(position) + 1 : 0,
     } as never)
     .select('id')
@@ -306,6 +336,21 @@ export async function criarCardConfec(params: {
   return id;
 }
 
+async function aposEntrarEmFinalizados(params: {
+  id: string;
+  secao?: string | null;
+  tela?: string | null;
+  telaNova?: boolean;
+}): Promise<void> {
+  validarPublicacaoNota(params);
+  await gerarESalvarNotaConfec({
+    cardId: params.id,
+    secao: `${params.secao ?? ''}`.trim(),
+    tela: `${params.tela ?? ''}`.trim(),
+    telaNova: Boolean(params.telaNova),
+  });
+}
+
 export async function atualizarCardConfec(params: {
   id: string;
   title: string;
@@ -314,6 +359,9 @@ export async function atualizarCardConfec(params: {
   clienteId?: string | null;
   analistaEmail?: string | null;
   desenvolvedorEmail?: string | null;
+  secao?: string | null;
+  tela?: string | null;
+  telaNova?: boolean;
   status: string;
   statusAnterior: string;
   colunas: ConfecColuna[];
@@ -321,10 +369,15 @@ export async function atualizarCardConfec(params: {
 }): Promise<void> {
   const title = normalizarTitulo(params.title);
   if (!title) throw new Error('Informe o título do ticket.');
+  const secao = `${params.secao ?? ''}`.trim();
+  const tela = `${params.tela ?? ''}`.trim();
   const destino = params.colunas.find((coluna) => coluna.slug === params.status);
   const origem = params.colunas.find((coluna) => coluna.slug === params.statusAnterior);
   const entrou = Boolean(destino && ehColunaConclusao(destino, params.colunas) && origem && !ehColunaConclusao(origem, params.colunas));
   const saiu = Boolean(origem && ehColunaConclusao(origem, params.colunas) && destino && !ehColunaConclusao(destino, params.colunas));
+  if (entrou || (destino && ehColunaConclusao(destino, params.colunas))) {
+    validarPublicacaoNota({ secao, tela });
+  }
 
   let labelIds = params.labelIds;
   const patch: Record<string, unknown> = {
@@ -334,6 +387,9 @@ export async function atualizarCardConfec(params: {
     cliente_id: params.clienteId || null,
     analista_email: params.analistaEmail?.trim() || null,
     desenvolvedor_email: params.desenvolvedorEmail?.trim() || null,
+    secao: ehSecaoConfec(secao) ? secao : null,
+    tela: tela || null,
+    tela_nova: Boolean(params.telaNova) && Boolean(tela),
     status: params.status,
     updated_at: new Date().toISOString(),
   };
@@ -345,11 +401,22 @@ export async function atualizarCardConfec(params: {
     const etiqueta = await garantirEtiquetaConcluido();
     labelIds = params.labelIds.filter((id) => id !== etiqueta.id);
     patch.completed_at = null;
+    patch.nota_linha = null;
+    patch.nota_detalhe = null;
+    patch.nota_gerada_em = null;
   }
 
   const { error } = await supabase.from('confec_kanban_cards').update(patch as never).eq('id', params.id);
   if (error) throw erroTabela(error.message);
   await substituirEtiquetas(params.id, labelIds);
+  if (entrou) {
+    await aposEntrarEmFinalizados({
+      id: params.id,
+      secao,
+      tela,
+      telaNova: Boolean(params.telaNova),
+    });
+  }
 }
 
 export async function moverCardConfec(params: {
@@ -360,12 +427,18 @@ export async function moverCardConfec(params: {
   colunas: ConfecColuna[];
   labelIds: string[];
   gravarPosicao: boolean;
+  secao?: string | null;
+  tela?: string | null;
+  telaNova?: boolean;
 }): Promise<void> {
   const destino = params.colunas.find((coluna) => coluna.slug === params.status);
   const origem = params.colunas.find((coluna) => coluna.slug === params.statusAnterior);
   if (!destino) throw new Error('Coluna inválida.');
   const entrou = ehColunaConclusao(destino, params.colunas) && origem && !ehColunaConclusao(origem, params.colunas);
   const saiu = origem && ehColunaConclusao(origem, params.colunas) && !ehColunaConclusao(destino, params.colunas);
+  if (entrou) {
+    validarPublicacaoNota({ secao: params.secao, tela: params.tela });
+  }
   const patch: Record<string, unknown> = {
     status: params.status,
     updated_at: new Date().toISOString(),
@@ -380,10 +453,52 @@ export async function moverCardConfec(params: {
     const etiqueta = await garantirEtiquetaConcluido();
     labelIds = params.labelIds.filter((id) => id !== etiqueta.id);
     patch.completed_at = null;
+    patch.nota_linha = null;
+    patch.nota_detalhe = null;
+    patch.nota_gerada_em = null;
   }
   const { error } = await supabase.from('confec_kanban_cards').update(patch as never).eq('id', params.id);
   if (error) throw erroTabela(error.message);
   if (entrou || saiu) await substituirEtiquetas(params.id, labelIds);
+  if (entrou) {
+    await aposEntrarEmFinalizados({
+      id: params.id,
+      secao: params.secao,
+      tela: params.tela,
+      telaNova: params.telaNova,
+    });
+  }
+}
+
+export async function atualizarNotaPublicadaConfec(params: {
+  id: string;
+  notaLinha: string;
+  notaDetalhe: string;
+}): Promise<void> {
+  const linha = params.notaLinha.trim();
+  const detalhe = params.notaDetalhe.trim();
+  if (!linha) throw new Error('Informe a linha da nota.');
+  if (!detalhe) throw new Error('Informe o detalhe da nota.');
+  const { error } = await supabase
+    .from('confec_kanban_cards')
+    .update({
+      nota_linha: linha,
+      nota_detalhe: detalhe,
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq('id', params.id);
+  if (error) throw erroTabela(error.message);
+}
+
+export async function listarNotasPublicadasConfec(): Promise<ConfecCard[]> {
+  const quadro = await carregarQuadroConfec();
+  return quadro.cards
+    .filter((card) => {
+      if (!card.completed_at) return false;
+      const coluna = quadro.colunas.find((item) => item.slug === card.status);
+      return Boolean(coluna && ehColunaConclusao(coluna, quadro.colunas));
+    })
+    .sort((a, b) => `${b.completed_at ?? ''}`.localeCompare(`${a.completed_at ?? ''}`));
 }
 
 export async function reordenarCardsConfec(ids: string[]): Promise<void> {

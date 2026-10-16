@@ -25,6 +25,12 @@ create table if not exists public.confec_kanban_cards (
   status text not null,
   position integer not null default 0,
   completed_at timestamptz,
+  secao text,
+  tela text,
+  tela_nova boolean not null default false,
+  nota_linha text,
+  nota_detalhe text,
+  nota_gerada_em timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -111,7 +117,8 @@ values
   ('Backlog', 'backlog', '#94A3B8', 0),
   ('Analisados', 'analisados', '#4C9AFF', 1),
   ('Em andamento', 'em-andamento', '#F5C542', 2),
-  ('Finalizados', 'finalizados', '#22C55E', 3)
+  ('Validação', 'validacao', '#A78BFA', 3),
+  ('Finalizados', 'finalizados', '#22C55E', 4)
 on conflict (slug) do nothing;
 
 alter table public.confec_kanban_columns enable row level security;

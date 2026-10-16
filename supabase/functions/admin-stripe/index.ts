@@ -21,6 +21,7 @@ const ADMIN_SCREEN_KEYS = [
   'pendencias',
   'agendamentos',
   'kanban_confec',
+  'notas_atualizacao',
   'excluir',
 ] as const;
 

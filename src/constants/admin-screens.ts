@@ -15,6 +15,7 @@ export type AdminScreenKey =
   | 'pendencias'
   | 'agendamentos'
   | 'kanban_confec'
+  | 'notas_atualizacao'
   | 'excluir';
 
 export type AdminScreenDef = {
@@ -33,6 +34,7 @@ export const ADMIN_SCREENS: readonly AdminScreenDef[] = [
   { key: 'pendencias', label: 'Pendências' },
   { key: 'agendamentos', label: 'Agendamentos' },
   { key: 'kanban_confec', label: 'Kanban Confec' },
+  { key: 'notas_atualizacao', label: 'Notas de atualização' },
   { key: 'conversas', label: 'Conversas' },
   { key: 'billing', label: 'Cobrança' },
   { key: 'audit', label: 'Auditoria' },
@@ -57,6 +59,7 @@ export function telasPadraoPorPapel(papel: AdminPapel): AdminScreenKey[] {
         'pendencias',
         'agendamentos',
         'kanban_confec',
+        'notas_atualizacao',
         'conversas',
         'billing',
         'audit',
@@ -65,7 +68,18 @@ export function telasPadraoPorPapel(papel: AdminPapel): AdminScreenKey[] {
         'metodo360',
       ];
     case 'viewer':
-      return ['dashboard', 'clients', 'acompanhamento', 'pendencias', 'agendamentos', 'kanban_confec', 'conversas', 'audit', 'marketing'];
+      return [
+        'dashboard',
+        'clients',
+        'acompanhamento',
+        'pendencias',
+        'agendamentos',
+        'kanban_confec',
+        'notas_atualizacao',
+        'conversas',
+        'audit',
+        'marketing',
+      ];
     default:
       return ['dashboard'];
   }

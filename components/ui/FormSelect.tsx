@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import React, { useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { FORM_CONTROL_HEIGHT, getFormInputStyles } from '@/src/styles/formInputStyles';
@@ -14,6 +14,22 @@ type Props<T extends string> = {
   disabled?: boolean;
 };
 
+type Anchor = { x: number; y: number; width: number };
+
+function ancorarNoViewport(x: number, y: number, width: number): Anchor {
+  const margem = 8;
+  const larguraMenu = Math.max(width, 180);
+  let left = Math.max(margem, x);
+  let top = Math.max(margem, y);
+  if (typeof window !== 'undefined') {
+    const maxLeft = Math.max(margem, window.innerWidth - larguraMenu - margem);
+    left = Math.min(left, maxLeft);
+    const maxTop = Math.max(margem, window.innerHeight - 120);
+    top = Math.min(top, maxTop);
+  }
+  return { x: left, y: top, width: larguraMenu };
+}
+
 export function FormSelect<T extends string>({
   options,
   value,
@@ -26,25 +42,30 @@ export function FormSelect<T extends string>({
   const inputStyles = useMemo(() => getFormInputStyles(theme), [theme]);
   const styles = useMemo(() => getStyles(theme), [theme]);
   const triggerRef = useRef<View>(null);
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<{ x: number; y: number; width: number } | null>(null);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
 
   const rotulo = value ? (labels?.[value] ?? value) : placeholder;
+  const aberto = anchor != null;
 
   function abrir() {
     if (disabled) return;
+
+    if (Platform.OS === 'web') {
+      const el = triggerRef.current as unknown as HTMLElement | null;
+      const rect = el?.getBoundingClientRect?.();
+      if (rect && rect.width > 0) {
+        setAnchor(ancorarNoViewport(rect.left, rect.bottom + 4, rect.width));
+        return;
+      }
+    }
+
     triggerRef.current?.measureInWindow((x, y, width, height) => {
-      setAnchor({
-        x: Math.max(8, x),
-        y: y + height + 4,
-        width: Math.max(width, 180),
-      });
-      setOpen(true);
+      if (!(width > 0 || height > 0)) return;
+      setAnchor(ancorarNoViewport(x, y + height + 4, width));
     });
   }
 
   function fechar() {
-    setOpen(false);
     setAnchor(null);
   }
 
@@ -60,59 +81,61 @@ export function FormSelect<T extends string>({
             styles.trigger,
             {
               opacity: disabled ? 0.55 : pressed ? 0.9 : 1,
-              borderColor: open ? theme.cadastroAction : theme.border,
+              borderColor: aberto ? theme.cadastroAction : theme.border,
             },
           ]}
         >
           <Text style={{ color: value ? theme.text : theme.textMuted, flex: 1, fontSize: 14 }} numberOfLines={1}>
             {rotulo}
           </Text>
-          <FontAwesome name={open ? 'chevron-up' : 'chevron-down'} size={12} color={theme.textMuted} />
+          <FontAwesome name={aberto ? 'chevron-up' : 'chevron-down'} size={12} color={theme.textMuted} />
         </Pressable>
       </View>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={fechar}>
+      <Modal visible={aberto} transparent animationType="none" onRequestClose={fechar}>
         <View style={styles.modalRoot} pointerEvents="box-none">
           <Pressable style={StyleSheet.absoluteFill} onPress={fechar} accessibilityLabel="Fechar lista" />
-          <View
-            style={[
-              styles.menu,
-              {
-                top: Math.max(8, anchor?.y ?? 80),
-                left: Math.max(8, anchor?.x ?? 16),
-                width: anchor?.width ?? 220,
-                backgroundColor: theme.surface,
-                borderColor: theme.border,
-              },
-            ]}
-          >
-            <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-              {options.map((opt) => {
-                const active = opt === value;
-                return (
-                  <Pressable
-                    key={opt}
-                    onPress={() => {
-                      onChange(opt);
-                      fechar();
-                    }}
-                    style={({ pressed }) => [
-                      styles.option,
-                      active && { backgroundColor: `${theme.cadastroAction}18` },
-                      pressed && { opacity: 0.85 },
-                    ]}
-                  >
-                    <Text
-                      style={{ color: active ? theme.cadastroAction : theme.text, fontWeight: active ? '800' : '500', fontSize: 13 }}
-                      numberOfLines={2}
+          {anchor ? (
+            <View
+              style={[
+                styles.menu,
+                {
+                  top: anchor.y,
+                  left: anchor.x,
+                  width: anchor.width,
+                  backgroundColor: theme.surface,
+                  borderColor: theme.border,
+                },
+              ]}
+            >
+              <ScrollView style={styles.menuScroll} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+                {options.map((opt) => {
+                  const active = opt === value;
+                  return (
+                    <Pressable
+                      key={opt}
+                      onPress={() => {
+                        onChange(opt);
+                        fechar();
+                      }}
+                      style={({ pressed }) => [
+                        styles.option,
+                        active && { backgroundColor: `${theme.cadastroAction}18` },
+                        pressed && { opacity: 0.85 },
+                      ]}
                     >
-                      {labels?.[opt] ?? opt}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
+                      <Text
+                        style={{ color: active ? theme.cadastroAction : theme.text, fontWeight: active ? '800' : '500', fontSize: 13 }}
+                        numberOfLines={2}
+                      >
+                        {labels?.[opt] ?? opt}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          ) : null}
         </View>
       </Modal>
     </View>

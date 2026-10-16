@@ -14,6 +14,8 @@ import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { registrarAuditoria } from '@/src/services/audit';
 import { listarClientesParaSelecao } from '@/src/services/repos/conversas-repo';
+import { CONFEC_SECOES, type ConfecSecao } from '@/src/constants/confec-notas';
+import { gerarESalvarNotaConfec } from '@/src/services/confec-notas-api';
 import {
   adicionarChecklistConfec,
   adicionarComentarioConfec,
@@ -136,6 +138,9 @@ type Rascunho = {
   clienteId: string | null;
   analista: string;
   desenvolvedor: string;
+  secao: ConfecSecao | '';
+  tela: string;
+  telaNova: boolean;
   status: string;
   labelIds: string[];
   base: string;
@@ -149,6 +154,9 @@ function chaveRascunho(r: Omit<Rascunho, 'base'>): string {
     clienteId: r.clienteId,
     analista: r.analista,
     desenvolvedor: r.desenvolvedor,
+    secao: r.secao,
+    tela: r.tela.trim(),
+    telaNova: r.telaNova,
     status: r.status,
     labelIds: [...r.labelIds].sort(),
   });
@@ -259,6 +267,12 @@ function TicketCard({
           </Text>
         </View>
         {card.cliente_nome ? <Text style={{ color: theme.textMuted, fontSize: 12 }}>{card.cliente_nome}</Text> : null}
+        {card.secao || card.tela ? (
+          <Text style={{ color: theme.textMuted, fontSize: 11 }}>
+            {[card.secao, card.tela].filter(Boolean).join(' · ')}
+            {card.tela_nova ? ' · nova' : ''}
+          </Text>
+        ) : null}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
           {card.etiquetas.map((etiqueta) => (
             <Text key={etiqueta.id} style={{ color: etiqueta.color, fontSize: 11, fontWeight: '800' }}>
@@ -380,6 +394,9 @@ export default function KanbanConfecScreen() {
       clienteId: null,
       analista: '',
       desenvolvedor: '',
+      secao: '' as ConfecSecao | '',
+      tela: '',
+      telaNova: false,
       status,
       labelIds: [] as string[],
     };
@@ -396,6 +413,9 @@ export default function KanbanConfecScreen() {
       clienteId: card.cliente_id,
       analista: card.analista_email ?? '',
       desenvolvedor: card.desenvolvedor_email ?? '',
+      secao: (card.secao ?? '') as ConfecSecao | '',
+      tela: card.tela ?? '',
+      telaNova: Boolean(card.tela_nova),
       status: card.status,
       labelIds: card.etiquetas.map((item) => item.id),
     };
@@ -414,6 +434,9 @@ export default function KanbanConfecScreen() {
           analistaEmail: atual.analista,
           desenvolvedorEmail: atual.desenvolvedor,
           createdByEmail: email,
+          secao: atual.secao || null,
+          tela: atual.tela,
+          telaNova: atual.telaNova,
           labelIds: atual.labelIds,
         });
       }
@@ -426,6 +449,9 @@ export default function KanbanConfecScreen() {
         clienteId: atual.clienteId,
         analistaEmail: atual.analista,
         desenvolvedorEmail: atual.desenvolvedor,
+        secao: atual.secao || null,
+        tela: atual.tela,
+        telaNova: atual.telaNova,
         status: atual.status,
         statusAnterior: anterior?.status ?? atual.status,
         colunas,
@@ -443,6 +469,8 @@ export default function KanbanConfecScreen() {
           titulo: normalizarTitulo(atual.title),
           observacoes: atual.description.trim(),
           dev: atual.devNotes.trim(),
+          secao: atual.secao || null,
+          tela: atual.tela.trim() || null,
           analista: atual.analista || null,
           desenvolvedor: atual.desenvolvedor || null,
           cliente: atual.clienteId,
@@ -452,6 +480,7 @@ export default function KanbanConfecScreen() {
       setRascunho(null);
       setErro(null);
       void qc.invalidateQueries({ queryKey: ['confec_kanban'] });
+      void qc.invalidateQueries({ queryKey: ['confec_notas_publicadas'] });
     },
     onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao salvar o ticket'),
   });
@@ -493,9 +522,15 @@ export default function KanbanConfecScreen() {
       colunas,
       labelIds: card.etiquetas.map((item) => item.id),
       gravarPosicao: true,
+      secao: card.secao,
+      tela: card.tela,
+      telaNova: card.tela_nova,
     })
       .then(() => reordenarCardsConfec(lista.map((item) => item.id)))
-      .then(() => qc.invalidateQueries({ queryKey: ['confec_kanban'] }))
+      .then(() => {
+        void qc.invalidateQueries({ queryKey: ['confec_kanban'] });
+        void qc.invalidateQueries({ queryKey: ['confec_notas_publicadas'] });
+      })
       .catch((e) => setErro(e instanceof Error ? e.message : 'Erro ao mover o ticket'));
     auditar('Moveu card no Kanban Confec', card.id, { status: card.status }, { status: slug });
   }
@@ -762,12 +797,40 @@ export default function KanbanConfecScreen() {
                 <Text style={{ color: theme.text }}>{detalhe.description || 'Sem observações do ticket.'}</Text>
                 <Text style={{ color: theme.text }}>{detalhe.dev_notes || 'Sem observações DEV.'}</Text>
                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                  Seção: {detalhe.secao || '—'} · Tela: {detalhe.tela || '—'}
+                  {detalhe.tela_nova ? ' (nova)' : ''}
+                </Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                   Analista: {detalhe.analista_email || '—'} · Desenvolvedor: {detalhe.desenvolvedor_email || '—'}
                 </Text>
                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                   Criado por {detalhe.created_by_email || '—'} em {formatDateTimeBR(detalhe.created_at)}
                   {detalhe.completed_at ? ` · Concluído em ${formatDateTimeBR(detalhe.completed_at)}` : ''}
                 </Text>
+                {detalhe.nota_linha ? (
+                  <View style={{ gap: 4, marginTop: 4 }}>
+                    <Text style={{ color: theme.headerText, fontWeight: '800' }}>Nota publicada</Text>
+                    <Text style={{ color: theme.text }}>{detalhe.nota_linha}</Text>
+                    {detalhe.nota_detalhe ? <Text style={{ color: theme.textMuted }}>{detalhe.nota_detalhe}</Text> : null}
+                    <Pressable
+                      onPress={() =>
+                        gerarESalvarNotaConfec({
+                          cardId: detalhe.id,
+                          secao: detalhe.secao ?? undefined,
+                          tela: detalhe.tela ?? undefined,
+                          telaNova: detalhe.tela_nova,
+                        })
+                          .then(() => {
+                            void qc.invalidateQueries({ queryKey: ['confec_kanban'] });
+                            void qc.invalidateQueries({ queryKey: ['confec_notas_publicadas'] });
+                          })
+                          .catch((e) => setErro(e instanceof Error ? e.message : 'Erro ao regenerar a nota'))
+                      }
+                    >
+                      <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Regenerar nota com IA</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                   {detalhe.etiquetas.map((etiqueta) => (
                     <Text key={etiqueta.id} style={{ color: etiqueta.color, fontWeight: '800' }}>{etiqueta.name}</Text>
@@ -906,6 +969,36 @@ export default function KanbanConfecScreen() {
                 <FormField label="Desenvolvedor">
                   <FormSelect options={emails} value={rascunho.desenvolvedor || VAZIO} onChange={(valor) => setRascunho({ ...rascunho, desenvolvedor: valor === VAZIO ? '' : valor })} labels={{ [VAZIO]: 'Nenhum' }} />
                 </FormField>
+                <FormField label="Seção do sistema" required>
+                  <FormSelect
+                    options={[VAZIO, ...CONFEC_SECOES]}
+                    value={rascunho.secao || VAZIO}
+                    onChange={(valor) => setRascunho({ ...rascunho, secao: valor === VAZIO ? '' : (valor as ConfecSecao) })}
+                    labels={{ [VAZIO]: 'Selecione…' }}
+                  />
+                </FormField>
+                <FormField label="Tela do sistema" required>
+                  <FormInput
+                    value={rascunho.tela}
+                    onChangeText={(tela) => setRascunho({ ...rascunho, tela })}
+                    placeholder={rascunho.telaNova ? 'Nome da tela nova' : 'Ex.: Pedidos, PDV, Romaneio'}
+                  />
+                </FormField>
+                <Pressable
+                  onPress={() => setRascunho({ ...rascunho, telaNova: !rascunho.telaNova })}
+                  style={[
+                    styles.chip,
+                    {
+                      alignSelf: 'flex-start',
+                      borderColor: rascunho.telaNova ? theme.cadastroAction : theme.border,
+                      backgroundColor: rascunho.telaNova ? theme.cadastroAction : theme.surface,
+                    },
+                  ]}
+                >
+                  <Text style={{ color: rascunho.telaNova ? theme.cadastroActionText : theme.textMuted, fontWeight: '800', fontSize: 12 }}>
+                    {rascunho.telaNova ? '✓ Tela nova' : 'Marcar como tela nova'}
+                  </Text>
+                </Pressable>
                 <FormField label="Mover para">
                   <FormSelect
                     options={colunas.map((coluna) => coluna.slug)}
