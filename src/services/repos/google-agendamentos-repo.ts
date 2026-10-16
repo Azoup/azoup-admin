@@ -29,9 +29,9 @@ export async function listarEventosAgendaCache(inicio: string, fim: string, cale
 }
 
 /** A lista Sem cliente começa neste dia e segue para frente. */
-export const AGENDA_DESDE_JULHO_2026 = '2026-07-01T00:00:00-03:00';
+export const AGENDA_SEM_CLIENTE_DESDE = '2026-09-01T00:00:00-03:00';
 
-/** Agendamentos ainda sem cliente, de julho de 2026 em diante. */
+/** Agendamentos ainda sem cliente, de setembro de 2026 em diante. */
 export async function listarEventosSemCliente(): Promise<GoogleAgendaEvento[]> {
   const pagina = 500;
   const lista: GoogleAgendaEvento[] = [];
@@ -40,7 +40,7 @@ export async function listarEventosSemCliente(): Promise<GoogleAgendaEvento[]> {
       .from('admin_google_agendamentos')
       .select('id,google_event_id,calendar_id,titulo,descricao,inicio,fim,status,cliente_id,match_tipo,participantes')
       .is('cliente_id', null)
-      .gte('inicio', AGENDA_DESDE_JULHO_2026)
+      .gte('inicio', AGENDA_SEM_CLIENTE_DESDE)
       .order('inicio', { ascending: true })
       .range(from, from + pagina - 1);
     if (error) {

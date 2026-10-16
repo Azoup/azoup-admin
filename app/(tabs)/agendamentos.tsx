@@ -32,11 +32,7 @@ import {
   type GoogleAgendaEvento,
 } from '@/src/services/google-calendar-api';
 import { listarClientesParaSelecao } from '@/src/services/repos/conversas-repo';
-import {
-  AGENDA_DESDE_JULHO_2026,
-  listarEventosAgendaCache,
-  listarEventosSemCliente,
-} from '@/src/services/repos/google-agendamentos-repo';
+import { listarEventosAgendaCache, listarEventosSemCliente } from '@/src/services/repos/google-agendamentos-repo';
 import { listarRegistrosManuaisNoPeriodo } from '@/src/services/repos/reunioes-repo';
 import type { ClienteAzoupRow } from '@/src/types/azoup';
 import { descricaoTemHtml } from '@/src/utils/agenda-html';
@@ -72,9 +68,8 @@ function janelaEmTorno(y: number, m0: number): { inicio: string; fim: string } {
   const fim = deslocarMes(y, m0, 6);
   const inicioYmd = ymdFromParts(ini.y, ini.m0, 1);
   const fimYmd = ymdFromParts(fim.y, fim.m0, diasNoMes(fim.y, fim.m0));
-  const inicio = `${inicioYmd}T00:00:00-03:00`;
   return {
-    inicio: inicio < AGENDA_DESDE_JULHO_2026 ? inicio : AGENDA_DESDE_JULHO_2026,
+    inicio: `${inicioYmd}T00:00:00-03:00`,
     fim: `${somarDiasYmd(fimYmd, 1)}T00:00:00-03:00`,
   };
 }
