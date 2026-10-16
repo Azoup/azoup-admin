@@ -339,12 +339,10 @@ export async function atualizarReuniaoCliente(params: {
   if (pendencia && !/^\d{4}-\d{2}-\d{2}$/.test(dataRetorno)) throw new Error('Informe a data do retorno.');
   const dataRegistro = params.dataRegistro?.trim() ?? '';
 
-  const patch: Record<string, unknown> = {
-    pendencia,
-    assuntos: params.assuntos?.trim() || null,
-    proxima_acao: params.proximaAcao?.trim() || null,
-  };
+  const patch: Record<string, unknown> = { pendencia };
   if (/^\d{4}-\d{2}-\d{2}$/.test(dataRetorno)) patch.data_retorno = dataRetorno;
+  if (params.assuntos !== undefined) patch.assuntos = params.assuntos?.trim() || null;
+  if (params.proximaAcao !== undefined) patch.proxima_acao = params.proximaAcao?.trim() || null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro)) {
     const diaAtual = dataCalendarioBrasil(params.createdAtAtual);
     if (diaAtual !== dataRegistro) {

@@ -13,6 +13,7 @@ import { PageHeader } from '@/components/ui/PageHeader';
 import { Screen } from '@/components/ui/Screen';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ConcluirPendenciaModal } from '@/components/ui/ConcluirPendenciaModal';
+import { EditarPendenciaModal } from '@/components/ui/EditarPendenciaModal';
 import { RegistrarReuniaoModal } from '@/components/ui/RegistrarReuniaoModal';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
@@ -759,6 +760,7 @@ export function HistoricoClienteTela({
   const [conversaAberta, setConversaAberta] = useState(false);
   const [pendenciaAberta, setPendenciaAberta] = useState(false);
   const [concluirAlvo, setConcluirAlvo] = useState<ReuniaoClienteRow | null>(null);
+  const [editarPendenciaAlvo, setEditarPendenciaAlvo] = useState<ReuniaoClienteRow | null>(null);
   const [mensagemAberta, setMensagemAberta] = useState(false);
   const [chamadoAberto, setChamadoAberto] = useState<DigisacChamado | null>(null);
   const [historicoAberto, setHistoricoAberto] = useState(false);
@@ -1066,6 +1068,37 @@ export function HistoricoClienteTela({
     onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao atualizar pendência'),
   });
 
+  const editarPendencia = useMutation({
+    mutationFn: async ({ id, pendencia, dataRetorno }: { id: string; pendencia: string; dataRetorno: string }) => {
+      const anterior = (pendenciasQ.data ?? []).find((row) => row.id === id);
+      await atualizarReuniaoCliente({ id, pendencia, dataRetorno });
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'REUNIAO_UPDATE',
+          entidade: 'admin_cliente_reunioes',
+          entidade_id: id,
+          valores_anteriores: {
+            cliente: cliente?.nome ?? null,
+            pendencia: anterior?.pendencia ?? null,
+            data_retorno: anterior?.data_retorno ?? null,
+          },
+          valores_novos: {
+            cliente: cliente?.nome ?? null,
+            pendencia: pendencia.trim(),
+            data_retorno: dataRetorno.trim(),
+          },
+        },
+      );
+    },
+    onSuccess: () => {
+      setErro(null);
+      setEditarPendenciaAlvo(null);
+      invalidarHistorico();
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao editar pendência'),
+  });
+
   const ocupado = salvarReuniao.isPending || excluirReuniao.isPending || salvarConversa.isPending || excluirConversa.isPending;
 
   const conteudo = (
@@ -1259,21 +1292,32 @@ export function HistoricoClienteTela({
                       <Text style={{ color: atrasada ? '#F07167' : concluida ? theme.textMuted : theme.cadastroAction, fontWeight: '800', fontSize: 12, flex: 1 }}>
                         {atrasada ? 'Atrasada' : concluida ? 'Concluída' : 'Em andamento'} · {formatYmdBR(item.data_retorno)}
                       </Text>
-                      <Pressable
-                        onPress={() => {
-                          if (concluida) {
-                            concluirPendencia.mutate({ id: item.id, concluida: false });
-                            return;
-                          }
-                          setConcluirAlvo(item);
-                        }}
-                        hitSlop={6}
-                        disabled={concluirPendencia.isPending}
-                      >
-                        <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
-                          {concluida ? 'Reabrir' : 'Concluir'}
-                        </Text>
-                      </Pressable>
+                      <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+                        <Pressable
+                          onPress={() => {
+                            setErro(null);
+                            setEditarPendenciaAlvo(item);
+                          }}
+                          hitSlop={6}
+                        >
+                          <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Editar</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            if (concluida) {
+                              concluirPendencia.mutate({ id: item.id, concluida: false });
+                              return;
+                            }
+                            setConcluirAlvo(item);
+                          }}
+                          hitSlop={6}
+                          disabled={concluirPendencia.isPending}
+                        >
+                          <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+                            {concluida ? 'Reabrir' : 'Concluir'}
+                          </Text>
+                        </Pressable>
+                      </View>
                     </View>
                     <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 4 }}>{item.pendencia}</Text>
                     {concluida && item.comentario_conclusao?.trim() ? (
@@ -1569,6 +1613,22 @@ export function HistoricoClienteTela({
           concluirPendencia.mutate({ id: concluirAlvo.id, concluida: true, comentario });
         }}
       />
+      <EditarPendenciaModal
+        visible={editarPendenciaAlvo != null}
+        pendenciaInicial={editarPendenciaAlvo?.pendencia ?? ''}
+        dataRetornoInicial={editarPendenciaAlvo?.data_retorno}
+        salvando={editarPendencia.isPending}
+        erro={editarPendenciaAlvo ? erro : null}
+        onClose={() => {
+          if (editarPendencia.isPending) return;
+          setEditarPendenciaAlvo(null);
+          setErro(null);
+        }}
+        onSalvar={({ pendencia, dataRetorno }) => {
+          if (!editarPendenciaAlvo) return;
+          editarPendencia.mutate({ id: editarPendenciaAlvo.id, pendencia, dataRetorno });
+        }}
+      />
       <ChamadoDigisacModal clienteId={cliente.id} chamado={chamadoAberto} onClose={() => setChamadoAberto(null)} />
       <EnviarMensagemProntaModal
         clienteId={cliente.id}
@@ -1593,6 +1653,10 @@ function PendenciasAbertasModal({
   onClose: () => void;
 }) {
   const { theme } = useTheme();
+  const { adminProfile } = useAdminAuth();
+  const qc = useQueryClient();
+  const [editarAlvo, setEditarAlvo] = useState<ReuniaoClienteRow | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
   const q = useQuery({
     queryKey: ['admin_cliente_reunioes', cliente?.id, 'pendencias-abertas-modal'],
     queryFn: () => listarReunioes(),
@@ -1601,6 +1665,38 @@ function PendenciasAbertasModal({
       rows.filter(
         (row) => row.cliente_id === cliente?.id && !row.concluida && `${row.pendencia ?? ''}`.trim(),
       ),
+  });
+
+  const editar = useMutation({
+    mutationFn: async ({ id, pendencia, dataRetorno }: { id: string; pendencia: string; dataRetorno: string }) => {
+      const anterior = (q.data ?? []).find((row) => row.id === id);
+      await atualizarReuniaoCliente({ id, pendencia, dataRetorno });
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'REUNIAO_UPDATE',
+          entidade: 'admin_cliente_reunioes',
+          entidade_id: id,
+          valores_anteriores: {
+            cliente: cliente?.nome ?? null,
+            pendencia: anterior?.pendencia ?? null,
+            data_retorno: anterior?.data_retorno ?? null,
+          },
+          valores_novos: {
+            cliente: cliente?.nome ?? null,
+            pendencia: pendencia.trim(),
+            data_retorno: dataRetorno.trim(),
+          },
+        },
+      );
+    },
+    onSuccess: () => {
+      setErro(null);
+      setEditarAlvo(null);
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
+      void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao editar pendência'),
   });
 
   return (
@@ -1627,9 +1723,20 @@ function PendenciasAbertasModal({
               const atrasada = coluna === 'atrasada';
               return (
                 <View key={item.id} style={[styles.historicoItem, { borderColor: atrasada ? '#F07167' : theme.border }]}>
-                  <Text style={{ color: atrasada ? '#F07167' : theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
-                    {atrasada ? 'Atrasada' : 'Em andamento'} · {formatYmdBR(item.data_retorno)}
-                  </Text>
+                  <View style={styles.rowBetween}>
+                    <Text style={{ color: atrasada ? '#F07167' : theme.cadastroAction, fontWeight: '800', fontSize: 12, flex: 1 }}>
+                      {atrasada ? 'Atrasada' : 'Em andamento'} · {formatYmdBR(item.data_retorno)}
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        setErro(null);
+                        setEditarAlvo(item);
+                      }}
+                      hitSlop={6}
+                    >
+                      <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Editar</Text>
+                    </Pressable>
+                  </View>
                   <Text style={{ color: theme.headerText, fontWeight: '800', marginTop: 4 }}>{item.pendencia}</Text>
                   <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
                     Escrito por {item.admin_email?.trim() || '—'}
@@ -1640,6 +1747,22 @@ function PendenciasAbertasModal({
           </ScrollView>
         </View>
       </View>
+      <EditarPendenciaModal
+        visible={editarAlvo != null}
+        pendenciaInicial={editarAlvo?.pendencia ?? ''}
+        dataRetornoInicial={editarAlvo?.data_retorno}
+        salvando={editar.isPending}
+        erro={erro}
+        onClose={() => {
+          if (editar.isPending) return;
+          setEditarAlvo(null);
+          setErro(null);
+        }}
+        onSalvar={({ pendencia, dataRetorno }) => {
+          if (!editarAlvo) return;
+          editar.mutate({ id: editarAlvo.id, pendencia, dataRetorno });
+        }}
+      />
     </Modal>
   );
 }

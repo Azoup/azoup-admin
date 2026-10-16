@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Switch, View } from 'react-native';
 
 import { Text } from '@/components/Themed';
@@ -43,6 +43,13 @@ export function AdminUserEditCard({ admin, expanded, onToggleEdit, onSaved }: Pr
   const [role, setRole] = useState<AdminPapel>(roleInicial);
   const [telas, setTelas] = useState<AdminScreenKey[]>(() => telasIniciais(admin.telas_acesso, roleInicial));
   const [active, setActive] = useState(admin.active !== false);
+
+  useEffect(() => {
+    const r = (`${admin.role ?? 'viewer'}` as AdminPapel);
+    setRole(r);
+    setTelas(telasIniciais(admin.telas_acesso, r));
+    setActive(admin.active !== false);
+  }, [admin.id, admin.role, admin.active, admin.telas_acesso]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {

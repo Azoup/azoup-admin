@@ -563,31 +563,45 @@ export default function KanbanConfecScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.background }}>
       <View style={styles.filtros}>
-        <View style={styles.barra}>
-          <Text style={{ color: theme.headerText, fontWeight: '900', fontSize: 18 }}>Kanban Confec</Text>
-          <Pressable onPress={() => setPdfAberto(true)} style={[styles.btn, { borderColor: theme.border }]}>
-            <Text style={[styles.btnTexto, { color: theme.headerText }]}>PDF concluídos</Text>
-          </Pressable>
-          <Pressable onPress={() => setEtiquetasAbertas(true)} style={[styles.btn, { borderColor: theme.border }]}>
-            <Text style={[styles.btnTexto, { color: theme.headerText }]}>Etiquetas</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              setNomeLista('');
-              setCorLista(CORES[0]);
-              setNovaLista(true);
-            }}
-            style={[styles.btn, { borderColor: theme.cadastroAction }]}
-          >
-            <Text style={[styles.btnTexto, { color: theme.cadastroAction }]}>Nova lista</Text>
-          </Pressable>
-          <View style={{ flex: 1.4, minWidth: 180 }}>
+        <View style={styles.barraTopo}>
+          <Text style={[styles.titulo, { color: theme.headerText }]}>Kanban Confec</Text>
+          <View style={styles.acoes}>
+            <Pressable
+              onPress={() => setPdfAberto(true)}
+              style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
+            >
+              <Text style={[styles.btnTexto, { color: theme.headerText }]}>PDF concluídos</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setEtiquetasAbertas(true)}
+              style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
+            >
+              <Text style={[styles.btnTexto, { color: theme.headerText }]}>Etiquetas</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setNomeLista('');
+                setCorLista(CORES[0]);
+                setNovaLista(true);
+              }}
+              style={({ pressed }) => [
+                styles.btn,
+                styles.btnPrimario,
+                { backgroundColor: theme.cadastroAction, opacity: pressed ? 0.9 : 1 },
+              ]}
+            >
+              <Text style={[styles.btnTexto, { color: theme.cadastroActionText }]}>Nova lista</Text>
+            </Pressable>
+          </View>
+        </View>
+        <View style={styles.barraFiltros}>
+          <View style={styles.busca}>
             <FormInput value={busca} onChangeText={setBusca} placeholder="Buscar número, cliente ou título" />
           </View>
-          <View style={{ width: 168 }}>
+          <View style={styles.filtro}>
             <FormSelect options={PERIODOS} value={periodo} onChange={setPeriodo} labels={ROTULO_PERIODO} />
           </View>
-          <View style={{ width: 168 }}>
+          <View style={styles.filtro}>
             <FormSelect
               options={emails}
               value={analista || VAZIO}
@@ -595,7 +609,7 @@ export default function KanbanConfecScreen() {
               labels={{ [VAZIO]: 'Analista' }}
             />
           </View>
-          <View style={{ width: 180 }}>
+          <View style={styles.filtro}>
             <FormSelect
               options={emails}
               value={desenvolvedor || VAZIO}
@@ -605,24 +619,30 @@ export default function KanbanConfecScreen() {
           </View>
         </View>
         {periodo === 'intervalo' ? (
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <View style={{ width: 160 }}>
+          <View style={styles.barraFiltros}>
+            <View style={styles.filtro}>
               <FormDateInput value={de} onChange={setDe} />
             </View>
-            <View style={{ width: 160 }}>
+            <View style={styles.filtro}>
               <FormDateInput value={ate} onChange={setAte} />
             </View>
           </View>
         ) : null}
         {(quadro?.etiquetas.length ?? 0) > 0 ? (
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          <View style={styles.etiquetasFiltro}>
             {(quadro?.etiquetas ?? []).map((etiqueta) => {
               const ativa = etiquetaFiltro.includes(etiqueta.id);
               return (
                 <Pressable
                   key={etiqueta.id}
                   onPress={() => setEtiquetaFiltro((atual) => (ativa ? atual.filter((id) => id !== etiqueta.id) : [...atual, etiqueta.id]))}
-                  style={[styles.btn, { borderColor: etiqueta.color, backgroundColor: ativa ? etiqueta.color : 'transparent' }]}
+                  style={[
+                    styles.chip,
+                    {
+                      borderColor: etiqueta.color,
+                      backgroundColor: ativa ? etiqueta.color : theme.surface,
+                    },
+                  ]}
                 >
                   <Text style={{ color: ativa ? '#1A1408' : etiqueta.color, fontWeight: '800', fontSize: 11 }}>{etiqueta.name}</Text>
                 </Pressable>
@@ -907,7 +927,7 @@ export default function KanbanConfecScreen() {
                             labelIds: ativa ? rascunho.labelIds.filter((id) => id !== etiqueta.id) : [...rascunho.labelIds, etiqueta.id],
                           })
                         }
-                        style={[styles.btn, { borderColor: etiqueta.color, backgroundColor: ativa ? etiqueta.color : 'transparent' }]}
+                        style={[styles.chip, { borderColor: etiqueta.color, backgroundColor: ativa ? etiqueta.color : theme.surface }]}
                       >
                         <Text style={{ color: ativa ? '#1A1408' : etiqueta.color, fontWeight: '800', fontSize: 12 }}>{etiqueta.name}</Text>
                       </Pressable>
@@ -916,11 +936,17 @@ export default function KanbanConfecScreen() {
                 </View>
                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>Criado por {email || '—'}. Cole uma imagem com Ctrl+V.</Text>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Pressable onPress={() => escolherArquivo(true)} style={[styles.btn, { borderColor: theme.border }]}>
-                    <Text style={{ color: theme.headerText, fontWeight: '700', fontSize: 12 }}>Imagem</Text>
+                  <Pressable
+                    onPress={() => escolherArquivo(true)}
+                    style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
+                  >
+                    <Text style={[styles.btnTexto, { color: theme.headerText }]}>Imagem</Text>
                   </Pressable>
-                  <Pressable onPress={() => escolherArquivo(false)} style={[styles.btn, { borderColor: theme.border }]}>
-                    <Text style={{ color: theme.headerText, fontWeight: '700', fontSize: 12 }}>Arquivo</Text>
+                  <Pressable
+                    onPress={() => escolherArquivo(false)}
+                    style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
+                  >
+                    <Text style={[styles.btnTexto, { color: theme.headerText }]}>Arquivo</Text>
                   </Pressable>
                 </View>
                 <PrimaryButton label={salvar.isPending ? 'Salvando…' : 'Salvar'} loading={salvar.isPending} onPress={() => salvar.mutate(rascunho)} />
@@ -1070,11 +1096,41 @@ export default function KanbanConfecScreen() {
 }
 
 const styles = StyleSheet.create({
-  filtros: { flexGrow: 0, flexShrink: 0, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8, gap: 8, zIndex: 5 },
-  barra: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  filtros: { flexGrow: 0, flexShrink: 0, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 10, gap: 10 },
+  barraTopo: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  titulo: { fontWeight: '900', fontSize: 20, letterSpacing: -0.3 },
+  acoes: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  barraFiltros: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  busca: { flexGrow: 1, flexShrink: 1, minWidth: 220, maxWidth: 420 },
+  filtro: { width: 190, flexGrow: 0 },
+  etiquetasFiltro: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   quadro: { flex: 1, minHeight: 0 },
-  btn: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  btnTexto: { fontWeight: '800', fontSize: 12 },
+  btn: {
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnSecundario: {
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  btnPrimario: {
+    borderWidth: 0,
+    shadowColor: '#F07167',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  btnTexto: { fontWeight: '800', fontSize: 13 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   coluna: { width: 300, minHeight: 420, height: '100%', borderWidth: 1, borderTopWidth: 4, borderRadius: 12, padding: 10 },
   miniatura: { width: 72, height: 52, borderRadius: 8, backgroundColor: '#111' },
   lightbox: { width: '92%', height: '82%' },

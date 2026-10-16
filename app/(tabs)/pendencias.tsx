@@ -4,6 +4,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
 import { ConcluirPendenciaModal } from '@/components/ui/ConcluirPendenciaModal';
+import { EditarPendenciaModal } from '@/components/ui/EditarPendenciaModal';
 import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
@@ -15,6 +16,7 @@ import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { listarClientesParaSelecao } from '@/src/services/repos/conversas-repo';
 import {
+  atualizarReuniaoCliente,
   colunaPendencia,
   criarPendenciaAvulsa,
   definirReuniaoConcluida,
@@ -49,6 +51,7 @@ const COLUNAS: { key: PendenciaColuna; label: string; cor: string }[] = [
 function PendenciaCard({
   item,
   cor,
+  onEditar,
   onConcluir,
   onReabrir,
   onArrastar,
@@ -56,6 +59,7 @@ function PendenciaCard({
 }: {
   item: ReuniaoClienteRow;
   cor: string;
+  onEditar: () => void;
   onConcluir: () => void;
   onReabrir: () => void;
   onArrastar: (x: number, y: number) => void;
@@ -101,15 +105,20 @@ function PendenciaCard({
       <View style={styles.cardRodape}>
         <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: 12 }}>{formatYmdBR(item.data_retorno)}</Text>
         <SemArraste>
-          {coluna === 'concluida' ? (
-            <Pressable onPress={onReabrir} hitSlop={6}>
-              <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Reabrir</Text>
+          <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
+            <Pressable onPress={onEditar} hitSlop={6}>
+              <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Editar</Text>
             </Pressable>
-          ) : (
-            <Pressable onPress={onConcluir} hitSlop={6}>
-              <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Concluir</Text>
-            </Pressable>
-          )}
+            {coluna === 'concluida' ? (
+              <Pressable onPress={onReabrir} hitSlop={6}>
+                <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Reabrir</Text>
+              </Pressable>
+            ) : (
+              <Pressable onPress={onConcluir} hitSlop={6}>
+                <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Concluir</Text>
+              </Pressable>
+            )}
+          </View>
         </SemArraste>
       </View>
     </View>
@@ -216,6 +225,7 @@ export default function PendenciasScreen() {
   const [rotuloArraste, setRotuloArraste] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [concluirAlvo, setConcluirAlvo] = useState<ReuniaoClienteRow | null>(null);
+  const [editarAlvo, setEditarAlvo] = useState<ReuniaoClienteRow | null>(null);
   const [autorFiltro, setAutorFiltro] = useState('');
   const fantasmaRef = useRef<View>(null);
   const posicaoArraste = useRef({ x: 0, y: 0 });
@@ -266,6 +276,18 @@ export default function PendenciasScreen() {
       void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
     },
     onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao atualizar pendência'),
+  });
+
+  const editarMutation = useMutation({
+    mutationFn: ({ id, pendencia, dataRetorno }: { id: string; pendencia: string; dataRetorno: string }) =>
+      atualizarReuniaoCliente({ id, pendencia, dataRetorno }),
+    onSuccess: () => {
+      setErro(null);
+      setEditarAlvo(null);
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
+      void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
+    },
+    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao editar pendência'),
   });
 
   function colunaValida(valor: string | null): PendenciaColuna | null {
@@ -419,6 +441,10 @@ export default function PendenciasScreen() {
                         key={item.id}
                         item={item}
                         cor={col.cor}
+                        onEditar={() => {
+                          setErro(null);
+                          setEditarAlvo(item);
+                        }}
                         onConcluir={() => setConcluirAlvo(item)}
                         onReabrir={() => statusMutation.mutate({ id: item.id, concluida: false })}
                         onArrastar={(x, y) => aoArrastar(item, x, y)}
@@ -447,6 +473,22 @@ export default function PendenciasScreen() {
         onConfirmar={(comentario) => {
           if (!concluirAlvo) return;
           statusMutation.mutate({ id: concluirAlvo.id, concluida: true, comentario });
+        }}
+      />
+      <EditarPendenciaModal
+        visible={editarAlvo != null}
+        pendenciaInicial={editarAlvo?.pendencia ?? ''}
+        dataRetornoInicial={editarAlvo?.data_retorno}
+        salvando={editarMutation.isPending}
+        erro={erro}
+        onClose={() => {
+          if (editarMutation.isPending) return;
+          setEditarAlvo(null);
+          setErro(null);
+        }}
+        onSalvar={({ pendencia, dataRetorno }) => {
+          if (!editarAlvo) return;
+          editarMutation.mutate({ id: editarAlvo.id, pendencia, dataRetorno });
         }}
       />
       <NovaPendenciaModal
