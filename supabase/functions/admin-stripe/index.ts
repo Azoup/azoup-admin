@@ -50,33 +50,11 @@ function isAuthEmailAlreadyExists(err: AuthApiErrorLike | null | undefined): boo
   return false;
 }
 
-async function findAuthUserByEmail(
-  supabaseAdmin: ReturnType<typeof createClient>,
-  email: string,
-): Promise<{ id: string; email?: string | null } | null> {
-  const normalized = email.trim().toLowerCase();
-  let page = 1;
-  const perPage = 200;
-
-  while (page <= 50) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
-    if (error) throw error;
-
-    const hit = data.users.find((u) => (u.email ?? '').trim().toLowerCase() === normalized);
-    if (hit) return { id: hit.id, email: hit.email };
-
-    if (data.users.length < perPage) break;
-    page += 1;
-  }
-
-  return null;
-}
-
-async function ensureAuthUserForAdminLogin(
+async function criarAuthUserParaAdminLogin(
   supabaseAdmin: ReturnType<typeof createClient>,
   email: string,
   password: string,
-): Promise<{ authUserId: string; linkedExisting: boolean }> {
+): Promise<string> {
   const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
     email,
     password,
@@ -84,27 +62,14 @@ async function ensureAuthUserForAdminLogin(
   });
 
   if (!createErr && created?.user?.id) {
-    return { authUserId: created.user.id, linkedExisting: false };
+    return created.user.id;
   }
 
-  if (!isAuthEmailAlreadyExists(createErr)) {
-    throw createErr ?? new Error('Falha ao criar usuário no Auth');
+  if (isAuthEmailAlreadyExists(createErr)) {
+    throw new Error('Já existe um login com este e-mail. Edite o usuário na lista ou use outro e-mail.');
   }
 
-  const existing = await findAuthUserByEmail(supabaseAdmin, email);
-  if (!existing) {
-    throw new Error(
-      'E-mail já existe no Auth, mas não foi possível localizar o usuário para vincular o acesso administrativo.',
-    );
-  }
-
-  const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(existing.id, {
-    password,
-    email_confirm: true,
-  });
-  if (updateErr) throw updateErr;
-
-  return { authUserId: existing.id, linkedExisting: true };
+  throw createErr ?? new Error('Falha ao criar usuário no Auth');
 }
 
 const NF_CHUNK = 80;
@@ -1287,34 +1252,41 @@ serve(async (req) => {
         throw new Error('A tela Acessos só pode ser liberada para perfil owner');
       }
 
-      const { authUserId, linkedExisting } = await ensureAuthUserForAdminLogin(
-        supabaseAdmin,
-        email,
-        password,
-      );
-
-      const { data: adminUpsert, error: adminUpsertErr } = await supabaseAdmin
+      const { data: adminExistente, error: adminExistenteErr } = await supabaseAdmin
         .from('admin_users')
-        .upsert(
-          {
-            email,
-            role,
-            active,
-            telas_acesso,
-            created_by_admin: user.email ?? null,
-            updated_at: new Date().toISOString(),
-          } as never,
-          { onConflict: 'email' },
-        )
+        .select('id')
+        .eq('email', email)
+        .maybeSingle();
+      if (adminExistenteErr) throw adminExistenteErr;
+      if (adminExistente) {
+        throw new Error('Já existe um acesso com este e-mail. Edite o usuário na lista ou use outro e-mail.');
+      }
+
+      const authUserId = await criarAuthUserParaAdminLogin(supabaseAdmin, email, password);
+
+      const { data: adminCriado, error: adminCriadoErr } = await supabaseAdmin
+        .from('admin_users')
+        .insert({
+          email,
+          role,
+          active,
+          telas_acesso,
+          created_by_admin: user.email ?? null,
+          updated_at: new Date().toISOString(),
+        } as never)
         .select('id,email,role,active,telas_acesso,created_at,updated_at')
         .single();
 
-      if (adminUpsertErr) throw adminUpsertErr;
+      if (adminCriadoErr) {
+        if (/duplicate|unique|already exists/i.test(adminCriadoErr.message)) {
+          throw new Error('Já existe um acesso com este e-mail. Edite o usuário na lista ou use outro e-mail.');
+        }
+        throw adminCriadoErr;
+      }
 
       return new Response(JSON.stringify({
-        admin: adminUpsert,
+        admin: adminCriado,
         auth_user_id: authUserId,
-        linked_existing_auth: linkedExisting,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
