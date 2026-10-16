@@ -26,9 +26,11 @@ import { dataCalendarioBrasil, formatDateTimeBR, formatYmdBR } from '@/src/utils
 
 const TODAS = '__todas__';
 
-const PERIODOS = ['mes_atual', 'mes_passado', '7d', '30d', 'hoje', 'todos'] as const satisfies readonly PeriodoFiltroPreset[];
+const PERIODOS = ['mes_atual', 'mes_passado', '7d', '30d', 'hoje', 'todos'] as const;
 
-const PERIODO_LABELS: Record<(typeof PERIODOS)[number], string> = {
+type PeriodoNota = (typeof PERIODOS)[number];
+
+const PERIODO_LABELS: Record<PeriodoNota, string> = {
   mes_atual: 'Este mês',
   mes_passado: 'Mês passado',
   '7d': 'Últimos 7 dias',
@@ -51,7 +53,7 @@ export default function NotasAtualizacaoScreen() {
   const pode = canAccessScreen('notas_atualizacao') || canAccessScreen('kanban_confec');
   const [busca, setBusca] = useState('');
   const [secao, setSecao] = useState<string>(TODAS);
-  const [periodo, setPeriodo] = useState<(typeof PERIODOS)[number]>('mes_atual');
+  const [periodo, setPeriodo] = useState<PeriodoNota>('mes_atual');
   const [detalhe, setDetalhe] = useState<ConfecCard | null>(null);
   const [editando, setEditando] = useState(false);
   const [editLinha, setEditLinha] = useState('');
@@ -75,7 +77,7 @@ export default function NotasAtualizacaoScreen() {
       resolverIntervaloPeriodo({
         busca: '',
         status: 'todos',
-        periodoPreset: periodo,
+        periodoPreset: periodo as PeriodoFiltroPreset,
         dataInicio: null,
         dataFim: null,
       }),
