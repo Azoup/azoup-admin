@@ -187,7 +187,8 @@ function ConversaModal({
         adminEmail: adminProfile?.email ?? session?.user?.email ?? null,
       });
     },
-    onSuccess: () => {
+    onSuccess: (row) => {
+      registrarUltimoChamadoVisto(cliente!.id, row.data_conversa ?? dataConversa);
       setDescricao('');
       setErro(null);
       onSaved();
@@ -2372,7 +2373,8 @@ export default function AcompanhamentoScreen() {
     for (const [id, data] of Object.entries(syncChamadosQ.data?.contatos ?? {})) {
       const chamado = `${data ?? ''}`.slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(chamado)) continue;
-      map.set(id, chamado);
+      const atual = map.get(id);
+      if (!atual || chamado > atual) map.set(id, chamado);
     }
     return map;
   }, [contatosQ.data, syncChamadosQ.data]);

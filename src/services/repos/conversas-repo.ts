@@ -204,16 +204,7 @@ export async function excluirConversaCliente(id: string): Promise<void> {
   if (error) throw new Error(erroHistorico(error.message, 'admin_cliente_conversas'));
 }
 
-const diasChamadoVistos = new Map<string, string>();
-
-/** Guarda o dia do chamado já exibido, para o card não voltar à data da conversa. */
-export function registrarUltimoChamadoVisto(clienteId: string, dia: string | null) {
-  const id = clienteId.trim();
-  const data = `${dia ?? ''}`.trim().slice(0, 10);
-  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(data)) return;
-  const atual = diasChamadoVistos.get(id);
-  if (!atual || data > atual) diasChamadoVistos.set(id, data);
-}
+const datasContatoVistas = new Map<string, string>();
 
 function guardarData(map: Map<string, string>, clienteId: string, data: string | null) {
   const id = clienteId.trim();
@@ -223,16 +214,22 @@ function guardarData(map: Map<string, string>, clienteId: string, data: string |
   if (!atual || dia > atual) map.set(id, dia);
 }
 
-/** Data do último chamado Digisac. Sem chamado, usa a conversa registrada. */
+/** Atualiza o cache local com a data mais recente de contato (conversa ou Digisac). */
+export function registrarUltimoChamadoVisto(clienteId: string, dia: string | null) {
+  guardarData(datasContatoVistas, clienteId, dia);
+}
+
+/** Último contato = data mais recente entre conversa manual e chamado Digisac. */
 export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>();
-  const chamadosPorCliente = new Map<string, string>();
   if (!clienteIds.length) return map;
 
   const CHUNK = 200;
   for (let i = 0; i < clienteIds.length; i += CHUNK) {
     const chunk = clienteIds.slice(i, i + CHUNK);
     const conversas = new Map<string, string>();
+    const chamadosPorCliente = new Map<string, string>();
+
     const { data, error } = await supabase
       .from('admin_cliente_conversas')
       .select('cliente_id,data_conversa,hora_conversa')
@@ -268,16 +265,10 @@ export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promi
     }
 
     for (const id of chunk) {
-      const chamado = chamadosPorCliente.get(id);
-      if (chamado) map.set(id, chamado);
-      else {
-        const conversa = conversas.get(id);
-        if (conversa) map.set(id, conversa);
-      }
+      guardarData(map, id, conversas.get(id) ?? null);
+      guardarData(map, id, chamadosPorCliente.get(id) ?? null);
+      guardarData(map, id, datasContatoVistas.get(id) ?? null);
     }
-  }
-  for (const [id, dia] of diasChamadoVistos) {
-    if (clienteIds.includes(id)) map.set(id, dia);
   }
   return map;
 }

@@ -26,6 +26,7 @@ import {
   excluirConversaCliente,
   listarClientesParaSelecao,
   listarConversasClientes,
+  registrarUltimoChamadoVisto,
   rotuloClienteConversa,
   type ClienteConversaComCliente,
 } from '@/src/services/repos/conversas-repo';
@@ -106,18 +107,22 @@ function ConversaFormModal({
             },
           },
         );
-        return;
+        return { clienteId: conversa.cliente_id, dataConversa: dataConversa.trim() };
       }
       if (!cliente) throw new Error('Selecione um cliente.');
-      return criarConversaCliente({
+      const criada = await criarConversaCliente({
         clienteId: cliente.id,
         dataConversa,
         horaConversa,
         descricao,
         adminEmail,
       });
+      return { clienteId: criada.cliente_id, dataConversa: criada.data_conversa ?? dataConversa.trim() };
     },
-    onSuccess: () => {
+    onSuccess: (resultado) => {
+      if (resultado?.clienteId) {
+        registrarUltimoChamadoVisto(resultado.clienteId, resultado.dataConversa);
+      }
       setErro(null);
       onSaved();
       onClose();
