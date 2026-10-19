@@ -72,6 +72,45 @@ const ROTULO_PERIODO: Record<Periodo, string> = {
   intervalo: 'Intervalo',
 };
 
+function extensaoImagemMime(mime: string): string {
+  const tipo = mime.toLowerCase();
+  if (tipo.includes('jpeg') || tipo.includes('jpg')) return 'jpg';
+  if (tipo.includes('gif')) return 'gif';
+  if (tipo.includes('webp')) return 'webp';
+  return 'png';
+}
+
+function normalizarImagemColada(arquivo: File, mimeHint?: string): File {
+  const tipo = (mimeHint || arquivo.type || 'image/png').toLowerCase();
+  const mime = tipo.startsWith('image/') ? tipo : 'image/png';
+  const nomeOk = arquivo.name && /\.(png|jpe?g|gif|webp)$/i.test(arquivo.name);
+  if (nomeOk && arquivo.type) return arquivo;
+  const nome = `imagem-colada-${Date.now()}.${extensaoImagemMime(mime)}`;
+  return new File([arquivo], nome, { type: mime, lastModified: arquivo.lastModified || Date.now() });
+}
+
+function imagemDoClipboard(data: DataTransfer | null): File | null {
+  if (!data) return null;
+  if (data.items) {
+    for (let i = 0; i < data.items.length; i++) {
+      const item = data.items[i];
+      if (!item?.type?.startsWith('image/')) continue;
+      const arquivo = item.getAsFile();
+      if (arquivo) return normalizarImagemColada(arquivo, item.type);
+    }
+  }
+  if (data.files) {
+    for (let i = 0; i < data.files.length; i++) {
+      const arquivo = data.files[i];
+      if (!arquivo) continue;
+      if (arquivo.type.startsWith('image/') || ehImagemAnexo(arquivo.type, arquivo.name)) {
+        return normalizarImagemColada(arquivo, arquivo.type);
+      }
+    }
+  }
+  return null;
+}
+
 function normalizarCor(valor: string): string {
   const limpo = valor.trim();
   const cheio = /^#?([0-9a-fA-F]{6})$/.exec(limpo);
@@ -315,6 +354,10 @@ export default function KanbanConfecScreen() {
   const [pdfAberto, setPdfAberto] = useState(false);
   const [imagemAberta, setImagemAberta] = useState<string | null>(null);
   const [anexando, setAnexando] = useState(false);
+  const anexandoRef = useRef(false);
+  const anexarRef = useRef<(arquivo: File, imagem: boolean) => Promise<void>>(async () => undefined);
+  const cardIdAnexoRef = useRef<string | null>(null);
+  const rascunhoRef = useRef<Rascunho | null>(null);
   const inputArquivoRef = useRef<HTMLInputElement | null>(null);
   const [comentario, setComentario] = useState('');
   const [comentarioEdit, setComentarioEdit] = useState<{ id: string; texto: string } | null>(null);
@@ -381,6 +424,8 @@ export default function KanbanConfecScreen() {
 
   const detalhe = quadro?.cards.find((card) => card.id === detalheId) ?? null;
   const clienteRascunho = (clientesQ.data ?? []).find((cliente) => cliente.id === rascunho?.clienteId) ?? null;
+  rascunhoRef.current = rascunho;
+  cardIdAnexoRef.current = rascunho?.id ?? detalheId;
 
   function auditar(acao: string, id: string, antes: Record<string, unknown> | null, depois: Record<string, unknown> | null) {
     void registrarAuditoria(
@@ -539,36 +584,71 @@ export default function KanbanConfecScreen() {
     auditar('Moveu card no Kanban Confec', card.id, { status: card.status }, { status: slug });
   }
 
-  async function anexar(arquivo: File, imagem: boolean) {
-    const cardId = rascunho?.id ?? detalheId;
-    if (!cardId) {
-      setErro('Salve o ticket antes de anexar arquivos ou imagens.');
-      return;
+  async function garantirCardParaAnexo(): Promise<string | null> {
+    if (cardIdAnexoRef.current) return cardIdAnexoRef.current;
+    const atual = rascunhoRef.current;
+    if (!atual) {
+      setErro('Abra um ticket para anexar.');
+      return null;
     }
+    const title = normalizarTitulo(atual.title) || 'Novo ticket';
+    const id = await criarCardConfec({
+      title,
+      status: atual.status,
+      description: atual.description,
+      devNotes: atual.devNotes,
+      clienteId: atual.clienteId,
+      analistaEmail: atual.analista,
+      desenvolvedorEmail: atual.desenvolvedor,
+      createdByEmail: email,
+      secao: atual.secao || null,
+      tela: atual.tela,
+      telaNova: atual.telaNova,
+      labelIds: atual.labelIds,
+    });
+    cardIdAnexoRef.current = id;
+    const proximo = {
+      ...atual,
+      id,
+      title: normalizarTitulo(atual.title) ? atual.title : title,
+    };
+    setRascunho({ ...proximo, base: chaveRascunho(proximo) });
+    auditar('Criou card no Kanban Confec', id, null, { titulo: title, via: 'anexo' });
+    return id;
+  }
+
+  async function anexar(arquivo: File, imagem: boolean) {
+    if (anexandoRef.current) return;
+    anexandoRef.current = true;
     setAnexando(true);
     setErro(null);
     try {
+      const cardId = await garantirCardParaAnexo();
+      if (!cardId) return;
       const comoImagem = imagem || ehImagemAnexo(arquivo.type, arquivo.name);
+      const nome = arquivo.name || (comoImagem ? `imagem-colada-${Date.now()}.png` : 'arquivo');
       await enviarAnexoConfec({
         cardId,
         arquivo,
-        nome: arquivo.name || (comoImagem ? 'imagem.png' : 'arquivo'),
-        mime: arquivo.type,
+        nome,
+        mime: arquivo.type || (comoImagem ? 'image/png' : 'application/octet-stream'),
         imagem: comoImagem,
         authorEmail: email,
       });
       auditar('Anexou arquivo no Kanban Confec', cardId, null, {
         imagens: comoImagem ? 1 : 0,
         arquivos: comoImagem ? 0 : 1,
-        nome: arquivo.name,
+        nome,
       });
       await qc.invalidateQueries({ queryKey: ['confec_kanban'] });
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro ao anexar');
     } finally {
+      anexandoRef.current = false;
       setAnexando(false);
     }
   }
+  anexarRef.current = anexar;
 
   function escolherArquivo(imagem: boolean) {
     if (typeof document === 'undefined') return;
@@ -598,24 +678,19 @@ export default function KanbanConfecScreen() {
   }
 
   useEffect(() => {
-    if ((!rascunho && !detalheId) || typeof window === 'undefined') return;
+    const modalAberto = rascunho != null || detalheId != null;
+    if (!modalAberto || typeof window === 'undefined') return;
     const aoColar = (event: ClipboardEvent) => {
-      const itens = event.clipboardData?.items;
-      if (!itens) return;
-      for (let i = 0; i < itens.length; i++) {
-        const item = itens[i];
-        if (!item.type.startsWith('image/')) continue;
-        const arquivo = item.getAsFile();
-        if (arquivo) {
-          event.preventDefault();
-          void anexar(arquivo, true);
-          break;
-        }
-      }
+      if (anexandoRef.current) return;
+      const arquivo = imagemDoClipboard(event.clipboardData);
+      if (!arquivo) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void anexarRef.current(arquivo, true);
     };
-    window.addEventListener('paste', aoColar);
-    return () => window.removeEventListener('paste', aoColar);
-  }, [rascunho?.id, detalheId]);
+    window.addEventListener('paste', aoColar, true);
+    return () => window.removeEventListener('paste', aoColar, true);
+  }, [rascunho != null, detalheId]);
 
   if (!pode) {
     return (
@@ -858,6 +933,7 @@ export default function KanbanConfecScreen() {
                   ))}
                 </View>
                 <Text style={{ color: theme.headerText, fontWeight: '800' }}>Anexos</Text>
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>Cole uma imagem com Ctrl+V.</Text>
                 {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
                 {anexando ? <Text style={{ color: theme.textMuted }}>Enviando anexo…</Text> : null}
                 <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -1083,13 +1159,13 @@ export default function KanbanConfecScreen() {
                   })}
                 </View>
                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                  Criado por {email || '—'}. {rascunho.id ? 'Cole uma imagem com Ctrl+V.' : 'Salve o ticket para liberar anexos.'}
+                  Criado por {email || '—'}. Cole uma imagem com Ctrl+V (mesmo sem salvar).
                 </Text>
                 {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
                 {anexando ? <Text style={{ color: theme.textMuted }}>Enviando anexo…</Text> : null}
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <Pressable
-                    disabled={anexando || !rascunho.id}
+                    disabled={anexando}
                     onPress={() => escolherArquivo(true)}
                     style={({ pressed }) => [
                       styles.btn,
@@ -1097,14 +1173,14 @@ export default function KanbanConfecScreen() {
                       {
                         borderColor: theme.border,
                         backgroundColor: theme.surface,
-                        opacity: pressed || anexando || !rascunho.id ? 0.55 : 1,
+                        opacity: pressed || anexando ? 0.55 : 1,
                       },
                     ]}
                   >
                     <Text style={[styles.btnTexto, { color: theme.headerText }]}>Imagem</Text>
                   </Pressable>
                   <Pressable
-                    disabled={anexando || !rascunho.id}
+                    disabled={anexando}
                     onPress={() => escolherArquivo(false)}
                     style={({ pressed }) => [
                       styles.btn,
@@ -1112,60 +1188,59 @@ export default function KanbanConfecScreen() {
                       {
                         borderColor: theme.border,
                         backgroundColor: theme.surface,
-                        opacity: pressed || anexando || !rascunho.id ? 0.55 : 1,
+                        opacity: pressed || anexando ? 0.55 : 1,
                       },
                     ]}
                   >
                     <Text style={[styles.btnTexto, { color: theme.headerText }]}>Arquivo</Text>
                   </Pressable>
                 </View>
-                {rascunho.id
-                  ? (() => {
-                      const card = quadro?.cards.find((item) => item.id === rascunho.id);
-                      const imagens = card?.imagens ?? [];
-                      const arquivos = card?.arquivos ?? [];
-                      if (!imagens.length && !arquivos.length) {
-                        return <Text style={{ color: theme.textMuted, fontSize: 12 }}>Nenhum anexo neste ticket.</Text>;
-                      }
-                      return (
-                        <View style={{ gap: 8 }}>
-                          {imagens.map((imagem) => (
-                            <View key={imagem.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                              <Pressable onPress={() => setImagemAberta(imagem.url)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                                <Image source={{ uri: imagem.url }} style={styles.miniatura} />
-                                <Text style={{ color: theme.cadastroAction, flex: 1 }}>{imagem.nome}</Text>
-                              </Pressable>
-                              <Pressable
-                                onPress={() =>
-                                  void excluirAnexoConfec(imagem, true)
-                                    .then(() => qc.invalidateQueries({ queryKey: ['confec_kanban'] }))
-                                    .catch((e) => setErro(e instanceof Error ? e.message : 'Erro ao excluir imagem'))
-                                }
-                              >
-                                <Text style={{ color: theme.error, fontSize: 12 }}>Excluir</Text>
-                              </Pressable>
-                            </View>
-                          ))}
-                          {arquivos.map((arquivo) => (
-                            <View key={arquivo.id} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                              <Pressable onPress={() => void Linking.openURL(arquivo.url)}>
-                                <Text style={{ color: theme.cadastroAction }}>{arquivo.nome}</Text>
-                              </Pressable>
-                              <Pressable
-                                onPress={() =>
-                                  void excluirAnexoConfec(arquivo, false)
-                                    .then(() => qc.invalidateQueries({ queryKey: ['confec_kanban'] }))
-                                    .catch((e) => setErro(e instanceof Error ? e.message : 'Erro ao excluir arquivo'))
-                                }
-                              >
-                                <Text style={{ color: theme.error, fontSize: 12 }}>Excluir</Text>
-                              </Pressable>
-                            </View>
-                          ))}
+                {(() => {
+                  const cardId = rascunho.id ?? cardIdAnexoRef.current;
+                  const card = cardId ? quadro?.cards.find((item) => item.id === cardId) : null;
+                  const imagens = card?.imagens ?? [];
+                  const arquivos = card?.arquivos ?? [];
+                  if (!imagens.length && !arquivos.length) {
+                    return <Text style={{ color: theme.textMuted, fontSize: 12 }}>Nenhum anexo neste ticket.</Text>;
+                  }
+                  return (
+                    <View style={{ gap: 8 }}>
+                      {imagens.map((imagem) => (
+                        <View key={imagem.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                          <Pressable onPress={() => setImagemAberta(imagem.url)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                            <Image source={{ uri: imagem.url }} style={styles.miniatura} />
+                            <Text style={{ color: theme.cadastroAction, flex: 1 }}>{imagem.nome}</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() =>
+                              void excluirAnexoConfec(imagem, true)
+                                .then(() => qc.invalidateQueries({ queryKey: ['confec_kanban'] }))
+                                .catch((e) => setErro(e instanceof Error ? e.message : 'Erro ao excluir imagem'))
+                            }
+                          >
+                            <Text style={{ color: theme.error, fontSize: 12 }}>Excluir</Text>
+                          </Pressable>
                         </View>
-                      );
-                    })()
-                  : null}
+                      ))}
+                      {arquivos.map((arquivo) => (
+                        <View key={arquivo.id} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Pressable onPress={() => void Linking.openURL(arquivo.url)}>
+                            <Text style={{ color: theme.cadastroAction }}>{arquivo.nome}</Text>
+                          </Pressable>
+                          <Pressable
+                            onPress={() =>
+                              void excluirAnexoConfec(arquivo, false)
+                                .then(() => qc.invalidateQueries({ queryKey: ['confec_kanban'] }))
+                                .catch((e) => setErro(e instanceof Error ? e.message : 'Erro ao excluir arquivo'))
+                            }
+                          >
+                            <Text style={{ color: theme.error, fontSize: 12 }}>Excluir</Text>
+                          </Pressable>
+                        </View>
+                      ))}
+                    </View>
+                  );
+                })()}
                 <PrimaryButton label={salvar.isPending ? 'Salvando…' : 'Salvar'} loading={salvar.isPending} onPress={() => salvar.mutate(rascunho)} />
               </View>
             </ScrollView>
