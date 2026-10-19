@@ -281,6 +281,7 @@ export interface AdminAcompanhamentoKanbanRow {
   ultima_dificuldade?: string | null;
   proxima_acao?: string | null;
   aguardando_retorno?: boolean | null;
+  motivo_cancelamento?: string | null;
 }
 
 export interface AdminClienteCongelamentoRow {

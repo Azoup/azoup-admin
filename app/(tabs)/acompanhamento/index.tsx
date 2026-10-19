@@ -385,6 +385,69 @@ function MoverModal({
   );
 }
 
+function CancelamentoModal({
+  cliente,
+  visible,
+  onClose,
+  onConfirmar,
+  saving,
+}: {
+  cliente: AcompanhamentoCliente | null;
+  visible: boolean;
+  onClose: () => void;
+  onConfirmar: (motivo: string) => void;
+  saving: boolean;
+}) {
+  const { theme } = useTheme();
+  const [motivo, setMotivo] = useState('');
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    setMotivo(cliente?.motivo_cancelamento?.trim() || '');
+    setErro(null);
+  }, [visible, cliente?.id, cliente?.motivo_cancelamento]);
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[styles.moverCard, { backgroundColor: theme.surface, borderColor: theme.border, maxWidth: 440 }]}>
+          <Text style={{ fontWeight: '800', fontSize: 16, color: theme.headerText }}>
+            Cancelar · {cliente?.nome ?? 'Cliente'}
+          </Text>
+          <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+            Informe o motivo do cancelamento. Ele fica salvo no card.
+          </Text>
+          <FormField label="Motivo" required>
+            <FormInput
+              value={motivo}
+              onChangeText={setMotivo}
+              placeholder="Ex.: cliente desistiu do trial, migrou para outro sistema…"
+              multiline
+              style={styles.areaHistorico}
+            />
+          </FormField>
+          {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
+          <PrimaryButton
+            label={saving ? 'Salvando…' : 'Confirmar cancelamento'}
+            loading={saving}
+            onPress={() => {
+              const texto = motivo.trim();
+              if (!texto) {
+                setErro('Digite o motivo do cancelamento.');
+                return;
+              }
+              setErro(null);
+              onConfirmar(texto);
+            }}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function AcoesRegistro({
   confirmar,
   podeExcluir,
@@ -1217,6 +1280,12 @@ export function HistoricoClienteTela({
                     : `${formatYmdBR(ultimoContatoQ.data)} · ${rotuloUltimoContato(ultimoContatoQ.data)}`}
                 </Text>
               </Text>
+              {cliente.coluna === 'cancelado' || cliente.motivo_cancelamento?.trim() ? (
+                <Text style={{ color: theme.text, fontSize: 14 }}>
+                  Motivo do cancelamento:{' '}
+                  <Text style={{ fontWeight: '800' }}>{cliente.motivo_cancelamento?.trim() || '—'}</Text>
+                </Text>
+              ) : null}
               <Text style={{ color: theme.text, fontSize: 14 }}>
                 Desde {cadastroEm} · {rotuloTempoCadastro(cliente?.created_at)}
               </Text>
@@ -2064,6 +2133,11 @@ function KanbanCard({
                 Aguardando retorno
               </Text>
             ) : null}
+            {item.coluna === 'cancelado' ? (
+              <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: '800', marginTop: 4 }} numberOfLines={2}>
+                Cancelado{item.motivo_cancelamento?.trim() ? `: ${item.motivo_cancelamento.trim()}` : ''}
+              </Text>
+            ) : null}
           </View>
         </Pressable>
         <SemArraste>
@@ -2143,7 +2217,25 @@ function KanbanCard({
         style={({ pressed }) => ({ opacity: pressed ? 0.88 : 1 })}
       >
       <View style={[styles.fichaBloco, { borderTopColor: theme.border }]}>
-        <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>ÚLTIMA DIFICULDADE</Text>
+        {item.coluna === 'cancelado' || item.motivo_cancelamento?.trim() ? (
+          <>
+            <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>MOTIVO DO CANCELAMENTO</Text>
+            <Text style={{ color: theme.text, fontSize: 13, marginTop: 3 }}>
+              {item.motivo_cancelamento?.trim() || '—'}
+            </Text>
+          </>
+        ) : null}
+        <Text
+          style={[
+            styles.secaoLabel,
+            {
+              color: theme.textMuted,
+              marginTop: item.coluna === 'cancelado' || item.motivo_cancelamento?.trim() ? 10 : 0,
+            },
+          ]}
+        >
+          ÚLTIMA DIFICULDADE
+        </Text>
         <Text style={{ color: theme.text, fontSize: 13, marginTop: 3 }}>{item.ultima_dificuldade?.trim() || '—'}</Text>
         <Text style={[styles.secaoLabel, { color: theme.textMuted, marginTop: 10 }]}>PRÓXIMA AÇÃO</Text>
         <Text style={{ color: theme.text, fontSize: 13, marginTop: 3 }}>{item.proxima_acao?.trim() || '—'}</Text>
@@ -2320,6 +2412,7 @@ export default function AcompanhamentoScreen() {
   const [clienteReuniao, setClienteReuniao] = useState<AcompanhamentoCliente | null>(null);
   const [clienteFicha, setClienteFicha] = useState<AcompanhamentoCliente | null>(null);
   const [clienteMover, setClienteMover] = useState<AcompanhamentoCliente | null>(null);
+  const [clienteCancelar, setClienteCancelar] = useState<AcompanhamentoCliente | null>(null);
   const [clienteMensagem, setClienteMensagem] = useState<AcompanhamentoCliente | null>(null);
   const [dropOverColuna, setDropOverColuna] = useState<AcompanhamentoColuna | null>(null);
   const [rotuloArraste, setRotuloArraste] = useState<string | null>(null);
@@ -2456,16 +2549,34 @@ export default function AcompanhamentoScreen() {
   const adminEmail = adminProfile?.email ?? session?.user?.email ?? null;
 
   const moverMutation = useMutation({
-    mutationFn: async ({ clienteId, coluna }: { clienteId: string; coluna: AcompanhamentoColuna }) =>
-      moverClienteKanban({ clienteId, coluna, adminEmail }),
-    onMutate: async ({ clienteId, coluna }) => {
+    mutationFn: async ({
+      clienteId,
+      coluna,
+      motivoCancelamento,
+    }: {
+      clienteId: string;
+      coluna: AcompanhamentoColuna;
+      motivoCancelamento?: string | null;
+    }) => moverClienteKanban({ clienteId, coluna, adminEmail, motivoCancelamento }),
+    onMutate: async ({ clienteId, coluna, motivoCancelamento }) => {
       setErroMove(null);
       await qc.cancelQueries({ queryKey: ['acompanhamento_clientes'] });
       const prev = qc.getQueryData<Board>(['acompanhamento_clientes']);
       if (prev) {
         qc.setQueryData(
           ['acompanhamento_clientes'],
-          recomporBoard(prev.clientes.map((c) => (c.id === clienteId ? { ...c, coluna, etiqueta: coluna } : c))),
+          recomporBoard(
+            prev.clientes.map((c) =>
+              c.id === clienteId
+                ? {
+                    ...c,
+                    coluna,
+                    etiqueta: coluna,
+                    motivo_cancelamento: coluna === 'cancelado' ? motivoCancelamento?.trim() || null : null,
+                  }
+                : c,
+            ),
+          ),
         );
       }
       return { prev };
@@ -2482,9 +2593,20 @@ export default function AcompanhamentoScreen() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
       setClienteMover(null);
+      setClienteCancelar(null);
       setDropOverColuna(null);
     },
   });
+
+  function solicitarMovimento(cliente: AcompanhamentoCliente, coluna: AcompanhamentoColuna) {
+    if (coluna === cliente.coluna) return;
+    if (coluna === 'cancelado') {
+      setClienteMover(null);
+      setClienteCancelar(cliente);
+      return;
+    }
+    moverMutation.mutate({ clienteId: cliente.id, coluna });
+  }
 
   const fichaMutation = useMutation({
     mutationFn: async (ficha: {
@@ -2776,7 +2898,7 @@ export default function AcompanhamentoScreen() {
                 setRotuloArraste(null);
                 setDropOverColuna(null);
                 if (!isAcompanhamentoColuna(col) || col === item.coluna) return;
-                moverMutation.mutate({ clienteId: item.id, coluna: col });
+                solicitarMovimento(item, col);
               }}
             />
           ))}
@@ -2824,7 +2946,21 @@ export default function AcompanhamentoScreen() {
         moving={moverMutation.isPending}
         onMover={(coluna) => {
           if (!clienteMover) return;
-          moverMutation.mutate({ clienteId: clienteMover.id, coluna });
+          solicitarMovimento(clienteMover, coluna);
+        }}
+      />
+      <CancelamentoModal
+        cliente={clienteCancelar}
+        visible={Boolean(clienteCancelar)}
+        saving={moverMutation.isPending}
+        onClose={() => setClienteCancelar(null)}
+        onConfirmar={(motivo) => {
+          if (!clienteCancelar) return;
+          moverMutation.mutate({
+            clienteId: clienteCancelar.id,
+            coluna: 'cancelado',
+            motivoCancelamento: motivo,
+          });
         }}
       />
       {clienteMensagem ? (

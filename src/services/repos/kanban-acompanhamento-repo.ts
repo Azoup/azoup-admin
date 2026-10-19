@@ -8,10 +8,10 @@ import {
 const CHUNK = 200;
 const SELECT_BASE = 'cliente_id,coluna,ordem,admin_email,updated_at';
 const SELECT_FICHA =
-  'ultima_reuniao,proxima_reuniao,pendencias_abertas,ultima_dificuldade,proxima_acao,aguardando_retorno';
+  'ultima_reuniao,proxima_reuniao,pendencias_abertas,ultima_dificuldade,proxima_acao,aguardando_retorno,motivo_cancelamento';
 
 function faltaColunaFicha(message: string): boolean {
-  return /ultima_reuniao|proxima_reuniao|pendencias_abertas|ultima_dificuldade|proxima_acao|aguardando_retorno|schema cache/i.test(
+  return /ultima_reuniao|proxima_reuniao|pendencias_abertas|ultima_dificuldade|proxima_acao|aguardando_retorno|motivo_cancelamento|schema cache/i.test(
     message,
   );
 }
@@ -56,9 +56,15 @@ export async function moverClienteKanban(params: {
   coluna: AcompanhamentoColuna;
   adminEmail?: string | null;
   ordem?: number;
+  motivoCancelamento?: string | null;
 }): Promise<AdminAcompanhamentoKanbanRow> {
   if (!params.clienteId) throw new Error('Cliente inválido.');
   if (!isAcompanhamentoColuna(params.coluna)) throw new Error('Coluna inválida.');
+
+  const motivo = `${params.motivoCancelamento ?? ''}`.trim();
+  if (params.coluna === 'cancelado' && !motivo) {
+    throw new Error('Informe o motivo do cancelamento.');
+  }
 
   const { data, error } = await supabase
     .from('admin_acompanhamento_kanban')
@@ -68,14 +74,20 @@ export async function moverClienteKanban(params: {
         coluna: params.coluna,
         ordem: params.ordem ?? 0,
         admin_email: params.adminEmail ?? null,
+        motivo_cancelamento: params.coluna === 'cancelado' ? motivo : null,
         updated_at: new Date().toISOString(),
       } as never,
       { onConflict: 'cliente_id' },
     )
-    .select(SELECT_BASE)
+    .select(`${SELECT_BASE},motivo_cancelamento`)
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (/motivo_cancelamento|check constraint|coluna/i.test(error.message)) {
+      throw new Error('Execute supabase/sql/admin_acompanhamento_kanban.sql no Supabase para a coluna Cancelado.');
+    }
+    throw new Error(error.message);
+  }
   return data as unknown as AdminAcompanhamentoKanbanRow;
 }
 

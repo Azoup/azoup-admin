@@ -91,6 +91,7 @@ export async function carregarAcompanhamentoClientes(): Promise<{
       ultima_dificuldade: kb?.ultima_dificuldade ?? null,
       proxima_acao: kb?.proxima_acao ?? null,
       aguardando_retorno: Boolean(kb?.aguardando_retorno),
+      motivo_cancelamento: kb?.motivo_cancelamento ?? null,
     });
   });
 

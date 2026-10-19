@@ -8,7 +8,8 @@ export type AcompanhamentoColuna =
   | 'treinamento_acompanhamento'
   | 'sistema_em_uso'
   | 'treinamento_finalizado'
-  | 'acompanhamento_finalizado';
+  | 'acompanhamento_finalizado'
+  | 'cancelado';
 
 /** @deprecated use AcompanhamentoColuna — mantido para compat. */
 export type AcompanhamentoEtiqueta = AcompanhamentoColuna;
@@ -45,6 +46,7 @@ export type AcompanhamentoCliente = {
   ultima_dificuldade?: string | null;
   proxima_acao?: string | null;
   aguardando_retorno?: boolean;
+  motivo_cancelamento?: string | null;
 };
 
 export const ACOMPANHAMENTO_COLUNAS: {
@@ -58,6 +60,7 @@ export const ACOMPANHAMENTO_COLUNAS: {
   { key: 'sistema_em_uso', label: 'Sistema em uso', cor: '#4C9AFF' },
   { key: 'treinamento_finalizado', label: 'Treinamento finalizado', cor: '#3DDC97' },
   { key: 'acompanhamento_finalizado', label: 'Acompanhamento finalizado', cor: '#22C55E' },
+  { key: 'cancelado', label: 'Cancelado', cor: '#6B7280' },
 ];
 
 /** Alias legado. */
@@ -164,6 +167,7 @@ export function agrupamentoAcompanhamentoVazio(): Record<AcompanhamentoColuna, A
     sistema_em_uso: [],
     treinamento_finalizado: [],
     acompanhamento_finalizado: [],
+    cancelado: [],
   };
 }
 

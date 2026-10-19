@@ -11,7 +11,8 @@ create table if not exists public.admin_acompanhamento_kanban (
       'treinamento_acompanhamento',
       'sistema_em_uso',
       'treinamento_finalizado',
-      'acompanhamento_finalizado'
+      'acompanhamento_finalizado',
+      'cancelado'
     )),
   ordem integer not null default 0,
   admin_email text,
@@ -24,10 +25,14 @@ alter table public.admin_acompanhamento_kanban
   add column if not exists pendencias_abertas integer not null default 0,
   add column if not exists ultima_dificuldade text,
   add column if not exists proxima_acao text,
-  add column if not exists aguardando_retorno boolean not null default false;
+  add column if not exists aguardando_retorno boolean not null default false,
+  add column if not exists motivo_cancelamento text;
 
 comment on column public.admin_acompanhamento_kanban.aguardando_retorno is
   'true = o cliente está aguardando retorno no acompanhamento.';
+
+comment on column public.admin_acompanhamento_kanban.motivo_cancelamento is
+  'Motivo informado ao mover o cliente para a coluna Cancelado.';
 
 alter table public.admin_acompanhamento_kanban
   drop constraint if exists admin_acompanhamento_kanban_coluna_check;
@@ -67,7 +72,8 @@ alter table public.admin_acompanhamento_kanban
     'treinamento_acompanhamento',
     'sistema_em_uso',
     'treinamento_finalizado',
-    'acompanhamento_finalizado'
+    'acompanhamento_finalizado',
+    'cancelado'
   ));
 
 create index if not exists idx_admin_acompanhamento_kanban_coluna
