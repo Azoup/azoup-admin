@@ -699,9 +699,14 @@ export function assinarQuadroConfec(aoMudar: () => void): () => void {
     'confec_kanban_card_comments',
     'kanban_card_checklist',
   ];
-  const canal = supabase.channel('confec-kanban');
+  // Canal com nome fixo reutilizado pelo client ainda inscrito → erro ao reentrar na tela.
+  for (const antigo of supabase.getChannels()) {
+    if (antigo.topic.includes('confec-kanban')) void supabase.removeChannel(antigo);
+  }
+  const topic = `confec-kanban:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  let canal = supabase.channel(topic);
   for (const table of tabelas) {
-    canal.on('postgres_changes', { event: '*', schema: 'public', table }, () => aoMudar());
+    canal = canal.on('postgres_changes', { event: '*', schema: 'public', table }, () => aoMudar());
   }
   canal.subscribe();
   return () => {

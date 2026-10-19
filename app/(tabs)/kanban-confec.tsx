@@ -354,7 +354,9 @@ export default function KanbanConfecScreen() {
       if (timer) clearTimeout(timer);
       parar();
     };
-  }, [pode, qc]);
+    // qc é estável; incluir gerava reassinatura do realtime ao trocar de tela.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pode]);
 
   const quadro = quadroQ.data;
   const colunas = quadro?.colunas ?? [];
