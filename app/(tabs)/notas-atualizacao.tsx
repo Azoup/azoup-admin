@@ -18,16 +18,12 @@ import {
   numeroTicket,
   type ConfecCard,
 } from '@/src/services/repos/confec-kanban-repo';
-import {
-  resolverIntervaloPeriodo,
-  type PeriodoFiltroPreset,
-} from '@/src/utils/clientes-filtro';
+import { resolverIntervaloPeriodo, type PeriodoFiltroPreset } from '@/src/utils/clientes-filtro';
 import { dataCalendarioBrasil, formatDateTimeBR, formatYmdBR } from '@/src/utils/format';
 
 const TODAS = '__todas__';
 
 const PERIODOS = ['mes_atual', 'mes_passado', '7d', '30d', 'hoje', 'todos'] as const;
-
 type PeriodoNota = (typeof PERIODOS)[number];
 
 const PERIODO_LABELS: Record<PeriodoNota, string> = {
@@ -66,6 +62,14 @@ export default function NotasAtualizacaoScreen() {
     setErro(null);
   };
 
+  const cancelarEdicao = () => {
+    if (!detalhe) return;
+    setEditando(false);
+    setEditLinha(detalhe.nota_linha ?? '');
+    setEditDetalhe(detalhe.nota_detalhe ?? '');
+    setErro(null);
+  };
+
   const q = useQuery({
     queryKey: ['confec_notas_publicadas'],
     queryFn: listarNotasPublicadasConfec,
@@ -88,9 +92,7 @@ export default function NotasAtualizacaoScreen() {
     const texto = busca.trim().toLowerCase();
     return (q.data ?? []).filter((card) => {
       const dia = dataCalendarioBrasil(card.completed_at) ?? '';
-      if (intervalo) {
-        if (dia < intervalo.inicio || dia > intervalo.fim) return false;
-      }
+      if (intervalo && (dia < intervalo.inicio || dia > intervalo.fim)) return false;
       if (secao !== TODAS && card.secao !== secao) return false;
       if (!texto) return true;
       const blob = `${card.nota_linha ?? ''} ${card.nota_detalhe ?? ''} ${card.tela ?? ''} ${card.title} ${card.secao ?? ''}`.toLowerCase();
@@ -181,35 +183,45 @@ export default function NotasAtualizacaoScreen() {
         <View style={styles.documento}>
           <PageHeader
             title="Notas de atualização"
-            subtitle="Changelog do Confec — o que foi publicado a partir dos tickets finalizados."
+            subtitle="Changelog do Confec. Só o texto publicado para o cliente — sem origem do Kanban."
           />
 
           <View style={[styles.filtros, { borderColor: theme.border }]}>
             <View style={styles.filtroBusca}>
-              <FormInput value={busca} onChangeText={setBusca} placeholder="Buscar melhoria, tela ou seção" />
+              <FormField label="Buscar">
+                <FormInput value={busca} onChangeText={setBusca} placeholder="Melhoria, tela ou seção" />
+              </FormField>
             </View>
             <View style={styles.filtroSelect}>
-              <FormSelect
-                options={[TODAS, ...CONFEC_SECOES]}
-                value={secao}
-                onChange={setSecao}
-                labels={{ [TODAS]: 'Todas as seções' }}
-              />
+              <FormField label="Seção">
+                <FormSelect
+                  options={[TODAS, ...CONFEC_SECOES]}
+                  value={secao}
+                  onChange={setSecao}
+                  labels={{ [TODAS]: 'Todas as seções' }}
+                />
+              </FormField>
             </View>
             <View style={styles.filtroSelect}>
-              <FormSelect options={PERIODOS} value={periodo} onChange={setPeriodo} labels={PERIODO_LABELS} />
+              <FormField label="Período">
+                <FormSelect
+                  options={[...PERIODOS]}
+                  value={periodo}
+                  onChange={setPeriodo}
+                  labels={PERIODO_LABELS}
+                  placeholder="Selecione o período"
+                />
+              </FormField>
             </View>
           </View>
 
-          <View style={styles.resumo}>
-            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-              {q.isLoading
-                ? 'Carregando…'
-                : filtradas.length === 0
-                  ? 'Nenhuma atualização neste período'
-                  : `${filtradas.length} atualizaç${filtradas.length === 1 ? 'ão' : 'ões'} · ${PERIODO_LABELS[periodo]}`}
-            </Text>
-          </View>
+          <Text style={{ color: theme.textMuted, fontSize: 13, marginBottom: 4 }}>
+            {q.isLoading
+              ? 'Carregando…'
+              : filtradas.length === 0
+                ? 'Nenhuma atualização neste período'
+                : `${filtradas.length} atualizaç${filtradas.length === 1 ? 'ão' : 'ões'} · ${PERIODO_LABELS[periodo]}`}
+          </Text>
 
           {erro && !detalhe ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
           {q.isLoading ? <ActivityIndicator color={theme.cadastroAction} style={{ marginTop: 24 }} /> : null}
@@ -232,48 +244,46 @@ export default function NotasAtualizacaoScreen() {
                 <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '700' }}>{cards.length}</Text>
               </View>
 
-              <View>
-                {cards.map((card, indice) => (
-                  <Pressable
-                    key={card.id}
-                    onPress={() => {
-                      setDetalhe(card);
-                      setEditando(false);
-                      setEditLinha(card.nota_linha ?? '');
-                      setEditDetalhe(card.nota_detalhe ?? '');
-                      setErro(null);
-                    }}
-                    style={({ pressed }) => [
-                      styles.entrada,
-                      {
-                        borderBottomColor: theme.border,
-                        borderBottomWidth: indice === cards.length - 1 ? 0 : StyleSheet.hairlineWidth,
-                        opacity: pressed ? 0.72 : 1,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.entradaData, { color: theme.textMuted }]}>
-                      {formatYmdBR(dataCalendarioBrasil(card.completed_at))}
+              {cards.map((card, indice) => (
+                <Pressable
+                  key={card.id}
+                  onPress={() => {
+                    setDetalhe(card);
+                    setEditando(false);
+                    setEditLinha(card.nota_linha ?? '');
+                    setEditDetalhe(card.nota_detalhe ?? '');
+                    setErro(null);
+                  }}
+                  style={({ pressed }) => [
+                    styles.entrada,
+                    {
+                      borderBottomColor: theme.border,
+                      borderBottomWidth: indice === cards.length - 1 ? 0 : StyleSheet.hairlineWidth,
+                      opacity: pressed ? 0.72 : 1,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.entradaData, { color: theme.textMuted }]}>
+                    {formatYmdBR(dataCalendarioBrasil(card.completed_at))}
+                  </Text>
+                  <View style={styles.entradaCorpo}>
+                    <Text style={[styles.entradaTitulo, { color: theme.headerText }]}>
+                      {card.nota_linha || card.title}
                     </Text>
-                    <View style={styles.entradaCorpo}>
-                      <Text style={[styles.entradaTitulo, { color: theme.headerText }]}>
-                        {card.nota_linha || card.title}
-                      </Text>
-                      {bullets(card.nota_detalhe)
-                        .slice(0, 3)
-                        .map((linha) => (
-                          <Text key={linha} style={[styles.bullet, { color: theme.text }]}>
-                            • {linha}
-                          </Text>
-                        ))}
-                      <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
-                        {card.tela || 'Sem tela'}
-                        {card.tela_nova ? ' · tela nova' : ''} · #{numeroTicket(card.ticket_number)}
-                      </Text>
-                    </View>
-                  </Pressable>
-                ))}
-              </View>
+                    {bullets(card.nota_detalhe)
+                      .slice(0, 3)
+                      .map((linha) => (
+                        <Text key={linha} style={[styles.bullet, { color: theme.text }]}>
+                          • {linha}
+                        </Text>
+                      ))}
+                    <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 4 }}>
+                      {card.tela || 'Sem tela'}
+                      {card.tela_nova ? ' · tela nova' : ''} · #{numeroTicket(card.ticket_number)}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
             </View>
           ))}
         </View>
@@ -289,7 +299,7 @@ export default function NotasAtualizacaoScreen() {
                   {detalhe.secao || 'Sem seção'} · {formatDateTimeBR(detalhe.completed_at)}
                 </Text>
                 <Text style={{ color: theme.headerText, fontWeight: '900', fontSize: 20, lineHeight: 26 }}>
-                  {detalhe.nota_linha || detalhe.title}
+                  {editando ? 'Editando nota publicada' : detalhe.nota_linha || detalhe.title}
                 </Text>
                 <Text style={{ color: theme.textMuted, fontSize: 13 }}>
                   {detalhe.tela || 'Sem tela'}
@@ -306,7 +316,10 @@ export default function NotasAtualizacaoScreen() {
                     </FormField>
                   </>
                 ) : (
-                  <View style={{ gap: 8, marginTop: 4 }}>
+                  <View style={{ gap: 8, marginTop: 4 }} pointerEvents="none">
+                    <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 16, lineHeight: 22 }}>
+                      {detalhe.nota_linha || 'Sem linha publicada'}
+                    </Text>
                     {bullets(detalhe.nota_detalhe).length > 0 ? (
                       bullets(detalhe.nota_detalhe).map((linha) => (
                         <Text key={linha} style={{ color: theme.text, fontSize: 15, lineHeight: 22 }}>
@@ -322,24 +335,29 @@ export default function NotasAtualizacaoScreen() {
                 {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
 
                 {editando ? (
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-                    <PrimaryButton
-                      compact
-                      label={salvar.isPending ? 'Salvando…' : 'Salvar'}
-                      loading={salvar.isPending}
-                      style={{ flex: 1 }}
-                      onPress={() => salvar.mutate()}
-                    />
-                    <PrimaryButton
-                      compact
-                      label={regenerar.isPending ? 'Gerando…' : 'Regenerar IA'}
-                      loading={regenerar.isPending}
-                      style={{ flex: 1 }}
-                      onPress={() => regenerar.mutate()}
-                    />
+                  <View style={{ gap: 8, marginTop: 4 }}>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <PrimaryButton
+                        compact
+                        label={salvar.isPending ? 'Salvando…' : 'Salvar'}
+                        loading={salvar.isPending}
+                        style={{ flex: 1 }}
+                        onPress={() => salvar.mutate()}
+                      />
+                      <PrimaryButton
+                        compact
+                        label={regenerar.isPending ? 'Gerando…' : 'Regenerar IA'}
+                        loading={regenerar.isPending}
+                        style={{ flex: 1 }}
+                        onPress={() => regenerar.mutate()}
+                      />
+                    </View>
+                    <Pressable onPress={cancelarEdicao} hitSlop={8}>
+                      <Text style={{ color: theme.textMuted, fontWeight: '700', textAlign: 'center' }}>Cancelar edição</Text>
+                    </Pressable>
                   </View>
                 ) : (
-                  <PrimaryButton compact label="Editar" onPress={() => setEditando(true)} style={{ marginTop: 4 }} />
+                  <PrimaryButton compact label="Editar" onPress={() => setEditando(true)} style={{ marginTop: 8 }} />
                 )}
               </View>
             </ScrollView>
@@ -356,14 +374,13 @@ const styles = StyleSheet.create({
   filtros: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    alignItems: 'center',
+    gap: 12,
+    alignItems: 'flex-end',
     paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   filtroBusca: { flex: 1.6, minWidth: 200 },
-  filtroSelect: { width: 190, minWidth: 160 },
-  resumo: { paddingTop: 4, paddingBottom: 8 },
+  filtroSelect: { width: 200, minWidth: 170 },
   vazio: {
     marginTop: 12,
     paddingVertical: 28,
