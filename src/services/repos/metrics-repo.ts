@@ -58,8 +58,8 @@ function pickAssinaturaPorCliente(assinaturas: AssinaturaClienteRow[]): Map<stri
 }
 
 function mrrLocalDeAssinatura(a: AssinaturaClienteRow): number {
-  if (a.valor_atual_centavos != null) return Number(a.valor_atual_centavos);
   if (a.valor_mensal_atual != null) return Math.round(Number(a.valor_mensal_atual) * 100);
+  if (a.valor_atual_centavos != null) return Number(a.valor_atual_centavos);
   return 0;
 }
 

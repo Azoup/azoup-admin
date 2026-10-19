@@ -553,10 +553,10 @@ export default function ClientDetailScreen() {
               ? formatBRLFromCentavos(cobranca.valor_bruto_centavos)
               : cobranca?.valor_liquido_centavos != null
                 ? formatBRLFromCentavos(cobranca.valor_liquido_centavos)
-                : data.assinatura?.valor_atual_centavos != null
-                  ? formatBRLFromCentavos(data.assinatura.valor_atual_centavos)
-                  : data.assinatura?.valor_mensal_atual != null
-                    ? formatBRLFromReais(data.assinatura.valor_mensal_atual)
+                : data.assinatura?.valor_mensal_atual != null
+                  ? formatBRLFromReais(data.assinatura.valor_mensal_atual)
+                  : data.assinatura?.valor_atual_centavos != null
+                    ? formatBRLFromCentavos(data.assinatura.valor_atual_centavos)
                     : formatBRLFromCentavos(data.plano?.valor_mensal_centavos)
           }
         />

@@ -145,22 +145,63 @@ type MrrAssinaturaValor = {
   desconto_centavos: number;
 };
 
-function aplicarDescontoStripe(brutoCentavos: number, discount: Stripe.Discount | null | undefined): MrrAssinaturaValor {
+type StripeDiscountLike = {
+  coupon?: Stripe.Coupon | string | null;
+  promotion_code?: Stripe.PromotionCode | string | null;
+};
+
+function cupomExpandido(raw: Stripe.Coupon | string | null | undefined): Stripe.Coupon | null {
+  if (!raw || typeof raw === 'string') return null;
+  return raw;
+}
+
+/** Descontos legado (`discount`) + Billing Mode Flexível (`discounts[]`). */
+function descontosDaAssinatura(subscription: Stripe.Subscription | null | undefined): StripeDiscountLike[] {
+  if (!subscription) return [];
+  const lista: StripeDiscountLike[] = [];
+  if (subscription.discount) lista.push(subscription.discount as StripeDiscountLike);
+  const flex = (subscription as { discounts?: Array<string | StripeDiscountLike> | null }).discounts;
+  if (Array.isArray(flex)) {
+    for (const item of flex) {
+      if (item && typeof item === 'object') lista.push(item);
+    }
+  }
+  return lista;
+}
+
+function cuponsDaAssinatura(subscription: Stripe.Subscription | null | undefined): Stripe.Coupon[] {
+  const cupons: Stripe.Coupon[] = [];
+  const vistos = new Set<string>();
+  for (const d of descontosDaAssinatura(subscription)) {
+    const coupon = cupomExpandido(d.coupon ?? null);
+    if (!coupon?.id || vistos.has(coupon.id)) continue;
+    vistos.add(coupon.id);
+    cupons.push(coupon);
+  }
+  return cupons;
+}
+
+function aplicarDescontosStripe(brutoCentavos: number, cupons: Stripe.Coupon[]): MrrAssinaturaValor {
   const bruto = Math.max(0, Math.round(brutoCentavos));
-  if (!discount?.coupon || bruto <= 0) {
+  if (!cupons.length || bruto <= 0) {
     return { liquido_centavos: bruto, bruto_centavos: bruto, desconto_centavos: 0 };
   }
-  const coupon = discount.coupon;
+  let liquido = bruto;
   let desconto = 0;
-  if (coupon.percent_off != null) {
-    desconto = Math.round((bruto * Number(coupon.percent_off)) / 100);
-  } else if (coupon.amount_off != null) {
-    desconto = Math.min(bruto, Math.round(Number(coupon.amount_off)));
+  for (const coupon of cupons) {
+    let parcela = 0;
+    if (coupon.percent_off != null) {
+      parcela = Math.round((liquido * Number(coupon.percent_off)) / 100);
+    } else if (coupon.amount_off != null) {
+      parcela = Math.min(liquido, Math.round(Number(coupon.amount_off)));
+    }
+    desconto += parcela;
+    liquido = Math.max(0, liquido - parcela);
   }
   return {
     bruto_centavos: bruto,
     desconto_centavos: desconto,
-    liquido_centavos: Math.max(0, bruto - desconto),
+    liquido_centavos: liquido,
   };
 }
 
@@ -175,10 +216,32 @@ function mrrDeItensAssinatura(subscription: Stripe.Subscription): MrrAssinaturaV
       bruto += unit * qty;
     }
   }
-  return aplicarDescontoStripe(bruto, subscription.discount);
+  return aplicarDescontosStripe(bruto, cuponsDaAssinatura(subscription));
 }
 
-async function mrrDeAssinaturaStripe(stripe: Stripe, subscriptionId: string): Promise<MrrAssinaturaValor> {
+const EXPAND_ASSINATURA_MRR = [
+  'discount.coupon',
+  'discount.promotion_code',
+  'discounts',
+  'discounts.coupon',
+  'discounts.promotion_code',
+  'items.data.price',
+] as const;
+
+async function carregarAssinaturaStripeMrr(stripe: Stripe, subscriptionId: string): Promise<Stripe.Subscription> {
+  return stripe.subscriptions.retrieve(subscriptionId, {
+    expand: [...EXPAND_ASSINATURA_MRR],
+  });
+}
+
+async function mrrDeAssinaturaStripe(
+  stripe: Stripe,
+  subscriptionId: string,
+  assinaturaCarregada?: Stripe.Subscription,
+): Promise<MrrAssinaturaValor> {
+  const subscription = assinaturaCarregada ?? (await carregarAssinaturaStripeMrr(stripe, subscriptionId));
+  const pelosItens = mrrDeItensAssinatura(subscription);
+
   try {
     const upcoming = await stripe.invoices.retrieveUpcoming({ subscription: subscriptionId });
     const liquido = Math.max(0, Math.round(Number(upcoming.total ?? 0)));
@@ -188,16 +251,19 @@ async function mrrDeAssinaturaStripe(stripe: Stripe, subscriptionId: string): Pr
       descontoLista.reduce((acc, d) => acc + Math.round(Number(d.amount ?? 0)), 0),
     );
     const bruto = Math.max(liquido + desconto, Math.round(Number(upcoming.subtotal ?? liquido + desconto)));
-    return {
+    const pelaFatura: MrrAssinaturaValor = {
       liquido_centavos: liquido,
       bruto_centavos: bruto,
       desconto_centavos: Math.min(desconto, bruto),
     };
+
+    // Flexível às vezes devolve fatura sem total_discount_amounts; prioriza itens+cupom.
+    if (pelaFatura.desconto_centavos <= 0 && pelosItens.desconto_centavos > 0) {
+      return pelosItens;
+    }
+    return pelaFatura;
   } catch {
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId, {
-      expand: ['discount', 'items.data.price'],
-    });
-    return mrrDeItensAssinatura(subscription);
+    return pelosItens;
   }
 }
 
@@ -614,10 +680,12 @@ function extrairCupomAssinatura(
   subscription: Stripe.Subscription | null,
   valores: MrrAssinaturaValor,
 ): Omit<ClienteCobrancaInfo, 'fonte'> {
-  const coupon = subscription?.discount?.coupon;
+  const descontos = descontosDaAssinatura(subscription);
+  const primeiro = descontos[0] ?? null;
+  const coupon = cupomExpandido(primeiro?.coupon ?? null) ?? cuponsDaAssinatura(subscription)[0] ?? null;
   const descontoCentavos = valores.desconto_centavos;
 
-  if (!coupon || descontoCentavos <= 0) {
+  if (!coupon && descontoCentavos <= 0) {
     return {
       tem_cupom: false,
       cupom_codigo: null,
@@ -633,7 +701,23 @@ function extrairCupomAssinatura(
     };
   }
 
-  const promo = subscription?.discount?.promotion_code;
+  if (!coupon) {
+    return {
+      tem_cupom: true,
+      cupom_codigo: 'Cupom Stripe',
+      cupom_nome: null,
+      desconto_tipo: 'amount',
+      desconto_percentual: null,
+      desconto_valor_centavos: descontoCentavos,
+      desconto_centavos: descontoCentavos,
+      valor_bruto_centavos: valores.bruto_centavos,
+      valor_liquido_centavos: valores.liquido_centavos,
+      duracao: null,
+      duracao_meses: null,
+    };
+  }
+
+  const promo = primeiro?.promotion_code;
   let codigo: string | null = null;
   if (typeof promo === 'object' && promo?.code) {
     codigo = promo.code;
@@ -929,13 +1013,12 @@ serve(async (req) => {
       let assinaturaLocal: {
         stripe_subscription_id: string | null;
         valor_mensal_atual: number | null;
-        valor_atual_centavos: number | null;
       } | null = null;
 
       if (clienteId) {
         const { data, error } = await supabaseAdmin
           .from('assinaturas_clientes')
-          .select('stripe_subscription_id, valor_mensal_atual, valor_atual_centavos')
+          .select('stripe_subscription_id, valor_mensal_atual')
           .eq('cliente_id', clienteId)
           .order('data_inicio', { ascending: false })
           .limit(1)
@@ -949,10 +1032,9 @@ serve(async (req) => {
 
       if (!subId) {
         const valorLocal =
-          assinaturaLocal?.valor_atual_centavos ??
-          (assinaturaLocal?.valor_mensal_atual != null
+          assinaturaLocal?.valor_mensal_atual != null
             ? Math.round(Number(assinaturaLocal.valor_mensal_atual) * 100)
-            : null);
+            : null;
 
         const cobranca: ClienteCobrancaInfo = {
           tem_cupom: false,
@@ -976,19 +1058,15 @@ serve(async (req) => {
 
       const stripe = new Stripe(stripeSecret, { apiVersion: '2023-10-16' });
 
-      const [valores, subscription] = await Promise.all([
-        mrrDeAssinaturaStripe(stripe, subId),
-        stripe.subscriptions.retrieve(subId, {
-          expand: ['discount.coupon', 'discount.promotion_code'],
-        }),
-      ]);
+      const subscription = await carregarAssinaturaStripeMrr(stripe, subId);
+      const valores = await mrrDeAssinaturaStripe(stripe, subId, subscription);
 
       let cobranca: ClienteCobrancaInfo = {
         ...extrairCupomAssinatura(subscription, valores),
         fonte: 'stripe',
       };
 
-      const couponId = subscription.discount?.coupon?.id;
+      const couponId = cuponsDaAssinatura(subscription)[0]?.id;
       if (couponId && cobranca.tem_cupom) {
         const { data: adminCoupon } = await supabaseAdmin
           .from('admin_coupons')

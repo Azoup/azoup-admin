@@ -163,10 +163,10 @@ export default function ClientsListScreen() {
                       </Text>
                       <Text style={{ color: theme.textMuted, fontSize: 13 }}>
                         Plano: {item.plano?.nome ?? '—'} · Valor atual:{' '}
-                        {item.assinatura?.valor_atual_centavos != null
-                          ? formatBRLFromCentavos(item.assinatura.valor_atual_centavos)
-                          : item.assinatura?.valor_mensal_atual != null
-                            ? formatBRLFromReais(item.assinatura.valor_mensal_atual)
+                        {item.assinatura?.valor_mensal_atual != null
+                          ? formatBRLFromReais(item.assinatura.valor_mensal_atual)
+                          : item.assinatura?.valor_atual_centavos != null
+                            ? formatBRLFromCentavos(item.assinatura.valor_atual_centavos)
                             : formatBRLFromCentavos(item.plano?.valor_mensal_centavos)}
                       </Text>
                       {servicos.length ? (
