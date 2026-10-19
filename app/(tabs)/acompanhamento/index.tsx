@@ -2263,8 +2263,18 @@ export default function AcompanhamentoScreen() {
   const [filtroAlerta, setFiltroAlerta] = useState(filtrosIniciais.current.filtroAlerta);
   const [filtroSemReuniao, setFiltroSemReuniao] = useState(filtrosIniciais.current.filtroSemReuniao);
   const [filtroAguardandoRetorno, setFiltroAguardandoRetorno] = useState(filtrosIniciais.current.filtroAguardandoRetorno);
+  const [filtrosRecolhidos, setFiltrosRecolhidos] = useState(false);
   useEffect(() => {
     salvarFiltrosAcompanhamento({ busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno });
+  }, [busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno]);
+
+  const filtrosAtivos = useMemo(() => {
+    const ativos: string[] = [];
+    if (busca.trim()) ativos.push('busca');
+    if (filtroAlerta) ativos.push('alerta');
+    if (filtroSemReuniao) ativos.push('sem reunião');
+    if (filtroAguardandoRetorno) ativos.push('aguardando');
+    return ativos;
   }, [busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno]);
   const [alturaSlot, setAlturaSlot] = useState(0);
   const alturaColuna = Math.max(alturaSlot - 12 - FOLGA_BARRA_HORIZONTAL, 0);
@@ -2536,79 +2546,126 @@ export default function AcompanhamentoScreen() {
 
   return (
     <View style={{ flex: 1, minHeight: 0, backgroundColor: theme.background }}>
-      <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: 12 }}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 16, gap: filtrosRecolhidos ? 8 : 12 }}>
         <PageHeader
           title="Acompanhamento"
-          subtitle="Trial e planos entram na Fila de espera. Arraste o card para avançar."
+          subtitle={
+            filtrosRecolhidos
+              ? undefined
+              : 'Trial e planos entram na Fila de espera. Arraste o card para avançar.'
+          }
+          trailing={
+            <Pressable
+              onPress={() => setFiltrosRecolhidos((atual) => !atual)}
+              style={({ pressed }) => [
+                styles.toggleFiltros,
+                {
+                  borderColor: theme.border,
+                  backgroundColor: theme.surface,
+                  opacity: pressed ? 0.8 : 1,
+                },
+              ]}
+            >
+              <FontAwesome
+                name={filtrosRecolhidos ? 'chevron-down' : 'chevron-up'}
+                size={11}
+                color={theme.headerText}
+              />
+              <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 12 }}>
+                {filtrosRecolhidos ? 'Mostrar filtros' : 'Recolher filtros'}
+              </Text>
+            </Pressable>
+          }
         />
 
-        <View style={styles.searchRow}>
-          <FontAwesome name="search" size={13} color={theme.textMuted} style={styles.searchIcon} />
-          <FormInput
-            style={styles.searchInput}
-            placeholder="Buscar por nome, e-mail, telefone ou empresa…"
-            value={busca}
-            onChangeText={setBusca}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {busca ? (
-            <Pressable onPress={() => setBusca('')} hitSlop={8} style={styles.clearIcon}>
-              <FontAwesome name="times-circle" size={14} color={theme.textMuted} />
-            </Pressable>
-          ) : null}
-        </View>
+        {filtrosRecolhidos ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+            {filtrosAtivos.length > 0 ? (
+              <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '700' }}>
+                Filtros ativos: {filtrosAtivos.join(' · ')}
+              </Text>
+            ) : (
+              <Text style={{ color: theme.textMuted, fontSize: 12 }}>Filtros recolhidos</Text>
+            )}
+            {q.isLoading ? <Text style={{ color: theme.textMuted, fontSize: 12 }}>Carregando…</Text> : null}
+            {q.error ? (
+              <Text style={{ color: theme.error, fontSize: 12 }}>
+                {q.error instanceof Error ? q.error.message : 'Erro ao carregar'}
+              </Text>
+            ) : null}
+            {erroMove ? <Text style={{ color: theme.error, fontSize: 12 }}>{erroMove}</Text> : null}
+          </View>
+        ) : (
+          <>
+            <View style={styles.searchRow}>
+              <FontAwesome name="search" size={13} color={theme.textMuted} style={styles.searchIcon} />
+              <FormInput
+                style={styles.searchInput}
+                placeholder="Buscar por nome, e-mail, telefone ou empresa…"
+                value={busca}
+                onChangeText={setBusca}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {busca ? (
+                <Pressable onPress={() => setBusca('')} hitSlop={8} style={styles.clearIcon}>
+                  <FontAwesome name="times-circle" size={14} color={theme.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
 
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <FiltroChip label="Com alerta" ativo={filtroAlerta} onPress={() => setFiltroAlerta((atual) => !atual)} />
-          <FiltroChip
-            label="Sem próxima reunião"
-            ativo={filtroSemReuniao}
-            onPress={() => setFiltroSemReuniao((atual) => !atual)}
-          />
-          <FiltroChip
-            label="Aguardando retorno"
-            ativo={filtroAguardandoRetorno}
-            onPress={() => setFiltroAguardandoRetorno((atual) => !atual)}
-          />
-          <Pressable
-            disabled={resumosMutation.isPending}
-            onPress={() => {
-              setAvisoResumo(null);
-              setErroResumo(null);
-              resumosMutation.mutate();
-            }}
-            style={({ pressed }) => ({
-              minHeight: 34,
-              paddingHorizontal: 12,
-              borderRadius: 999,
-              borderWidth: 1,
-              borderColor: theme.cadastroAction,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed || resumosMutation.isPending ? 0.7 : 1,
-            })}
-          >
-            <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
-              {resumosMutation.isPending ? 'Gerando resumos…' : 'Gerar resumos das reuniões'}
-            </Text>
-          </Pressable>
-        </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <FiltroChip label="Com alerta" ativo={filtroAlerta} onPress={() => setFiltroAlerta((atual) => !atual)} />
+              <FiltroChip
+                label="Sem próxima reunião"
+                ativo={filtroSemReuniao}
+                onPress={() => setFiltroSemReuniao((atual) => !atual)}
+              />
+              <FiltroChip
+                label="Aguardando retorno"
+                ativo={filtroAguardandoRetorno}
+                onPress={() => setFiltroAguardandoRetorno((atual) => !atual)}
+              />
+              <Pressable
+                disabled={resumosMutation.isPending}
+                onPress={() => {
+                  setAvisoResumo(null);
+                  setErroResumo(null);
+                  resumosMutation.mutate();
+                }}
+                style={({ pressed }) => ({
+                  minHeight: 34,
+                  paddingHorizontal: 12,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderColor: theme.cadastroAction,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed || resumosMutation.isPending ? 0.7 : 1,
+                })}
+              >
+                <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+                  {resumosMutation.isPending ? 'Gerando resumos…' : 'Gerar resumos das reuniões'}
+                </Text>
+              </Pressable>
+            </View>
 
-        {autoResumo.isFetching || resumosMutation.isPending ? (
-          <Text style={{ color: theme.textMuted }}>Gerando os registros das reuniões que já terminaram…</Text>
-        ) : null}
-        {avisoResumo ? <Text style={{ color: theme.success, fontWeight: '700' }}>{avisoResumo}</Text> : null}
-        {erroResumo ? <Text style={{ color: theme.error }}>{erroResumo}</Text> : null}
-        {autoResumo.error ? (
-          <Text style={{ color: theme.error }}>{(autoResumo.error as Error).message}</Text>
-        ) : null}
+            {autoResumo.isFetching || resumosMutation.isPending ? (
+              <Text style={{ color: theme.textMuted }}>Gerando os registros das reuniões que já terminaram…</Text>
+            ) : null}
+            {avisoResumo ? <Text style={{ color: theme.success, fontWeight: '700' }}>{avisoResumo}</Text> : null}
+            {erroResumo ? <Text style={{ color: theme.error }}>{erroResumo}</Text> : null}
+            {autoResumo.error ? (
+              <Text style={{ color: theme.error }}>{(autoResumo.error as Error).message}</Text>
+            ) : null}
 
-        {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando Kanban…</Text> : null}
-        {q.error ? (
-          <Text style={{ color: theme.error }}>{q.error instanceof Error ? q.error.message : 'Erro ao carregar'}</Text>
-        ) : null}
-        {erroMove ? <Text style={{ color: theme.error }}>{erroMove}</Text> : null}
+            {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando Kanban…</Text> : null}
+            {q.error ? (
+              <Text style={{ color: theme.error }}>{q.error instanceof Error ? q.error.message : 'Erro ao carregar'}</Text>
+            ) : null}
+            {erroMove ? <Text style={{ color: theme.error }}>{erroMove}</Text> : null}
+          </>
+        )}
       </View>
 
       <View
@@ -2754,6 +2811,15 @@ export default function AcompanhamentoScreen() {
 }
 
 const styles = StyleSheet.create({
+  toggleFiltros: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 34,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
   searchRow: { position: 'relative', justifyContent: 'center', maxWidth: 480 },
   searchIcon: { position: 'absolute', left: 8, zIndex: 1 },
   searchInput: { height: 36, fontSize: 13, paddingLeft: 28, paddingRight: 28 },
