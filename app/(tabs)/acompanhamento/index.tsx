@@ -39,7 +39,15 @@ import {
 } from '@/src/services/digisac-historico-api';
 import { listarMensagensProntasDigisac } from '@/src/services/repos/digisac-mensagens-prontas-repo';
 import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
-import { atualizarConversaCliente, criarConversaCliente, excluirConversaCliente, listarConversasClientes, listarUltimoContatoPorCliente, registrarUltimoChamadoVisto } from '@/src/services/repos/conversas-repo';
+import {
+  atualizarConversaCliente,
+  criarConversaCliente,
+  ehContatoDigisacAutomatico,
+  excluirConversaCliente,
+  listarConversasClientes,
+  listarUltimoContatoPorCliente,
+  registrarUltimoChamadoVisto,
+} from '@/src/services/repos/conversas-repo';
 import {
   atualizarReuniaoCliente,
   criarPendenciaAvulsa,
@@ -829,8 +837,17 @@ export function HistoricoClienteTela({
   });
 
   const conversasQ = useQuery({
-    queryKey: ['admin_cliente_conversas', cliente.id, 'historico'],
-    queryFn: () => listarConversasClientes({ clienteId: cliente.id, limit: 50 }),
+    queryKey: ['admin_cliente_conversas', cliente.id, 'historico', 'com_digisac'],
+    queryFn: () => listarConversasClientes({ clienteId: cliente.id, limit: 50, incluirDigisac: true }),
+    enabled: Boolean(cliente.id),
+  });
+
+  const ultimoContatoQ = useQuery({
+    queryKey: ['acompanhamento_ultimos_contatos', cliente.id],
+    queryFn: async () => {
+      const map = await listarUltimoContatoPorCliente([cliente.id]);
+      return map.get(cliente.id) ?? null;
+    },
     enabled: Boolean(cliente.id),
   });
 
@@ -1193,6 +1210,14 @@ export function HistoricoClienteTela({
                 </Text>
               </Text>
               <Text style={{ color: theme.text, fontSize: 14 }}>
+                Último contato:{' '}
+                <Text style={{ fontWeight: '800' }}>
+                  {ultimoContatoQ.isLoading
+                    ? '…'
+                    : `${formatYmdBR(ultimoContatoQ.data)} · ${rotuloUltimoContato(ultimoContatoQ.data)}`}
+                </Text>
+              </Text>
+              <Text style={{ color: theme.text, fontSize: 14 }}>
                 Desde {cadastroEm} · {rotuloTempoCadastro(cliente?.created_at)}
               </Text>
             </View>
@@ -1514,6 +1539,9 @@ export function HistoricoClienteTela({
 
             <View style={{ gap: 8 }}>
               <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>CONVERSAS</Text>
+              <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                Inclui registros manuais e o último contato Digisac (mesma data do card).
+              </Text>
               {conversasQ.isLoading ? (
                 <ActivityIndicator color={theme.cadastroAction} />
               ) : conversasQ.error ? (
@@ -1521,58 +1549,66 @@ export function HistoricoClienteTela({
               ) : (conversasQ.data ?? []).length === 0 ? (
                 <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhuma conversa registrada.</Text>
               ) : (
-                (conversasQ.data ?? []).map((conversa) => (
-                  <View key={conversa.id} style={[styles.historicoItem, { borderColor: theme.border }]}>
-                    <View style={styles.rowBetween}>
-                      <View style={{ flex: 1, gap: 2 }}>
-                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                          {formatConversaQuando(conversa.data_conversa, conversa.hora_conversa)}
-                        </Text>
-                        <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                          Registrado por {conversa.admin_email?.trim() || '—'}
-                        </Text>
+                (conversasQ.data ?? []).map((conversa) => {
+                  const digisac = ehContatoDigisacAutomatico(conversa.descricao);
+                  return (
+                    <View key={conversa.id} style={[styles.historicoItem, { borderColor: theme.border }]}>
+                      <View style={styles.rowBetween}>
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                            {formatConversaQuando(conversa.data_conversa, conversa.hora_conversa)}
+                            {digisac ? ' · Digisac' : ''}
+                          </Text>
+                          <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                            {digisac
+                              ? 'Contato automático pelo último chamado'
+                              : `Registrado por ${conversa.admin_email?.trim() || '—'}`}
+                          </Text>
+                        </View>
+                        {digisac || editandoId === conversa.id ? null : (
+                          <AcoesRegistro
+                            confirmar={confirmarId === conversa.id}
+                            podeExcluir={canDeleteRecords}
+                            onEditar={() => {
+                              setErro(null);
+                              setConfirmarId(null);
+                              setEditandoId(conversa.id);
+                            }}
+                            onPedirExclusao={() => {
+                              setErro(null);
+                              setEditandoId(null);
+                              setConfirmarId(conversa.id);
+                            }}
+                            onCancelarExclusao={() => setConfirmarId(null)}
+                            onConfirmarExclusao={() => {
+                              if (!canDeleteRecords) return;
+                              excluirConversa.mutate(conversa.id);
+                            }}
+                          />
+                        )}
                       </View>
-                      {editandoId === conversa.id ? null : (
-                        <AcoesRegistro
-                          confirmar={confirmarId === conversa.id}
-                          podeExcluir={canDeleteRecords}
-                          onEditar={() => {
-                            setErro(null);
-                            setConfirmarId(null);
-                            setEditandoId(conversa.id);
-                          }}
-                          onPedirExclusao={() => {
-                            setErro(null);
-                            setEditandoId(null);
-                            setConfirmarId(conversa.id);
-                          }}
-                          onCancelarExclusao={() => setConfirmarId(null)}
-                          onConfirmarExclusao={() => {
-                            if (!canDeleteRecords) return;
-                            excluirConversa.mutate(conversa.id);
-                          }}
+                      {editandoId === conversa.id && !digisac ? (
+                        <EditarConversaBloco
+                          conversa={conversa}
+                          saving={salvarConversa.isPending}
+                          onCancelar={() => setEditandoId(null)}
+                          onSalvar={(valor) =>
+                            salvarConversa.mutate({
+                              id: conversa.id,
+                              dataConversa: valor.dataConversa,
+                              horaConversa: valor.horaConversa,
+                              descricao: valor.descricao,
+                            })
+                          }
                         />
+                      ) : (
+                        <Text style={{ color: theme.text, fontSize: 14, marginTop: 4 }}>
+                          {digisac ? 'Último chamado sincronizado da Digisac (mesma data do card de acompanhamento).' : conversa.descricao}
+                        </Text>
                       )}
                     </View>
-                    {editandoId === conversa.id ? (
-                      <EditarConversaBloco
-                        conversa={conversa}
-                        saving={salvarConversa.isPending}
-                        onCancelar={() => setEditandoId(null)}
-                        onSalvar={(valor) =>
-                          salvarConversa.mutate({
-                            id: conversa.id,
-                            dataConversa: valor.dataConversa,
-                            horaConversa: valor.horaConversa,
-                            descricao: valor.descricao,
-                          })
-                        }
-                      />
-                    ) : (
-                      <Text style={{ color: theme.text, fontSize: 14, marginTop: 4 }}>{conversa.descricao}</Text>
-                    )}
-                  </View>
-                ))
+                  );
+                })
               )}
             </View>
           {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}

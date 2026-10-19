@@ -20,8 +20,11 @@ export function formatYmdBR(ymd?: string | null) {
 
 export function formatDateBR(iso?: string | null) {
   if (!iso) return '—';
+  const t = `${iso}`.trim();
+  // YYYY-MM-DD puro: não usar Date() (vira véspera no fuso do Brasil).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return formatYmdBR(t);
   try {
-    return new Date(iso).toLocaleDateString('pt-BR');
+    return new Date(t).toLocaleDateString('pt-BR');
   } catch {
     return iso;
   }
@@ -102,7 +105,8 @@ export function formatHoraBR(raw?: string | null) {
 
 /** Data da conversa + horário opcional (ex.: 20/05/2026 às 14:30). */
 export function formatConversaQuando(data?: string | null, hora?: string | null) {
-  const d = formatDateBR(data);
+  const ymd = `${data ?? ''}`.trim().slice(0, 10);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? formatYmdBR(ymd) : formatDateBR(data);
   const h = formatHoraBR(hora);
   if (d === '—') return '—';
   return h ? `${d} às ${h}` : d;

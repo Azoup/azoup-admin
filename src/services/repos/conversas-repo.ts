@@ -98,10 +98,18 @@ export async function listarClientesComConversas(): Promise<ClienteAzoupRow[]> {
   return anexarEmpresaCadastrada(clientes);
 }
 
+export const MARCADOR_CONTATO_DIGISAC = 'Contato pelo último chamado da Digisac';
+
+export function ehContatoDigisacAutomatico(descricao?: string | null): boolean {
+  return `${descricao ?? ''}`.trim() === MARCADOR_CONTATO_DIGISAC;
+}
+
 export async function listarConversasClientes(params?: {
   clienteId?: string | null;
   clienteIds?: string[] | null;
   limit?: number;
+  /** Inclui o marcador automático da Digisac (mesmo critério do card de último contato). */
+  incluirDigisac?: boolean;
 }): Promise<ClienteConversaComCliente[]> {
   let query = supabase
     .from('admin_cliente_conversas')
@@ -119,7 +127,7 @@ export async function listarConversasClientes(params?: {
   if (error) throw new Error(error.message);
 
   const rows = ((data ?? []) as AdminClienteConversaRow[]).filter(
-    (row) => row.descricao !== 'Contato pelo último chamado da Digisac',
+    (row) => params?.incluirDigisac || !ehContatoDigisacAutomatico(row.descricao),
   );
   const clienteIds = [...new Set(rows.map((r) => r.cliente_id))];
   const clientesMap = await buscarClientesPorIds(clienteIds);
@@ -232,13 +240,15 @@ export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promi
 
     const { data, error } = await supabase
       .from('admin_cliente_conversas')
-      .select('cliente_id,data_conversa,hora_conversa')
+      .select('cliente_id,data_conversa,hora_conversa,descricao')
       .in('cliente_id', chunk)
       .order('data_conversa', { ascending: false })
       .order('hora_conversa', { ascending: false, nullsFirst: false });
 
     if (error) throw new Error(error.message);
-    for (const row of (data ?? []) as Pick<AdminClienteConversaRow, 'cliente_id' | 'data_conversa'>[]) {
+    for (const row of (data ?? []) as Pick<AdminClienteConversaRow, 'cliente_id' | 'data_conversa' | 'descricao'>[]) {
+      // Marcador Digisac entra pelo chamado; evita duplicar e divergir da lista de conversas.
+      if (ehContatoDigisacAutomatico((row as { descricao?: string | null }).descricao)) continue;
       guardarData(conversas, row.cliente_id, row.data_conversa ? `${row.data_conversa}`.slice(0, 10) : null);
     }
 
