@@ -646,7 +646,40 @@ export async function excluirChecklistConfec(id: string): Promise<void> {
 function aceitaArquivo(mime: string, nome: string): boolean {
   const tipo = mime.toLowerCase();
   if (MIME_OK.some((prefixo) => (prefixo.endsWith('/') ? tipo.startsWith(prefixo) : tipo === prefixo))) return true;
+  if (tipo === 'application/octet-stream') {
+    return /\.(png|jpe?g|gif|webp|mp4|mov|pdf|txt|csv|xlsx?|docx?|pptx?|zip|rar|7z)$/i.test(nome);
+  }
   return /\.(png|jpe?g|gif|webp|mp4|mov|pdf|txt|csv|xlsx?|docx?|pptx?|zip|rar|7z)$/i.test(nome);
+}
+
+function mimeDoArquivo(mime: string, nome: string): string {
+  const bruto = `${mime ?? ''}`.trim().toLowerCase();
+  if (bruto && bruto !== 'application/octet-stream') return bruto;
+  const n = nome.toLowerCase();
+  if (n.endsWith('.png')) return 'image/png';
+  if (n.endsWith('.jpg') || n.endsWith('.jpeg')) return 'image/jpeg';
+  if (n.endsWith('.gif')) return 'image/gif';
+  if (n.endsWith('.webp')) return 'image/webp';
+  if (n.endsWith('.pdf')) return 'application/pdf';
+  if (n.endsWith('.txt')) return 'text/plain';
+  if (n.endsWith('.csv')) return 'text/csv';
+  if (n.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (n.endsWith('.xls')) return 'application/vnd.ms-excel';
+  if (n.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (n.endsWith('.doc')) return 'application/msword';
+  if (n.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  if (n.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
+  if (n.endsWith('.zip')) return 'application/zip';
+  if (n.endsWith('.rar')) return 'application/vnd.rar';
+  if (n.endsWith('.7z')) return 'application/x-7z-compressed';
+  if (n.endsWith('.mp4')) return 'video/mp4';
+  if (n.endsWith('.mov')) return 'video/quicktime';
+  return bruto || 'application/octet-stream';
+}
+
+export function ehImagemAnexo(mime: string, nome: string): boolean {
+  const tipo = mimeDoArquivo(mime, nome);
+  return tipo.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(nome);
 }
 
 export async function enviarAnexoConfec(params: {
@@ -657,28 +690,36 @@ export async function enviarAnexoConfec(params: {
   imagem: boolean;
   authorEmail: string;
 }): Promise<void> {
+  if (!params.cardId) throw new Error('Salve o ticket antes de anexar.');
+  if (!params.arquivo || params.arquivo.size <= 0) throw new Error('Arquivo vazio.');
   if (params.arquivo.size > LIMITE_ARQUIVO_BYTES) throw new Error('O arquivo passa de 5 GB.');
-  if (!aceitaArquivo(params.mime, params.nome)) throw new Error('Tipo de arquivo não aceito.');
+  const mime = mimeDoArquivo(params.mime, params.nome);
+  if (!aceitaArquivo(mime, params.nome)) throw new Error('Tipo de arquivo não aceito.');
+  const imagem = params.imagem || ehImagemAnexo(mime, params.nome);
   const seguro = params.nome.replace(/[^\w.\-]+/g, '_').slice(0, 80) || 'arquivo';
   const path = `${params.cardId}/${Date.now()}-${seguro}`;
   const { error: up } = await supabase.storage.from(BUCKET_CONFEC).upload(path, params.arquivo, {
-    contentType: params.mime || 'application/octet-stream',
+    contentType: mime,
     upsert: false,
+    cacheControl: '3600',
   });
-  if (up) throw new Error(up.message);
-  const tabela = params.imagem ? 'confec_kanban_card_images' : 'confec_kanban_card_files';
-  const linha = params.imagem
+  if (up) throw new Error(up.message || 'Falha ao enviar o arquivo para o storage.');
+  const tabela = imagem ? 'confec_kanban_card_images' : 'confec_kanban_card_files';
+  const linha = imagem
     ? { card_id: params.cardId, storage_path: path, nome: params.nome, created_by_email: params.authorEmail }
     : {
         card_id: params.cardId,
         storage_path: path,
         nome: params.nome,
         tamanho: params.arquivo.size,
-        mime: params.mime,
+        mime,
         created_by_email: params.authorEmail,
       };
   const { error } = await supabase.from(tabela).insert(linha as never);
-  if (error) throw erroTabela(error.message);
+  if (error) {
+    await supabase.storage.from(BUCKET_CONFEC).remove([path]);
+    throw erroTabela(error.message);
+  }
 }
 
 export async function excluirAnexoConfec(anexo: ConfecAnexo, imagem: boolean): Promise<void> {
