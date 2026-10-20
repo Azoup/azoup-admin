@@ -1,3 +1,4 @@
+import type { AdminClienteCongelamentoRow } from '@/src/types/azoup';
 import { dataHojeBrasil } from '@/src/utils/format';
 import { classificarStatusAssinatura } from '@/src/utils/assinatura-status';
 
@@ -47,6 +48,7 @@ export type AcompanhamentoCliente = {
   proxima_acao?: string | null;
   aguardando_retorno?: boolean;
   motivo_cancelamento?: string | null;
+  congelamento?: AdminClienteCongelamentoRow | null;
 };
 
 export const ACOMPANHAMENTO_COLUNAS: {

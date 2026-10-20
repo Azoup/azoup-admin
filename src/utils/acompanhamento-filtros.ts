@@ -3,6 +3,7 @@ export type FiltrosAcompanhamento = {
   filtroAlerta: boolean;
   filtroSemReuniao: boolean;
   filtroAguardandoRetorno: boolean;
+  filtroCongelado: boolean;
 };
 
 const VAZIO: FiltrosAcompanhamento = {
@@ -10,6 +11,7 @@ const VAZIO: FiltrosAcompanhamento = {
   filtroAlerta: false,
   filtroSemReuniao: false,
   filtroAguardandoRetorno: false,
+  filtroCongelado: false,
 };
 
 const CHAVE = 'acompanhamento_filtros';
@@ -27,6 +29,7 @@ function lerSessao(): FiltrosAcompanhamento | null {
       filtroAlerta: Boolean(json.filtroAlerta),
       filtroSemReuniao: Boolean(json.filtroSemReuniao),
       filtroAguardandoRetorno: Boolean(json.filtroAguardandoRetorno),
+      filtroCongelado: Boolean(json.filtroCongelado),
     };
   } catch {
     return null;

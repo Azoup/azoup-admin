@@ -1,6 +1,7 @@
 import { obterAcompanhamentoViaFunction } from '@/src/services/stripe-admin-api';
 import { listarKanbanAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
-import type { AdminAcompanhamentoKanbanRow } from '@/src/types/azoup';
+import { listarCongelamentosClientes } from '@/src/services/repos/congelamento-repo';
+import type { AdminAcompanhamentoKanbanRow, AdminClienteCongelamentoRow } from '@/src/types/azoup';
 import {
   agrupamentoAcompanhamentoVazio,
   enriquecerAcompanhamentoCliente,
@@ -61,6 +62,17 @@ export async function carregarAcompanhamentoClientes(): Promise<{
     );
   }
 
+  let congelamentos = new Map<string, AdminClienteCongelamentoRow>();
+  try {
+    congelamentos = await listarCongelamentosClientes(ids);
+  } catch (e) {
+    console.warn(
+      '[admin_cliente_congelamento] Leitura ignorada no acompanhamento:',
+      e instanceof Error ? e.message : e,
+      '— execute supabase/sql/admin_cliente_congelamento.sql no Supabase.',
+    );
+  }
+
   const clientes = baseRows.map((row) => {
     const kb = kanban.get(row.id);
     return enriquecerAcompanhamentoCliente({
@@ -92,6 +104,7 @@ export async function carregarAcompanhamentoClientes(): Promise<{
       proxima_acao: kb?.proxima_acao ?? null,
       aguardando_retorno: Boolean(kb?.aguardando_retorno),
       motivo_cancelamento: kb?.motivo_cancelamento ?? null,
+      congelamento: congelamentos.get(row.id) ?? null,
     });
   });
 

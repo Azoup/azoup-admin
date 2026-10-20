@@ -1,4 +1,5 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import FontAwesome5 from '@expo/vector-icons/FontAwesome5';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -61,6 +62,12 @@ import {
   type ResumoReunioesCliente,
   type ReuniaoClienteRow,
 } from '@/src/services/repos/reunioes-repo';
+import {
+  clienteCongelado,
+  clientePrecisaChamar,
+  congelarCliente,
+  descongelarCliente,
+} from '@/src/services/repos/congelamento-repo';
 import { definirAguardandoRetorno, moverClienteKanban, salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
 import { lerFiltrosAcompanhamento, salvarFiltrosAcompanhamento } from '@/src/utils/acompanhamento-filtros';
 import {
@@ -84,7 +91,7 @@ import {
 } from '@/src/utils/kanban-drag';
 import { agoraHorarioLocal, hojeIsoLocal } from '@/src/utils/conversa-datetime';
 import { dataCalendarioBrasil, formatConversaQuando, formatDataHoraBrasil, formatDateTimeBR, formatYmdBR } from '@/src/utils/format';
-import type { AdminClienteConversaRow } from '@/src/types/azoup';
+import type { AdminClienteCongelamentoRow, AdminClienteConversaRow } from '@/src/types/azoup';
 import { digitsOnlyPhone } from '@/src/utils/whatsapp';
 
 const COL_WIDTH = 300;
@@ -442,6 +449,99 @@ function CancelamentoModal({
               onConfirmar(texto);
             }}
           />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function CongelarModal({
+  cliente,
+  visible,
+  onClose,
+  onCongelar,
+  onDescongelar,
+  saving,
+}: {
+  cliente: AcompanhamentoCliente | null;
+  visible: boolean;
+  onClose: () => void;
+  onCongelar: (params: { dataRetorno: string; observacao: string }) => void;
+  onDescongelar: () => void;
+  saving: boolean;
+}) {
+  const { theme } = useTheme();
+  const congelado = clienteCongelado(cliente?.congelamento);
+  const [dataRetorno, setDataRetorno] = useState('');
+  const [observacao, setObservacao] = useState('');
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    setDataRetorno(`${cliente?.congelamento?.data_retorno ?? ''}`.slice(0, 10));
+    setObservacao(cliente?.congelamento?.observacao ?? '');
+    setErro(null);
+  }, [visible, cliente?.id, cliente?.congelamento?.data_retorno, cliente?.congelamento?.observacao]);
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+      <View style={styles.modalOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={[styles.moverCard, { backgroundColor: theme.surface, borderColor: theme.border, maxWidth: 440 }]}>
+          <Text style={{ fontWeight: '800', fontSize: 16, color: theme.headerText }}>
+            {congelado ? 'Congelado' : 'Congelar'} · {cliente?.nome ?? 'Cliente'}
+          </Text>
+          {congelado ? (
+            <Text
+              style={{
+                color: clientePrecisaChamar(cliente?.congelamento) ? theme.error : theme.cadastroAction,
+                fontWeight: '800',
+                fontSize: 13,
+              }}
+            >
+              {clientePrecisaChamar(cliente?.congelamento)
+                ? `Hora de chamar · retorno ${formatYmdBR(cliente?.congelamento?.data_retorno)}`
+                : `Congelado até ${formatYmdBR(cliente?.congelamento?.data_retorno)}`}
+            </Text>
+          ) : (
+            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+              Congela o acompanhamento e agenda a data para ligar novamente.
+            </Text>
+          )}
+          <FormField label="Data para chamar" required>
+            <FormDateInput value={dataRetorno} onChange={setDataRetorno} />
+          </FormField>
+          <FormField label="Observação">
+            <FormInput
+              value={observacao}
+              onChangeText={setObservacao}
+              placeholder="Motivo do congelamento / o que falar na ligação"
+              multiline
+              style={styles.areaHistorico}
+            />
+          </FormField>
+          {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
+          <PrimaryButton
+            label={saving ? 'Salvando…' : congelado ? 'Atualizar retorno' : 'Congelar cliente'}
+            loading={saving}
+            onPress={() => {
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(dataRetorno.trim())) {
+                setErro('Informe a data para chamar novamente.');
+                return;
+              }
+              setErro(null);
+              onCongelar({ dataRetorno: dataRetorno.trim(), observacao });
+            }}
+          />
+          {congelado ? (
+            <Pressable
+              disabled={saving}
+              onPress={onDescongelar}
+              style={({ pressed }) => [styles.cancelarHistorico, { opacity: pressed || saving ? 0.7 : 1 }]}
+            >
+              <Text style={{ color: theme.error, fontWeight: '800' }}>Descongelar</Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -822,7 +922,7 @@ export function HistoricoClienteTela({
   embutido?: boolean;
 }) {
   const { theme } = useTheme();
-  const { adminProfile, canDeleteRecords, papel } = useAdminAuth();
+  const { adminProfile, session, canDeleteRecords, papel } = useAdminAuth();
   const podeAlterarDataRegistro = papel === 'owner';
   const qc = useQueryClient();
   const [editandoId, setEditandoId] = useState<string | null>(null);
@@ -835,6 +935,8 @@ export function HistoricoClienteTela({
   const [editarPendenciaAlvo, setEditarPendenciaAlvo] = useState<ReuniaoClienteRow | null>(null);
   const [mensagemAberta, setMensagemAberta] = useState(false);
   const [chamadoAberto, setChamadoAberto] = useState<DigisacChamado | null>(null);
+  const [congelarAberto, setCongelarAberto] = useState(false);
+  const [congelarErro, setCongelarErro] = useState<string | null>(null);
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [buscaAssunto, setBuscaAssunto] = useState('');
   const [periodoDe, setPeriodoDe] = useState('');
@@ -985,6 +1087,7 @@ export function HistoricoClienteTela({
     void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
     void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
     void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+    void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
     void qc.invalidateQueries({ queryKey: ['admin_audit_logs'] });
   }
 
@@ -1180,7 +1283,63 @@ export function HistoricoClienteTela({
     onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao editar pendência'),
   });
 
+  const congelarMutation = useMutation({
+    mutationFn: async (params: { dataRetorno: string; observacao: string }) =>
+      congelarCliente({
+        clienteId: cliente.id,
+        dataRetorno: params.dataRetorno,
+        observacao: params.observacao,
+        adminEmail: session?.user?.email ?? adminProfile?.email ?? null,
+      }),
+    onSuccess: async (row) => {
+      setCongelarErro(null);
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'CLIENTE_CONGELAR',
+          entidade: 'admin_cliente_congelamento',
+          entidade_id: cliente.id,
+          valores_anteriores: {},
+          valores_novos: row as unknown as Record<string, unknown>,
+        },
+      );
+      setCongelarAberto(false);
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+      void qc.invalidateQueries({ queryKey: ['clientes_azoup_admin'] });
+      void qc.invalidateQueries({ queryKey: ['cliente_azoup_admin', cliente.id] });
+    },
+    onError: (e) => setCongelarErro(e instanceof Error ? e.message : 'Erro ao congelar'),
+  });
+
+  const descongelarMutation = useMutation({
+    mutationFn: async () =>
+      descongelarCliente({
+        clienteId: cliente.id,
+        adminEmail: session?.user?.email ?? adminProfile?.email ?? null,
+      }),
+    onSuccess: async (row) => {
+      setCongelarErro(null);
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'CLIENTE_DESCONGELAR',
+          entidade: 'admin_cliente_congelamento',
+          entidade_id: cliente.id,
+          valores_anteriores: {},
+          valores_novos: row as unknown as Record<string, unknown>,
+        },
+      );
+      setCongelarAberto(false);
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+      void qc.invalidateQueries({ queryKey: ['clientes_azoup_admin'] });
+      void qc.invalidateQueries({ queryKey: ['cliente_azoup_admin', cliente.id] });
+    },
+    onError: (e) => setCongelarErro(e instanceof Error ? e.message : 'Erro ao descongelar'),
+  });
+
   const ocupado = salvarReuniao.isPending || excluirReuniao.isPending || salvarConversa.isPending || excluirConversa.isPending;
+  const congelado = clienteCongelado(cliente.congelamento);
+  const precisaChamar = clientePrecisaChamar(cliente.congelamento);
 
   const conteudo = (
     <>
@@ -1191,7 +1350,16 @@ export function HistoricoClienteTela({
         <BotaoAcao label="Registrar conversa" onPress={() => setConversaAberta(true)} />
         <BotaoAcao label="Nova pendência" onPress={() => setPendenciaAberta(true)} />
         <BotaoAcao label="Enviar mensagem" onPress={() => setMensagemAberta(true)} />
+        <BotaoAcao label={congelado ? 'Congelado' : 'Congelar'} onPress={() => setCongelarAberto(true)} />
       </View>
+      {congelado ? (
+        <Text style={{ color: precisaChamar ? theme.error : theme.cadastroAction, fontWeight: '800', fontSize: 13 }}>
+          {precisaChamar
+            ? `Hora de chamar · retorno ${formatYmdBR(cliente.congelamento?.data_retorno)}`
+            : `Congelado · chamar em ${formatYmdBR(cliente.congelamento?.data_retorno)}`}
+        </Text>
+      ) : null}
+      {congelarErro ? <Text style={{ color: theme.error }}>{congelarErro}</Text> : null}
       <View style={{ gap: 14 }}>
             <View style={{ gap: 4 }}>
               <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>CADASTRO</Text>
@@ -1685,6 +1853,14 @@ export function HistoricoClienteTela({
             <ActivityIndicator color={theme.cadastroAction} />
           ) : null}
       </View>
+      <CongelarModal
+        cliente={cliente}
+        visible={congelarAberto}
+        saving={congelarMutation.isPending || descongelarMutation.isPending}
+        onClose={() => setCongelarAberto(false)}
+        onCongelar={(params) => congelarMutation.mutate(params)}
+        onDescongelar={() => descongelarMutation.mutate()}
+      />
       <RegistrarReuniaoModal
         cliente={cliente}
         visible={reuniaoAberta}
@@ -2030,6 +2206,7 @@ function KanbanCard({
   onEditarFicha,
   onAbrirMover,
   onMarcarRetorno,
+  onCongelar,
   marcandoRetorno,
   onArrastar,
   onSoltar,
@@ -2049,6 +2226,7 @@ function KanbanCard({
   onEditarFicha: () => void;
   onAbrirMover: () => void;
   onMarcarRetorno: () => void;
+  onCongelar: () => void;
   marcandoRetorno?: boolean;
   onArrastar: (x: number, y: number) => void;
   onSoltar: (x: number, y: number) => void;
@@ -2057,6 +2235,8 @@ function KanbanCard({
   const [aberto, setAberto] = useState(false);
   const empresa = `${item.empresa_nome ?? ''}`.trim();
   const pendencias = pendenciasAbertas;
+  const congelado = clienteCongelado(item.congelamento);
+  const precisaChamar = clientePrecisaChamar(item.congelamento);
   const proximaReuniao = proximaReuniaoGoogle || item.proxima_reuniao || null;
   const proximaDeGoogle = Boolean(proximaReuniaoGoogle);
   const arrastarRef = useRef(onArrastar);
@@ -2077,7 +2257,7 @@ function KanbanCard({
         styles.card,
         {
           backgroundColor: theme.surface,
-          borderColor: item.aguardando_retorno ? theme.warning : theme.border,
+          borderColor: congelado ? '#38BDF8' : item.aguardando_retorno ? theme.warning : theme.border,
         },
       ]}
     >
@@ -2101,11 +2281,21 @@ function KanbanCard({
                 <Text style={styles.marcaTrialTexto}>T</Text>
               </View>
             ) : null}
+            {congelado ? (
+              <View style={[styles.marcaCongelado, { backgroundColor: precisaChamar ? theme.error : '#0EA5E9' }]}>
+                <FontAwesome5 name="snowflake" size={8} color="#FFFFFF" solid />
+              </View>
+            ) : null}
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={{ fontWeight: '800', fontSize: 15, color: theme.headerText }} numberOfLines={2}>
-              {item.nome}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {congelado ? (
+                <FontAwesome5 name="snowflake" size={13} color={precisaChamar ? theme.error : '#0EA5E9'} solid />
+              ) : null}
+              <Text style={{ fontWeight: '800', fontSize: 15, color: theme.headerText, flex: 1 }} numberOfLines={2}>
+                {item.nome}
+              </Text>
+            </View>
             <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
               {empresa ? empresa.toUpperCase() : '—'}
             </Text>
@@ -2126,6 +2316,20 @@ function KanbanCard({
             {mensagemAutomatica ? (
               <Text style={{ color: theme.cadastroAction, fontSize: 11, fontWeight: '800', marginTop: 4 }}>
                 Mensagem automática enviada
+              </Text>
+            ) : null}
+            {congelado ? (
+              <Text
+                style={{
+                  color: precisaChamar ? theme.error : '#0EA5E9',
+                  fontSize: 11,
+                  fontWeight: '800',
+                  marginTop: 4,
+                }}
+              >
+                {precisaChamar
+                  ? `Chamar agora · ${formatYmdBR(item.congelamento?.data_retorno)}`
+                  : `Congelado · ${formatYmdBR(item.congelamento?.data_retorno)}`}
               </Text>
             ) : null}
             {item.aguardando_retorno ? (
@@ -2255,6 +2459,11 @@ function KanbanCard({
               : 'Marcar aguardando retorno'}
         </Text>
       </Pressable>
+      <Pressable onPress={onCongelar} hitSlop={6}>
+        <Text style={{ color: congelado ? '#0EA5E9' : theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+          {congelado ? 'Atualizar congelamento' : 'Congelar cliente'}
+        </Text>
+      </Pressable>
 
       <Pressable
         onPress={onRegistrarConversa}
@@ -2296,6 +2505,7 @@ function KanbanColumn({
   onEditarFicha,
   onAbrirMover,
   onMarcarRetorno,
+  onCongelar,
   marcandoRetornoId,
   onArrastar,
   onSoltar,
@@ -2320,6 +2530,7 @@ function KanbanColumn({
   onEditarFicha: (c: AcompanhamentoCliente) => void;
   onAbrirMover: (c: AcompanhamentoCliente) => void;
   onMarcarRetorno: (c: AcompanhamentoCliente) => void;
+  onCongelar: (c: AcompanhamentoCliente) => void;
   marcandoRetornoId?: string | null;
   onArrastar: (c: AcompanhamentoCliente, x: number, y: number) => void;
   onSoltar: (c: AcompanhamentoCliente, x: number, y: number) => void;
@@ -2371,6 +2582,7 @@ function KanbanColumn({
               onEditarFicha={() => onEditarFicha(item)}
               onAbrirMover={() => onAbrirMover(item)}
               onMarcarRetorno={() => onMarcarRetorno(item)}
+              onCongelar={() => onCongelar(item)}
               marcandoRetorno={marcandoRetornoId === item.id}
               onArrastar={(x, y) => onArrastar(item, x, y)}
               onSoltar={(x, y) => onSoltar(item, x, y)}
@@ -2392,10 +2604,11 @@ export default function AcompanhamentoScreen() {
   const [filtroAlerta, setFiltroAlerta] = useState(filtrosIniciais.current.filtroAlerta);
   const [filtroSemReuniao, setFiltroSemReuniao] = useState(filtrosIniciais.current.filtroSemReuniao);
   const [filtroAguardandoRetorno, setFiltroAguardandoRetorno] = useState(filtrosIniciais.current.filtroAguardandoRetorno);
+  const [filtroCongelado, setFiltroCongelado] = useState(filtrosIniciais.current.filtroCongelado);
   const [filtrosRecolhidos, setFiltrosRecolhidos] = useState(false);
   useEffect(() => {
-    salvarFiltrosAcompanhamento({ busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno });
-  }, [busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno]);
+    salvarFiltrosAcompanhamento({ busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno, filtroCongelado });
+  }, [busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno, filtroCongelado]);
 
   const filtrosAtivos = useMemo(() => {
     const ativos: string[] = [];
@@ -2403,8 +2616,9 @@ export default function AcompanhamentoScreen() {
     if (filtroAlerta) ativos.push('alerta');
     if (filtroSemReuniao) ativos.push('sem reunião');
     if (filtroAguardandoRetorno) ativos.push('aguardando');
+    if (filtroCongelado) ativos.push('congelados');
     return ativos;
-  }, [busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno]);
+  }, [busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno, filtroCongelado]);
   const [alturaSlot, setAlturaSlot] = useState(0);
   const alturaColuna = Math.max(alturaSlot - 12 - FOLGA_BARRA_HORIZONTAL, 0);
   const [clientePendencias, setClientePendencias] = useState<AcompanhamentoCliente | null>(null);
@@ -2413,6 +2627,8 @@ export default function AcompanhamentoScreen() {
   const [clienteFicha, setClienteFicha] = useState<AcompanhamentoCliente | null>(null);
   const [clienteMover, setClienteMover] = useState<AcompanhamentoCliente | null>(null);
   const [clienteCancelar, setClienteCancelar] = useState<AcompanhamentoCliente | null>(null);
+  const [clienteCongelar, setClienteCongelar] = useState<AcompanhamentoCliente | null>(null);
+  const [erroCongelar, setErroCongelar] = useState<string | null>(null);
   const [clienteMensagem, setClienteMensagem] = useState<AcompanhamentoCliente | null>(null);
   const [dropOverColuna, setDropOverColuna] = useState<AcompanhamentoColuna | null>(null);
   const [rotuloArraste, setRotuloArraste] = useState<string | null>(null);
@@ -2540,11 +2756,12 @@ export default function AcompanhamentoScreen() {
         if (filtroAlerta && !contatoAtrasado(contatos?.get(c.id) ?? null, alertas?.[col.key] ?? 7)) return false;
         if (filtroSemReuniao && temProximaReuniao(c, google?.get(c.id), hoje)) return false;
         if (filtroAguardandoRetorno && !c.aguardando_retorno) return false;
+        if (filtroCongelado && !clienteCongelado(c.congelamento)) return false;
         return true;
       });
     }
     return out;
-  }, [q.data, busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno, contatosComChamado, alertaQ.data, googleProximasQ.data]);
+  }, [q.data, busca, filtroAlerta, filtroSemReuniao, filtroAguardandoRetorno, filtroCongelado, contatosComChamado, alertaQ.data, googleProximasQ.data]);
 
   const adminEmail = adminProfile?.email ?? session?.user?.email ?? null;
 
@@ -2696,6 +2913,109 @@ export default function AcompanhamentoScreen() {
     },
   });
 
+  function aplicarCongelamentoNoBoard(
+    prev: Board | undefined,
+    clienteId: string,
+    congelamento: AdminClienteCongelamentoRow | null,
+  ) {
+    if (!prev) return prev;
+    return recomporBoard(
+      prev.clientes.map((c) => (c.id === clienteId ? { ...c, congelamento } : c)),
+    );
+  }
+
+  const congelarBoardMutation = useMutation({
+    mutationFn: async (params: { cliente: AcompanhamentoCliente; dataRetorno: string; observacao: string }) =>
+      congelarCliente({
+        clienteId: params.cliente.id,
+        dataRetorno: params.dataRetorno,
+        observacao: params.observacao,
+        adminEmail: adminEmail,
+      }),
+    onMutate: async (params) => {
+      setErroCongelar(null);
+      await qc.cancelQueries({ queryKey: ['acompanhamento_clientes'] });
+      const prev = qc.getQueryData<Board>(['acompanhamento_clientes']);
+      const congelamento: AdminClienteCongelamentoRow = {
+        cliente_id: params.cliente.id,
+        congelado: true,
+        data_retorno: params.dataRetorno,
+        observacao: params.observacao.trim() || null,
+        admin_email: adminEmail,
+        updated_at: new Date().toISOString(),
+      };
+      if (prev) qc.setQueryData(['acompanhamento_clientes'], aplicarCongelamentoNoBoard(prev, params.cliente.id, congelamento));
+      return { prev };
+    },
+    onSuccess: async (row, params) => {
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'CLIENTE_CONGELAR',
+          entidade: 'admin_cliente_congelamento',
+          entidade_id: params.cliente.id,
+          valores_anteriores: {},
+          valores_novos: row as unknown as Record<string, unknown>,
+        },
+      );
+      setClienteCongelar(null);
+      void qc.invalidateQueries({ queryKey: ['clientes_azoup_admin'] });
+      void qc.invalidateQueries({ queryKey: ['cliente_azoup_admin', params.cliente.id] });
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['acompanhamento_clientes'], ctx.prev);
+      setErroCongelar(e instanceof Error ? e.message : 'Erro ao congelar');
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+    },
+  });
+
+  const descongelarBoardMutation = useMutation({
+    mutationFn: async (cliente: AcompanhamentoCliente) =>
+      descongelarCliente({
+        clienteId: cliente.id,
+        adminEmail,
+      }),
+    onMutate: async (cliente) => {
+      setErroCongelar(null);
+      await qc.cancelQueries({ queryKey: ['acompanhamento_clientes'] });
+      const prev = qc.getQueryData<Board>(['acompanhamento_clientes']);
+      const congelamento: AdminClienteCongelamentoRow = {
+        cliente_id: cliente.id,
+        congelado: false,
+        data_retorno: null,
+        observacao: null,
+        admin_email: adminEmail,
+        updated_at: new Date().toISOString(),
+      };
+      if (prev) qc.setQueryData(['acompanhamento_clientes'], aplicarCongelamentoNoBoard(prev, cliente.id, congelamento));
+      return { prev };
+    },
+    onSuccess: async (row, cliente) => {
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'CLIENTE_DESCONGELAR',
+          entidade: 'admin_cliente_congelamento',
+          entidade_id: cliente.id,
+          valores_anteriores: {},
+          valores_novos: row as unknown as Record<string, unknown>,
+        },
+      );
+      setClienteCongelar(null);
+      void qc.invalidateQueries({ queryKey: ['clientes_azoup_admin'] });
+      void qc.invalidateQueries({ queryKey: ['cliente_azoup_admin', cliente.id] });
+    },
+    onError: (e, _v, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['acompanhamento_clientes'], ctx.prev);
+      setErroCongelar(e instanceof Error ? e.message : 'Erro ao descongelar');
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+    },
+  });
+
   if (!canAccessScreen('acompanhamento')) {
     return (
       <View style={{ flex: 1, padding: 16, backgroundColor: theme.background }}>
@@ -2754,6 +3074,7 @@ export default function AcompanhamentoScreen() {
               </Text>
             ) : null}
             {erroMove ? <Text style={{ color: theme.error, fontSize: 12 }}>{erroMove}</Text> : null}
+            {erroCongelar ? <Text style={{ color: theme.error, fontSize: 12 }}>{erroCongelar}</Text> : null}
           </View>
         ) : (
           <>
@@ -2785,6 +3106,11 @@ export default function AcompanhamentoScreen() {
                 label="Aguardando retorno"
                 ativo={filtroAguardandoRetorno}
                 onPress={() => setFiltroAguardandoRetorno((atual) => !atual)}
+              />
+              <FiltroChip
+                label="Congelados"
+                ativo={filtroCongelado}
+                onPress={() => setFiltroCongelado((atual) => !atual)}
               />
               <Pressable
                 disabled={resumosMutation.isPending}
@@ -2824,6 +3150,7 @@ export default function AcompanhamentoScreen() {
               <Text style={{ color: theme.error }}>{q.error instanceof Error ? q.error.message : 'Erro ao carregar'}</Text>
             ) : null}
             {erroMove ? <Text style={{ color: theme.error }}>{erroMove}</Text> : null}
+            {erroCongelar ? <Text style={{ color: theme.error }}>{erroCongelar}</Text> : null}
           </>
         )}
       </View>
@@ -2875,6 +3202,10 @@ export default function AcompanhamentoScreen() {
               }}
               onAbrirMover={setClienteMover}
               onMarcarRetorno={(cliente) => retornoMutation.mutate(cliente)}
+              onCongelar={(cliente) => {
+                setErroCongelar(null);
+                setClienteCongelar(cliente);
+              }}
               marcandoRetornoId={retornoMutation.isPending ? retornoMutation.variables?.id : null}
               onArrastar={(item, x, y) => {
                 posicaoArraste.current = { x, y };
@@ -2963,6 +3294,20 @@ export default function AcompanhamentoScreen() {
           });
         }}
       />
+      <CongelarModal
+        cliente={clienteCongelar}
+        visible={Boolean(clienteCongelar)}
+        saving={congelarBoardMutation.isPending || descongelarBoardMutation.isPending}
+        onClose={() => setClienteCongelar(null)}
+        onCongelar={(params) => {
+          if (!clienteCongelar) return;
+          congelarBoardMutation.mutate({ cliente: clienteCongelar, ...params });
+        }}
+        onDescongelar={() => {
+          if (!clienteCongelar) return;
+          descongelarBoardMutation.mutate(clienteCongelar);
+        }}
+      />
       {clienteMensagem ? (
         <EnviarMensagemProntaModal
           clienteId={clienteMensagem.id}
@@ -3033,6 +3378,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   marcaTrialTexto: { color: '#1A1408', fontSize: 10, fontWeight: '800', lineHeight: 12 },
+  marcaCongelado: {
+    position: 'absolute',
+    bottom: -3,
+    right: -4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatar: {
     width: 40,
     height: 40,

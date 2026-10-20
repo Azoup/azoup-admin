@@ -89,6 +89,10 @@ export async function descongelarCliente(params: {
   return data as AdminClienteCongelamentoRow;
 }
 
+export function clienteCongelado(row?: AdminClienteCongelamentoRow | null): boolean {
+  return Boolean(row?.congelado);
+}
+
 /** Cliente congelado com data_retorno <= hoje (precisa ser chamado). */
 export function clientePrecisaChamar(row?: AdminClienteCongelamentoRow | null): boolean {
   if (!row?.congelado || !row.data_retorno) return false;
