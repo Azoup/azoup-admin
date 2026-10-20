@@ -1,12 +1,17 @@
 import { differenceInCalendarDays, parseISO } from 'date-fns';
 
 import { supabase } from '@/src/lib/supabase';
-import { listarCongelamentosClientes, buscarCongelamentoCliente } from '@/src/services/repos/congelamento-repo';
+import {
+  listarCongelamentosClientes,
+  buscarCongelamentoCliente,
+  listarHistoricoCongelamento,
+} from '@/src/services/repos/congelamento-repo';
 import { listarClientesComMensagemHoje } from '@/src/services/repos/mensagem-contato-repo';
 import { obterMetricasClienteViaFunction } from '@/src/services/stripe-admin-api';
 import { prioridadeAssinatura } from '@/src/utils/assinatura-status';
 import { contarNotasFiscaisGeradasDoCliente } from '@/src/utils/nota-fiscal-metricas';
 import type {
+  AdminClienteCongelamentoHistoricoRow,
   AdminClienteCongelamentoRow,
   AssinaturaClienteRow,
   AssinaturaLimitesOverrideRow,
@@ -340,19 +345,27 @@ export async function montarVisaoCliente(clienteId: string, base?: ClienteAzoupR
     cliente = data as ClienteAzoupRow;
   }
 
-  const [assinatura, limites_override, historico_faturas, metricas_uso, congelamento] = await Promise.all([
-    buscarAssinaturaRecente(clienteId),
-    buscarOverride(clienteId),
-    buscarHistoricoFaturas(clienteId),
-    buscarMetricasUsoCliente(clienteId),
-    buscarCongelamentoCliente(clienteId).catch((e) => {
-      console.warn(
-        '[admin_cliente_congelamento] Leitura ignorada no detalhe:',
-        e instanceof Error ? e.message : e,
-      );
-      return null;
-    }),
-  ]);
+  const [assinatura, limites_override, historico_faturas, metricas_uso, congelamento, congelamento_historico] =
+    await Promise.all([
+      buscarAssinaturaRecente(clienteId),
+      buscarOverride(clienteId),
+      buscarHistoricoFaturas(clienteId),
+      buscarMetricasUsoCliente(clienteId),
+      buscarCongelamentoCliente(clienteId).catch((e) => {
+        console.warn(
+          '[admin_cliente_congelamento] Leitura ignorada no detalhe:',
+          e instanceof Error ? e.message : e,
+        );
+        return null;
+      }),
+      listarHistoricoCongelamento(clienteId).catch((e) => {
+        console.warn(
+          '[admin_cliente_congelamento_historico] Leitura ignorada no detalhe:',
+          e instanceof Error ? e.message : e,
+        );
+        return [] as AdminClienteCongelamentoHistoricoRow[];
+      }),
+    ]);
   const plano = await buscarPlano(assinatura?.plano_id);
 
   const inicioAssinatura = safeParseIso(assinatura?.data_inicio ?? undefined);
@@ -379,6 +392,7 @@ export async function montarVisaoCliente(clienteId: string, base?: ClienteAzoupR
     cobrancas_falhas,
     metricas_uso,
     congelamento,
+    congelamento_historico,
   };
 }
 

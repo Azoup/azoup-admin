@@ -290,7 +290,20 @@ export interface AdminClienteCongelamentoRow {
   data_retorno?: string | null;
   observacao?: string | null;
   admin_email?: string | null;
+  congelado_em?: string | null;
   updated_at?: string | null;
+  created_at?: string | null;
+}
+
+export interface AdminClienteCongelamentoHistoricoRow {
+  id: string;
+  cliente_id: string;
+  congelado_em: string;
+  descongelado_em: string;
+  data_retorno?: string | null;
+  observacao?: string | null;
+  admin_email_congelou?: string | null;
+  admin_email_descongelou?: string | null;
   created_at?: string | null;
 }
 
@@ -432,4 +445,5 @@ export interface ClienteAzoupAdminView extends ClienteAzoupRow {
   mensagem_enviada_hoje?: boolean;
   /** Congelamento de acompanhamento + data para chamar de novo. */
   congelamento?: AdminClienteCongelamentoRow | null;
+  congelamento_historico?: AdminClienteCongelamentoHistoricoRow[];
 }

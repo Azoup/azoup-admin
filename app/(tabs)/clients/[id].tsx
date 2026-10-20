@@ -501,6 +501,28 @@ export default function ClientDetailScreen() {
             />
           ) : null}
         </View>
+
+        {congelado && data.congelamento?.congelado_em ? (
+          <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+            Congelado desde {formatDateTimeBR(data.congelamento.congelado_em)}
+          </Text>
+        ) : null}
+
+        {(data.congelamento_historico ?? []).length > 0 ? (
+          <View style={{ gap: 6, marginTop: 4 }}>
+            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 13 }}>Histórico de congelamento</Text>
+            {(data.congelamento_historico ?? []).map((periodo) => (
+              <View key={periodo.id} style={{ gap: 2 }}>
+                <Text style={{ color: theme.text, fontSize: 13, fontWeight: '700' }}>
+                  {formatDateTimeBR(periodo.congelado_em)} → {formatDateTimeBR(periodo.descongelado_em)}
+                </Text>
+                {periodo.observacao?.trim() ? (
+                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>{periodo.observacao.trim()}</Text>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
       </ScreenCard>
 
       <ScreenCard>
