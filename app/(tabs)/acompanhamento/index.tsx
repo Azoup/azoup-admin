@@ -67,6 +67,7 @@ import {
   clientePrecisaChamar,
   congelarCliente,
   descongelarCliente,
+  listarHistoricoCongelamento,
 } from '@/src/services/repos/congelamento-repo';
 import { definirAguardandoRetorno, moverClienteKanban, salvarFichaAcompanhamento } from '@/src/services/repos/kanban-acompanhamento-repo';
 import { lerFiltrosAcompanhamento, salvarFiltrosAcompanhamento } from '@/src/utils/acompanhamento-filtros';
@@ -960,6 +961,12 @@ export function HistoricoClienteTela({
     enabled: Boolean(cliente.id),
   });
 
+  const congelamentoHistoricoQ = useQuery({
+    queryKey: ['admin_cliente_congelamento_historico', cliente.id],
+    queryFn: () => listarHistoricoCongelamento(cliente.id),
+    enabled: Boolean(cliente.id),
+  });
+
   const gerarResumoEvento = useMutation({
     mutationFn: (googleEventId: string) =>
       gerarResumoDoEvento({
@@ -1305,6 +1312,7 @@ export function HistoricoClienteTela({
       );
       setCongelarAberto(false);
       void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_congelamento_historico', cliente.id] });
       void qc.invalidateQueries({ queryKey: ['clientes_azoup_admin'] });
       void qc.invalidateQueries({ queryKey: ['cliente_azoup_admin', cliente.id] });
     },
@@ -1331,6 +1339,7 @@ export function HistoricoClienteTela({
       );
       setCongelarAberto(false);
       void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_congelamento_historico', cliente.id] });
       void qc.invalidateQueries({ queryKey: ['clientes_azoup_admin'] });
       void qc.invalidateQueries({ queryKey: ['cliente_azoup_admin', cliente.id] });
     },
@@ -1359,7 +1368,27 @@ export function HistoricoClienteTela({
             : `Congelado · chamar em ${formatYmdBR(cliente.congelamento?.data_retorno)}`}
         </Text>
       ) : null}
+      {congelado && cliente.congelamento?.congelado_em ? (
+        <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+          Congelado desde {formatDateTimeBR(cliente.congelamento.congelado_em)}
+        </Text>
+      ) : null}
       {congelarErro ? <Text style={{ color: theme.error }}>{congelarErro}</Text> : null}
+      {(congelamentoHistoricoQ.data ?? []).length > 0 ? (
+        <View style={{ gap: 6 }}>
+          <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>HISTÓRICO DE CONGELAMENTO</Text>
+          {(congelamentoHistoricoQ.data ?? []).map((periodo) => (
+            <View key={periodo.id} style={{ gap: 2 }}>
+              <Text style={{ color: theme.text, fontSize: 13, fontWeight: '700' }}>
+                {formatDateTimeBR(periodo.congelado_em)} → {formatDateTimeBR(periodo.descongelado_em)}
+              </Text>
+              {periodo.observacao?.trim() ? (
+                <Text style={{ color: theme.textMuted, fontSize: 12 }}>{periodo.observacao.trim()}</Text>
+              ) : null}
+            </View>
+          ))}
+        </View>
+      ) : null}
       <View style={{ gap: 14 }}>
             <View style={{ gap: 4 }}>
               <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>CADASTRO</Text>
@@ -2961,6 +2990,7 @@ export default function AcompanhamentoScreen() {
       setClienteCongelar(null);
       void qc.invalidateQueries({ queryKey: ['clientes_azoup_admin'] });
       void qc.invalidateQueries({ queryKey: ['cliente_azoup_admin', params.cliente.id] });
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_congelamento_historico', params.cliente.id] });
     },
     onError: (e, _v, ctx) => {
       if (ctx?.prev) qc.setQueryData(['acompanhamento_clientes'], ctx.prev);
@@ -3006,6 +3036,7 @@ export default function AcompanhamentoScreen() {
       setClienteCongelar(null);
       void qc.invalidateQueries({ queryKey: ['clientes_azoup_admin'] });
       void qc.invalidateQueries({ queryKey: ['cliente_azoup_admin', cliente.id] });
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_congelamento_historico', cliente.id] });
     },
     onError: (e, _v, ctx) => {
       if (ctx?.prev) qc.setQueryData(['acompanhamento_clientes'], ctx.prev);
