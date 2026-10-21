@@ -355,23 +355,6 @@ function quando(item: ReuniaoSemRegistro): string {
   return fim && fim !== inicio ? `${inicio} ate ${fim}` : inicio;
 }
 
-function instante(raw?: string | null): number | null {
-  if (!raw) return null;
-  let t = `${raw}`.trim();
-  if (!t) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) t = `${t}T23:59:59-03:00`;
-  else if (/^\d{4}-\d{2}-\d{2} /.test(t)) t = t.replace(' ', 'T');
-  t = t.replace(/([+-]\d{2})$/, '$1:00');
-  const ms = Date.parse(t);
-  return Number.isFinite(ms) ? ms : null;
-}
-
-/** A reunião só entra no PDF depois que o horário de término já passou. */
-function encerrouAntesDaGeracao(item: ReuniaoSemRegistro, geradoEmMs: number): boolean {
-  const fim = instante(item.fim);
-  return fim != null && fim < geradoEmMs;
-}
-
 function ordenar(itens: ReuniaoSemRegistro[]): ReuniaoSemRegistro[][] {
   const grupos = new Map<string, ReuniaoSemRegistro[]>();
   for (const item of itens) {
@@ -386,8 +369,7 @@ function ordenar(itens: ReuniaoSemRegistro[]): ReuniaoSemRegistro[][] {
 
 export function gerarPdfReunioesSemRegistro(itens: ReuniaoSemRegistro[]): Uint8Array {
   const geradoEmMs = Date.now();
-  const encerradas = itens.filter((item) => encerrouAntesDaGeracao(item, geradoEmMs));
-  const grupos = ordenar(encerradas);
+  const grupos = ordenar(itens);
   const lista = grupos.flat();
   const geradoEm = `Gerado em ${formatDataHoraBrasil(new Date(geradoEmMs).toISOString())}`;
   const pdf = new RelatorioPdf();
@@ -396,7 +378,7 @@ export function gerarPdfReunioesSemRegistro(itens: ReuniaoSemRegistro[]): Uint8A
 
   pdf.paragrafo('Reuniões sem registro', { tamanho: 18, negrito: true, espacoDepois: 6 });
   pdf.paragrafo(
-    'Reuniões dos últimos 90 dias que já terminaram antes deste relatório e ainda não têm registro no dia do cliente.',
+    'Mesma regra da agenda: reuniões dos últimos 90 dias que já começaram e ainda não têm registro manual no dia (incluindo eventos sem cliente vinculado). Resumo gerado por IA não conta como registro.',
     { tamanho: 10, cor: COR_SUAVE, espacoDepois: 10 },
   );
   pdf.faixa('Resumo');

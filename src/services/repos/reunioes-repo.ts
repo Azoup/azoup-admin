@@ -123,20 +123,27 @@ export async function listarReunioesDoCliente(clienteId: string): Promise<Reunia
 
 /** Registros manuais no período. Pendência avulsa e resumo de IA ficam de fora. */
 export async function listarRegistrosManuaisNoPeriodo(inicio: string, fim: string): Promise<ReuniaoClienteRow[]> {
-  const { data, error } = await consultarReunioes('id,cliente_id,empresa_nome,assuntos,admin_email,created_at', (colunas) =>
-    supabase
-      .from('admin_cliente_reunioes')
-      .select(colunas)
-      .gte('created_at', inicio)
-      .lt('created_at', fim)
-      .order('created_at', { ascending: true })
-      .limit(2000),
-  );
-  if (error) {
-    if (/admin_cliente_reunioes|schema cache/i.test(error.message)) return [];
-    throw new Error(error.message);
+  const pagina = 500;
+  const saida: ReuniaoClienteRow[] = [];
+  for (let from = 0; from < 8000; from += pagina) {
+    const { data, error } = await consultarReunioes('id,cliente_id,empresa_nome,assuntos,admin_email,created_at', (colunas) =>
+      supabase
+        .from('admin_cliente_reunioes')
+        .select(colunas)
+        .gte('created_at', inicio)
+        .lt('created_at', fim)
+        .order('created_at', { ascending: true })
+        .range(from, from + pagina - 1),
+    );
+    if (error) {
+      if (/admin_cliente_reunioes|schema cache/i.test(error.message)) return [];
+      throw new Error(error.message);
+    }
+    const rows = ((data ?? []) as unknown as ReuniaoClienteRow[]).filter((row) => !row.avulsa && !row.gerado_ia);
+    saida.push(...rows);
+    if ((data ?? []).length < pagina) break;
   }
-  return ((data ?? []) as unknown as ReuniaoClienteRow[]).filter((row) => !row.avulsa && !row.gerado_ia);
+  return saida;
 }
 
 export async function listarReunioes(): Promise<ReuniaoClienteRow[]> {

@@ -721,12 +721,23 @@ function extractEmailsFromText(...parts: Array<string | null | undefined>): stri
   return [...new Set(found.map((e) => e.toLowerCase()))];
 }
 
+/** Google all-day `end.date` is exclusive; store inclusive end of last day in Brazil. */
+function fimDiaInteiro(startDate: string, endDateExclusive: string): string {
+  const partes = endDateExclusive.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!partes) return `${endDateExclusive}T23:59:59-03:00`;
+  const dt = new Date(Date.UTC(Number(partes[1]), Number(partes[2]) - 1, Number(partes[3])));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  const ymd = dt.toISOString().slice(0, 10);
+  const ultimo = ymd < startDate ? startDate : ymd;
+  return `${ultimo}T23:59:59-03:00`;
+}
+
 function mapGoogleEvent(ev: Record<string, unknown>, calendarId: string) {
   const startObj = (ev.start ?? {}) as Record<string, string>;
   const endObj = (ev.end ?? {}) as Record<string, string>;
   const allDay = Boolean(startObj.date && !startObj.dateTime);
   const inicio = startObj.dateTime || (startObj.date ? `${startObj.date}T00:00:00-03:00` : null);
-  const fim = endObj.dateTime || (endObj.date ? `${endObj.date}T23:59:59-03:00` : inicio);
+  const fim = endObj.dateTime || (endObj.date && startObj.date ? fimDiaInteiro(startObj.date, endObj.date) : inicio);
   const attendees = Array.isArray(ev.attendees)
     ? (ev.attendees as Array<Record<string, unknown>>).map((a) => ({
         email: `${a.email ?? ''}`.toLowerCase(),

@@ -37,6 +37,7 @@ import { listarRegistrosManuaisNoPeriodo } from '@/src/services/repos/reunioes-r
 import type { ClienteAzoupRow } from '@/src/types/azoup';
 import { descricaoTemHtml } from '@/src/utils/agenda-html';
 import { dataCalendarioBrasil, dataHojeBrasil, formatDateTimeBR, formatYmdBR, somarDiasYmd } from '@/src/utils/format';
+import { chaveClienteDia, cobertasDeRegistrosManuais, eventoAgendaSemRegistro } from '@/src/utils/reuniao-sem-registro';
 
 const SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
@@ -356,20 +357,21 @@ export default function AgendamentosScreen() {
 
   const doDia = porDia.get(diaSelecionado) ?? [];
 
+  const cobertasRegistros = useMemo(() => cobertasDeRegistrosManuais(registrosQ.data ?? []), [registrosQ.data]);
+
   const registrosPorClienteDia = useMemo(() => {
     const map = new Map<string, { id: string; assuntos: string; autor: string; empresa: string }[]>();
     for (const row of registrosQ.data ?? []) {
-      const clienteId = `${row.cliente_id ?? ''}`.trim();
-      const dia = dataCalendarioBrasil(row.created_at);
-      if (!clienteId || !dia) continue;
-      const lista = map.get(`${clienteId}|${dia}`) ?? [];
+      const chave = chaveClienteDia(row.cliente_id, row.created_at);
+      if (!chave) continue;
+      const lista = map.get(chave) ?? [];
       lista.push({
         id: row.id,
         assuntos: `${row.assuntos ?? ''}`.trim(),
         autor: `${row.admin_email ?? ''}`.trim(),
         empresa: `${row.empresa_nome ?? ''}`.trim(),
       });
-      map.set(`${clienteId}|${dia}`, lista);
+      map.set(chave, lista);
     }
     return map;
   }, [registrosQ.data]);
@@ -668,9 +670,9 @@ export default function AgendamentosScreen() {
             ) : (
               <>
               {doDia.map((ev) => {
-                const registros = ev.cliente_id ? (registrosPorClienteDia.get(`${ev.cliente_id}|${diaSelecionado}`) ?? []) : [];
-                const passou = Date.parse(ev.inicio) < Date.now();
-                const semRegistro = passou && registros.length === 0;
+                const chave = chaveClienteDia(ev.cliente_id, ev.inicio);
+                const registros = chave ? (registrosPorClienteDia.get(chave) ?? []) : [];
+                const semRegistro = eventoAgendaSemRegistro(ev, cobertasRegistros);
                 return (
                 <ScreenCard
                   key={ev.id}

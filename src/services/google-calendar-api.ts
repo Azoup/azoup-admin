@@ -20,7 +20,7 @@ export type GoogleAgendaEvento = {
   status?: string | null;
   cliente_id?: string | null;
   match_tipo?: 'email_auto' | 'manual' | 'nenhum';
-  cliente?: { id: string; nome?: string | null; email?: string | null } | null;
+  cliente?: { id: string; nome?: string | null; email?: string | null; telefone?: string | null } | null;
 };
 
 export type GoogleConexaoStatus = {

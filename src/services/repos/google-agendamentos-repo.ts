@@ -1,6 +1,8 @@
-import type { GoogleAgendaEvento } from '@/src/services/google-calendar-api';
+import { statusConexaoGoogle, type GoogleAgendaEvento } from '@/src/services/google-calendar-api';
 import { supabase } from '@/src/lib/supabase';
-import { dataCalendarioBrasil } from '@/src/utils/format';
+import { listarRegistrosManuaisNoPeriodo } from '@/src/services/repos/reunioes-repo';
+import { dataCalendarioBrasil, dataHojeBrasil, somarDiasYmd } from '@/src/utils/format';
+import { cobertasDeRegistrosManuais, eventoAgendaSemRegistro } from '@/src/utils/reuniao-sem-registro';
 
 export type { GoogleAgendaEvento };
 
@@ -9,23 +11,34 @@ function normalizarEvento(row: GoogleAgendaEvento & { cliente?: GoogleAgendaEven
   return { ...row, cliente };
 }
 
+const SELECT_EVENTO_AGENDA =
+  'id,google_event_id,calendar_id,titulo,descricao,inicio,fim,all_day,status,match_tipo,participantes,html_link,cliente_id,cliente:clientes_azoup(id,nome,email)';
+
 /** Eventos do mês a partir do cache local. Não chama o Google. */
 export async function listarEventosAgendaCache(inicio: string, fim: string, calendarId?: string | null): Promise<GoogleAgendaEvento[]> {
-  let q = supabase
-    .from('admin_google_agendamentos')
-    .select('id,google_event_id,calendar_id,titulo,descricao,inicio,fim,status,cliente_id,match_tipo,cliente:clientes_azoup(id,nome,email)')
-    .gte('inicio', inicio)
-    .lt('inicio', fim)
-    .order('inicio', { ascending: true });
-  if (calendarId) q = q.eq('calendar_id', calendarId);
-  const { data, error } = await q;
-  if (error) {
-    if (/admin_google_agendamentos|schema cache|does not exist/i.test(error.message)) return [];
-    throw new Error(error.message);
+  const pagina = 500;
+  const lista: GoogleAgendaEvento[] = [];
+  for (let from = 0; from < 8000; from += pagina) {
+    let q = supabase
+      .from('admin_google_agendamentos')
+      .select(SELECT_EVENTO_AGENDA)
+      .gte('inicio', inicio)
+      .lt('inicio', fim)
+      .order('inicio', { ascending: true })
+      .range(from, from + pagina - 1);
+    if (calendarId) q = q.eq('calendar_id', calendarId);
+    const { data, error } = await q;
+    if (error) {
+      if (/admin_google_agendamentos|schema cache|does not exist/i.test(error.message)) return [];
+      throw new Error(error.message);
+    }
+    const rows = ((data ?? []) as Array<GoogleAgendaEvento & { cliente?: GoogleAgendaEvento['cliente'] | GoogleAgendaEvento['cliente'][] }>)
+      .map(normalizarEvento)
+      .filter((ev) => `${ev.status ?? ''}` !== 'cancelled');
+    lista.push(...rows);
+    if ((data ?? []).length < pagina) break;
   }
-  return ((data ?? []) as Array<GoogleAgendaEvento & { cliente?: GoogleAgendaEvento['cliente'] | GoogleAgendaEvento['cliente'][] }>)
-    .map(normalizarEvento)
-    .filter((ev) => `${ev.status ?? ''}` !== 'cancelled');
+  return lista;
 }
 
 /** A lista Sem cliente começa neste dia e segue para frente. */
@@ -153,100 +166,47 @@ function textoParticipantes(valor: unknown): string[] {
   return [...new Set(saida)];
 }
 
-/** Reuniões da agenda que já aconteceram e não têm registro no mesmo dia. */
+/** Reuniões da agenda que já começaram e não têm registro manual no mesmo dia. */
 export async function listarReunioesPassadasSemRegistro(): Promise<ReuniaoSemRegistro[]> {
-  const agora = new Date();
-  const desde = new Date(agora.getTime() - 90 * 86_400_000).toISOString();
-  const ate = agora.toISOString();
-
-  const { data: eventos, error } = await supabase
-    .from('admin_google_agendamentos')
-    .select(
-      'id,titulo,descricao,inicio,fim,all_day,status,match_tipo,participantes,html_link,cliente_id,cliente:clientes_azoup(id,nome,email,telefone)',
-    )
-    .not('cliente_id', 'is', null)
-    .gte('inicio', desde)
-    .lt('inicio', ate)
-    .order('inicio', { ascending: false })
-    .limit(500);
-  if (error) {
-    if (/admin_google_agendamentos|schema cache|does not exist/i.test(error.message)) return [];
-    throw new Error(error.message);
+  let calendarId: string | null = null;
+  try {
+    const status = await statusConexaoGoogle();
+    if (!status.connected) return [];
+    calendarId = status.calendar_id ?? null;
+  } catch {
+    return [];
   }
 
-  let registros: { cliente_id?: string | null; created_at?: string | null; avulsa?: boolean | null }[] = [];
-  const comAvulsa = await supabase
-    .from('admin_cliente_reunioes')
-    .select('cliente_id,created_at,avulsa')
-    .gte('created_at', desde)
-    .limit(2000);
-  if (comAvulsa.error && /avulsa/i.test(comAvulsa.error.message)) {
-    const semAvulsa = await supabase
-      .from('admin_cliente_reunioes')
-      .select('cliente_id,created_at')
-      .gte('created_at', desde)
-      .limit(2000);
-    if (semAvulsa.error) {
-      if (/admin_cliente_reunioes|schema cache/i.test(semAvulsa.error.message)) return [];
-      throw new Error(semAvulsa.error.message);
-    }
-    registros = (semAvulsa.data ?? []) as typeof registros;
-  } else if (comAvulsa.error) {
-    if (/admin_cliente_reunioes|schema cache/i.test(comAvulsa.error.message)) return [];
-    throw new Error(comAvulsa.error.message);
-  } else {
-    registros = (comAvulsa.data ?? []) as typeof registros;
-  }
-
-  const cobertas = new Set<string>();
-  for (const row of registros) {
-    if (row.avulsa) continue;
-    const clienteId = `${row.cliente_id ?? ''}`.trim();
-    const dia = dataCalendarioBrasil(row.created_at);
-    if (clienteId && dia) cobertas.add(`${clienteId}|${dia}`);
-  }
-
+  const hoje = dataHojeBrasil();
+  const desde = `${somarDiasYmd(hoje, -90)}T00:00:00-03:00`;
+  const ate = `${somarDiasYmd(hoje, 1)}T00:00:00-03:00`;
+  const [eventos, registros] = await Promise.all([
+    listarEventosAgendaCache(desde, ate, calendarId),
+    listarRegistrosManuaisNoPeriodo(desde, ate),
+  ]);
+  const cobertas = cobertasDeRegistrosManuais(registros);
+  const agora = Date.now();
   const saida: ReuniaoSemRegistro[] = [];
-  for (const row of (eventos ?? []) as Array<{
-    id?: string;
-    titulo?: string | null;
-    descricao?: string | null;
-    inicio?: string | null;
-    fim?: string | null;
-    all_day?: boolean | null;
-    status?: string | null;
-    match_tipo?: string | null;
-    participantes?: unknown;
-    html_link?: string | null;
-    cliente_id?: string | null;
-    cliente?:
-      | { nome?: string | null; email?: string | null; telefone?: string | null }
-      | { nome?: string | null; email?: string | null; telefone?: string | null }[]
-      | null;
-  }>) {
-    if (`${row.status ?? ''}` === 'cancelled') continue;
-    const clienteId = `${row.cliente_id ?? ''}`.trim();
-    const inicio = `${row.inicio ?? ''}`.trim();
-    const dia = dataCalendarioBrasil(inicio);
-    if (!clienteId || !inicio || !dia || cobertas.has(`${clienteId}|${dia}`)) continue;
-    const cliente = Array.isArray(row.cliente) ? row.cliente[0] : row.cliente;
-    const nome = `${cliente?.nome ?? ''}`.trim() || 'Cliente';
-    const vinculo = row.match_tipo === 'email_auto' || row.match_tipo === 'manual' ? row.match_tipo : 'nenhum';
+  for (const ev of eventos) {
+    if (!eventoAgendaSemRegistro(ev, cobertas, agora)) continue;
+    const clienteId = `${ev.cliente_id ?? ''}`.trim();
+    const nome = `${ev.cliente?.nome ?? ''}`.trim() || (clienteId ? 'Cliente' : 'Sem cliente vinculado');
+    const vinculo = ev.match_tipo === 'email_auto' || ev.match_tipo === 'manual' ? ev.match_tipo : 'nenhum';
     saida.push({
-      id: `${row.id ?? ''}`,
-      clienteId,
+      id: `${ev.id ?? ''}`,
+      clienteId: clienteId || '__sem_cliente__',
       clienteNome: nome,
-      clienteEmail: `${cliente?.email ?? ''}`.trim(),
-      clienteTelefone: `${cliente?.telefone ?? ''}`.trim(),
-      titulo: `${row.titulo ?? ''}`.trim() || 'Reunião',
-      descricao: `${row.descricao ?? ''}`.trim(),
-      inicio,
-      fim: `${row.fim ?? ''}`.trim(),
-      diaInteiro: Boolean(row.all_day),
+      clienteEmail: `${ev.cliente?.email ?? ''}`.trim(),
+      clienteTelefone: `${ev.cliente?.telefone ?? ''}`.trim(),
+      titulo: `${ev.titulo ?? ''}`.trim() || 'Reunião',
+      descricao: `${ev.descricao ?? ''}`.trim(),
+      inicio: ev.inicio,
+      fim: `${ev.fim ?? ''}`.trim(),
+      diaInteiro: Boolean(ev.all_day),
       vinculo,
-      participantes: textoParticipantes(row.participantes),
-      linkAgenda: `${row.html_link ?? ''}`.trim(),
+      participantes: textoParticipantes(ev.participantes),
+      linkAgenda: `${ev.html_link ?? ''}`.trim(),
     });
   }
-  return saida.filter((item) => item.id);
+  return saida.filter((item) => item.id).sort((a, b) => (a.inicio < b.inicio ? 1 : -1));
 }

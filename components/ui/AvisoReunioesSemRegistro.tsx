@@ -35,7 +35,7 @@ export function AvisoReunioesSemRegistroProvider({ children }: { children: React
           <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 18 }}>Reuniões sem registro</Text>
             <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-              Estes clientes já tiveram reunião e ainda não têm o registro dessa reunião.
+              Mesma lista da agenda: reuniões que já começaram e ainda não têm registro manual no dia.
             </Text>
             <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ gap: 8 }}>
               {avisos.map((item) => (
