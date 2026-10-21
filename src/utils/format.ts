@@ -18,6 +18,30 @@ export function formatYmdBR(ymd?: string | null) {
   return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
+/** Máscara DD/MM/AAAA enquanto digita. */
+export function mascaraDataBR(valor: string): string {
+  const d = `${valor}`.replace(/\D/g, '').slice(0, 8);
+  if (d.length <= 2) return d;
+  if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`;
+  return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`;
+}
+
+/** Converte DD/MM/AAAA (ou YYYY-MM-DD) em YYYY-MM-DD. Data inválida → null. */
+export function dataBrParaYmd(valor: string): string | null {
+  const t = valor.trim();
+  if (!t) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  const m = t.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  const dd = Number(m[1]);
+  const mm = Number(m[2]);
+  const yyyy = Number(m[3]);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  const dt = new Date(yyyy, mm - 1, dd);
+  if (dt.getFullYear() !== yyyy || dt.getMonth() !== mm - 1 || dt.getDate() !== dd) return null;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
 export function formatDateBR(iso?: string | null) {
   if (!iso) return '—';
   const t = `${iso}`.trim();

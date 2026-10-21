@@ -21,7 +21,14 @@ import {
   listarPlanos,
 } from '@/src/services/repos/billing-repo';
 import { criarCupomStripe } from '@/src/services/stripe-admin-api';
-import { formatBRLFromReais, rotuloDuracaoCupom, rotuloValidadeCupom, dataHojeBrasil } from '@/src/utils/format';
+import {
+  dataBrParaYmd,
+  dataHojeBrasil,
+  formatBRLFromReais,
+  mascaraDataBR,
+  rotuloDuracaoCupom,
+  rotuloValidadeCupom,
+} from '@/src/utils/format';
 import { stripePriceIdDoPlano, stripeProductIdDoPlano } from '@/src/utils/plano-stripe';
 import type { AdminCouponRow } from '@/src/types/azoup';
 
@@ -31,13 +38,20 @@ type TipoDesconto = 'percent' | 'amount';
 function validarRedeemByLocal(value: string): string | null {
   const raw = value.trim();
   if (!raw) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    return 'Data "Válido até" inválida. Use AAAA-MM-DD (ex.: 2026-12-31).';
+  const ymd = dataBrParaYmd(raw);
+  if (!ymd) {
+    return 'Data "Válido até" inválida. Use DD/MM/AAAA (ex.: 31/12/2026).';
   }
-  if (raw < dataHojeBrasil()) {
+  if (ymd < dataHojeBrasil()) {
     return 'A data "Válido até" precisa ser hoje ou uma data futura.';
   }
   return null;
+}
+
+function redeemByYmd(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  return dataBrParaYmd(raw);
 }
 
 function parseReais(valor: string): number | null {
@@ -93,7 +107,7 @@ export default function CouponsScreen() {
   const cuponsFiltrados = useMemo(() => {
     const todos = cuponsQuery.data ?? [];
     if (aba === 'stripe') return todos.filter(temStripe);
-    return todos;
+    return todos.filter((item) => !temStripe(item));
   }, [aba, cuponsQuery.data]);
 
   const idsAsaas = useMemo(() => (aba === 'asaas' ? cuponsFiltrados.map((c) => c.id) : []), [aba, cuponsFiltrados]);
@@ -141,7 +155,7 @@ export default function CouponsScreen() {
         duration,
         duration_in_months: duration === 'repeating' ? Number(months || '3') : undefined,
         max_redemptions: maxRedemptions.trim() ? Number(maxRedemptions) : undefined,
-        redeem_by: redeemBy.trim() ? redeemBy.trim() : null,
+        redeem_by: redeemByYmd(redeemBy),
         apenas_novas_assinaturas: novasOnly,
       };
 
@@ -238,7 +252,7 @@ export default function CouponsScreen() {
         duration,
         duration_in_months: duration === 'repeating' ? Number(months) : undefined,
         max_redemptions: max,
-        redeem_by: redeemBy.trim() || null,
+        redeem_by: redeemByYmd(redeemBy),
         aplicavel_planos_ids: selectedPlanIds,
         created_by_admin: adminProfile?.email ?? null,
       });
@@ -346,9 +360,15 @@ export default function CouponsScreen() {
               </FormField>
               <FormField
                 label="Válido até"
-                helper="Opcional. Formato AAAA-MM-DD (ex.: 2026-12-31). Precisa ser hoje ou data futura."
+                helper="Opcional. Formato DD/MM/AAAA (ex.: 31/12/2026). Precisa ser hoje ou data futura."
               >
-                <FormInput placeholder="2026-12-31" value={redeemBy} onChangeText={setRedeemBy} />
+                <FormInput
+                  placeholder="31/12/2026"
+                  value={redeemBy}
+                  onChangeText={(v) => setRedeemBy(mascaraDataBR(v))}
+                  keyboardType="number-pad"
+                  maxLength={10}
+                />
               </FormField>
 
               <FormField
@@ -415,9 +435,15 @@ export default function CouponsScreen() {
               </FormField>
               <FormField
                 label="Válido até"
-                helper="Data limite para usar o código pela primeira vez. Formato AAAA-MM-DD."
+                helper="Data limite para usar o código pela primeira vez. Formato DD/MM/AAAA."
               >
-                <FormInput placeholder="2026-12-31" value={redeemBy} onChangeText={setRedeemBy} />
+                <FormInput
+                  placeholder="31/12/2026"
+                  value={redeemBy}
+                  onChangeText={(v) => setRedeemBy(mascaraDataBR(v))}
+                  keyboardType="number-pad"
+                  maxLength={10}
+                />
               </FormField>
               {formPlanos}
               <PrimaryButton
@@ -429,7 +455,12 @@ export default function CouponsScreen() {
             </ScreenCard>
           )}
 
-          <SectionTitle>{aba === 'stripe' ? 'Cupons Stripe' : 'Cupons (Asaas usa esta tabela)'}</SectionTitle>
+          <SectionTitle>{aba === 'stripe' ? 'Cupons Stripe' : 'Cupons Asaas'}</SectionTitle>
+          {!cuponsQuery.isLoading && cuponsFiltrados.length === 0 ? (
+            <Text style={{ color: theme.textMuted }}>
+              {aba === 'stripe' ? 'Nenhum cupom gerado no Stripe.' : 'Nenhum cupom gerado só para Asaas.'}
+            </Text>
+          ) : null}
         </View>
       }
       renderItem={({ item }) => {
