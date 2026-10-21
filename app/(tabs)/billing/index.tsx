@@ -17,8 +17,8 @@ const LINKS = [
   },
   {
     href: '/billing/coupons' as const,
-    title: 'Cupons do Stripe',
-    body: 'Cria cupom e promotion code no Stripe e registra em admin_coupons.',
+    title: 'Cupons Stripe / Asaas',
+    body: 'Cria cupom no Stripe ou só para o Confec Asaas (admin_coupons).',
     icon: 'ticket' as const,
   },
   {
@@ -34,7 +34,7 @@ export default function BillingHubScreen() {
 
   return (
     <Screen scroll>
-      <PageHeader title="Cobrança" subtitle="Gerencie período de teste, cupons no Stripe e planos disponíveis." />
+      <PageHeader title="Cobrança" subtitle="Gerencie período de teste, cupons Stripe/Asaas e planos disponíveis." />
 
       {LINKS.map((item) => (
         <Link key={item.href} href={item.href} asChild>

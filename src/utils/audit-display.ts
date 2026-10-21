@@ -5,6 +5,7 @@ import { normalizarAuditLogParaExibicao } from '@/src/services/audit';
 const ACAO_LABELS: Record<string, string> = {
   LIMITES_OVERRIDE_UPSERT: 'Créditos ou limites alterados',
   STRIPE_COUPON_CREATE: 'Cupom de desconto criado',
+  ASAAS_COUPON_CREATE: 'Cupom Asaas criado',
   BILLING_TRIAL_DIAS_UPDATE: 'Período de trial alterado',
   CONVERSA_UPDATE: 'Conversa editada',
   CONVERSA_DELETE: 'Conversa excluída',
@@ -151,7 +152,7 @@ function montarAlteracoes(
     linhas.push({ campo: rotuloCampo(chave), de: strAntes, para: strDepois });
   }
 
-  if (!linhas.length && acao === 'STRIPE_COUPON_CREATE' && d.code) {
+  if (!linhas.length && (acao === 'STRIPE_COUPON_CREATE' || acao === 'ASAAS_COUPON_CREATE') && d.code) {
     linhas.push({ campo: 'Código do cupom', de: '—', para: formatValorAudit('code', d.code) });
   }
 
@@ -177,6 +178,10 @@ function montarResumo(acao: string, entidade: string, alteracoes: AuditAlteracao
   if (acao === 'STRIPE_COUPON_CREATE') {
     const codigo = alteracoes.find((l) => l.campo.toLowerCase().includes('código'));
     return codigo ? `Novo cupom "${codigo.para}" cadastrado no Stripe.` : 'Novo cupom promocional cadastrado.';
+  }
+  if (acao === 'ASAAS_COUPON_CREATE') {
+    const codigo = alteracoes.find((l) => l.campo.toLowerCase().includes('código'));
+    return codigo ? `Novo cupom "${codigo.para}" cadastrado para Asaas.` : 'Novo cupom Asaas cadastrado.';
   }
   if (acao === 'CONVERSA_DELETE' || acao === 'REUNIAO_DELETE') {
     const cliente = alteracoes.find((l) => l.campo === 'Cliente');

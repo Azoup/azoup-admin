@@ -8,33 +8,43 @@ import type {
 } from '@/src/types/azoup';
 
 export function montarLinhaAdminCoupon(input: InserirCupomAdminInput): Omit<AdminCouponRow, 'id' | 'created_at' | 'updated_at'> {
+  const amountReaisInformado = input.amount_off_reais != null ? Number(input.amount_off_reais) : null;
   const amountCentavos = input.amount_off_centavos != null ? Number(input.amount_off_centavos) : null;
   const percentOff = input.percent_off != null ? Number(input.percent_off) : null;
-  const usaValorFixo = amountCentavos != null && amountCentavos > 0 && (percentOff == null || percentOff <= 0);
+  const valorFixoReais =
+    amountReaisInformado != null && amountReaisInformado > 0
+      ? amountReaisInformado
+      : amountCentavos != null && amountCentavos > 0
+        ? amountCentavos / 100
+        : null;
+  const usaValorFixo = valorFixoReais != null && valorFixoReais > 0 && (percentOff == null || percentOff <= 0);
 
   if (!input.codigo.trim()) throw new Error('Código é obrigatório');
-  if (usaValorFixo && (!amountCentavos || amountCentavos <= 0)) {
-    throw new Error('Informe um valor fixo válido em centavos.');
+  if (usaValorFixo && (!valorFixoReais || valorFixoReais <= 0)) {
+    throw new Error('Informe um valor fixo válido.');
   }
   if (!usaValorFixo && (!percentOff || percentOff <= 0)) {
     throw new Error('Informe um desconto percentual válido.');
   }
+  if (input.duration === 'repeating') {
+    const meses = Number(input.duration_in_months);
+    if (!Number.isFinite(meses) || meses <= 0) throw new Error('Informe quantos meses o desconto vale.');
+  }
 
-  const planIds = [...new Set(input.aplicavel_planos_ids.map((id) => Number(id)).filter((id) => Number.isFinite(id)))];
-  if (!planIds.length) throw new Error('Selecione ao menos um plano.');
+  const planIds = [...new Set((input.aplicavel_planos_ids ?? []).map((id) => Number(id)).filter((id) => Number.isFinite(id)))];
 
   return {
     code: input.codigo.trim().toUpperCase(),
-    plan_id: planIds[0],
-    aplicavel_planos_ids: planIds,
+    plan_id: planIds[0] ?? null,
+    aplicavel_planos_ids: planIds.length ? planIds : null,
     discount_type: usaValorFixo ? 'amount' : 'percent',
-    discount_value: usaValorFixo ? amountCentavos! / 100 : percentOff!,
+    discount_value: usaValorFixo ? valorFixoReais! : percentOff!,
     duration: input.duration,
     duration_in_months: input.duration === 'repeating' ? input.duration_in_months ?? 3 : null,
     redeem_by: input.redeem_by?.trim() ? input.redeem_by.trim() : null,
     max_redemptions: input.max_redemptions ?? null,
-    stripe_coupon_id: input.stripe_coupon_id,
-    stripe_promotion_code_id: input.stripe_promotion_code_id,
+    stripe_coupon_id: input.stripe_coupon_id?.trim() || null,
+    stripe_promotion_code_id: input.stripe_promotion_code_id?.trim() || null,
     active: true,
     created_by_admin: input.created_by_admin ?? null,
   };
@@ -91,4 +101,14 @@ export async function inserirCupomAdmin(input: InserirCupomAdminInput): Promise<
   const { data, error } = await supabase.from('admin_coupons').insert(row as never).select('*').single();
   if (error) throw new Error(error.message);
   return data as AdminCouponRow;
+}
+
+/** Usos Asaas em assinatura_cupons. Tabela do Confec: falha silenciosa se o painel não puder ler. */
+export async function contarUsosCupomAsaas(adminCouponId: string): Promise<number | null> {
+  const { count, error } = await supabase
+    .from('assinatura_cupons')
+    .select('id', { count: 'exact', head: true })
+    .eq('admin_coupon_id', adminCouponId);
+  if (error) return null;
+  return count ?? 0;
 }

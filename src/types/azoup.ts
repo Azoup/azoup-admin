@@ -212,8 +212,8 @@ export interface AdminBillingSettingsRow {
 export interface AdminCouponRow {
   id: string;
   code: string;
-  plan_id: number;
-  /** Todos os planos vinculados; plan_id = primeiro item. */
+  plan_id?: number | null;
+  /** Todos os planos vinculados; plan_id = primeiro item. Vazio/nulo = qualquer plano. */
   aplicavel_planos_ids?: number[] | null;
   discount_type: 'percent' | 'amount';
   discount_value: number;
@@ -221,8 +221,8 @@ export interface AdminCouponRow {
   duration_in_months?: number | null;
   redeem_by?: string | null;
   max_redemptions?: number | null;
-  stripe_coupon_id: string;
-  stripe_promotion_code_id: string;
+  stripe_coupon_id?: string | null;
+  stripe_promotion_code_id?: string | null;
   active: boolean;
   created_by_admin?: string | null;
   created_at?: string | null;
@@ -233,13 +233,14 @@ export type InserirCupomAdminInput = {
   codigo: string;
   percent_off?: number | null;
   amount_off_centavos?: number | null;
+  amount_off_reais?: number | null;
   duration: 'once' | 'repeating' | 'forever';
   duration_in_months?: number;
   max_redemptions?: number | null;
   redeem_by?: string | null;
-  aplicavel_planos_ids: number[];
-  stripe_coupon_id: string;
-  stripe_promotion_code_id: string;
+  aplicavel_planos_ids?: number[];
+  stripe_coupon_id?: string | null;
+  stripe_promotion_code_id?: string | null;
   created_by_admin?: string | null;
 };
 
