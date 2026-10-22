@@ -41,6 +41,16 @@ alter table public.admin_cliente_reunioes
 comment on column public.admin_cliente_reunioes.reuniao_cancelada is
   'true = a reunião da agenda correspondente a este registro foi cancelada.';
 
+alter table public.admin_cliente_reunioes
+  add column if not exists confec_card_id uuid references public.confec_kanban_cards(id) on delete set null;
+
+comment on column public.admin_cliente_reunioes.confec_card_id is
+  'Ticket do Kanban Confec que gerou esta pendência automaticamente.';
+
+create unique index if not exists idx_admin_cliente_reunioes_confec_card
+  on public.admin_cliente_reunioes (confec_card_id)
+  where confec_card_id is not null;
+
 create index if not exists idx_admin_cliente_reunioes_cliente
   on public.admin_cliente_reunioes (cliente_id, data_retorno);
 

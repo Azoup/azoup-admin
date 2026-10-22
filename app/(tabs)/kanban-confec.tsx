@@ -530,6 +530,8 @@ export default function KanbanConfecScreen() {
       setErro(null);
       void qc.invalidateQueries({ queryKey: ['confec_kanban'] });
       void qc.invalidateQueries({ queryKey: ['confec_notas_publicadas'] });
+      void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
     },
     onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao salvar o ticket'),
   });

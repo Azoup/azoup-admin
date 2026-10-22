@@ -15,6 +15,7 @@ export type ReuniaoClienteRow = {
   gerado_ia?: boolean | null;
   comentario_conclusao?: string | null;
   reuniao_cancelada?: boolean | null;
+  confec_card_id?: string | null;
   admin_email?: string | null;
   created_at?: string | null;
 };
@@ -286,6 +287,7 @@ export async function criarPendenciaAvulsa(params: {
   pendencia: string;
   dataRetorno: string;
   adminEmail?: string | null;
+  confecCardId?: string | null;
 }): Promise<ReuniaoClienteRow> {
   if (!params.clienteId) throw new Error('Selecione o cliente.');
   const texto = params.pendencia.trim();
@@ -293,22 +295,32 @@ export async function criarPendenciaAvulsa(params: {
   const dataRetorno = params.dataRetorno.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dataRetorno)) throw new Error('Informe a data do retorno.');
 
-  const { data, error } = await supabase
-    .from('admin_cliente_reunioes')
-    .insert({
-      cliente_id: params.clienteId,
-      empresa_nome: params.empresaNome?.trim() || null,
-      pendencia: texto,
-      data_retorno: dataRetorno,
-      participante_ids: [],
-      concluida: false,
-      avulsa: true,
-      admin_email: params.adminEmail ?? null,
-    } as never)
-    .select(SELECT_REUNIAO)
-    .single();
+  const payload = {
+    cliente_id: params.clienteId,
+    empresa_nome: params.empresaNome?.trim() || null,
+    pendencia: texto,
+    data_retorno: dataRetorno,
+    participante_ids: [],
+    concluida: false,
+    avulsa: true,
+    admin_email: params.adminEmail ?? null,
+    ...(params.confecCardId ? { confec_card_id: params.confecCardId } : {}),
+  };
+  let { data, error } = await supabase.from('admin_cliente_reunioes').insert(payload as never).select(SELECT_REUNIAO).single();
+  if (error && params.confecCardId && /confec_card_id/i.test(error.message)) {
+    const { confec_card_id: _c, ...semCard } = payload;
+    ({ data, error } = await supabase.from('admin_cliente_reunioes').insert(semCard as never).select(SELECT_REUNIAO).single());
+  }
 
   if (error) {
+    if (/duplicate|unique/i.test(error.message) && params.confecCardId) {
+      const { data: ja } = await supabase
+        .from('admin_cliente_reunioes')
+        .select(SELECT_REUNIAO)
+        .eq('confec_card_id', params.confecCardId)
+        .maybeSingle();
+      if (ja) return ja as unknown as ReuniaoClienteRow;
+    }
     if (faltaColunaAvulsa(error.message)) {
       throw new Error('Execute de novo supabase/sql/admin_cliente_reunioes.sql no Supabase para cadastrar pendência avulsa.');
     }
@@ -318,6 +330,40 @@ export async function criarPendenciaAvulsa(params: {
     throw new Error(error.message);
   }
   return data as unknown as ReuniaoClienteRow;
+}
+
+/** Uma pendência por ticket Confec, no nome de quem abriu o card. */
+export async function garantirPendenciaDoTicketConfec(params: {
+  cardId: string;
+  clienteId: string;
+  empresaNome?: string | null;
+  pendencia: string;
+  adminEmail?: string | null;
+}): Promise<void> {
+  const cardId = `${params.cardId ?? ''}`.trim();
+  const clienteId = `${params.clienteId ?? ''}`.trim();
+  if (!cardId || !clienteId) return;
+  const { data: existente, error: busca } = await supabase
+    .from('admin_cliente_reunioes')
+    .select('id')
+    .eq('confec_card_id', cardId)
+    .limit(1);
+  if (busca) {
+    if (/confec_card_id/i.test(busca.message)) {
+      throw new Error('Execute supabase/sql/admin_cliente_reunioes.sql no Supabase.');
+    }
+    if (/admin_cliente_reunioes|schema cache/i.test(busca.message)) return;
+    throw new Error(busca.message);
+  }
+  if (existente?.length) return;
+  await criarPendenciaAvulsa({
+    clienteId,
+    empresaNome: params.empresaNome,
+    pendencia: params.pendencia,
+    dataRetorno: dataHojeBrasil(),
+    adminEmail: params.adminEmail,
+    confecCardId: cardId,
+  });
 }
 
 export async function definirReuniaoConcluida(id: string, concluida: boolean, comentario?: string | null): Promise<void> {

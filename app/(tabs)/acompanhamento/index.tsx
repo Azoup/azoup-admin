@@ -1074,22 +1074,37 @@ export function HistoricoClienteTela({
   });
 
   const adicionarTelefone = useMutation({
-    mutationFn: () => adicionarTelefoneDigisac(cliente.id, novoTelefone),
-    onSuccess: () => {
+    mutationFn: async () => {
+      await adicionarTelefoneDigisac(cliente.id, novoTelefone);
+      return listarChamadosDigisac(cliente.id);
+    },
+    onSuccess: (chamados) => {
       setNovoTelefone('');
       setErroTelefone(null);
+      qc.setQueryData(['digisac_chamados', cliente.id], chamados);
       void qc.invalidateQueries({ queryKey: ['admin_digisac_telefones', cliente.id] });
-      void qc.invalidateQueries({ queryKey: ['digisac_chamados', cliente.id] });
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
     },
-    onError: (e) => setErroTelefone(e instanceof Error ? e.message : 'Erro ao adicionar telefone'),
+    onError: (e) => {
+      void qc.invalidateQueries({ queryKey: ['admin_digisac_telefones', cliente.id] });
+      setErroTelefone(e instanceof Error ? e.message : 'Erro ao adicionar telefone');
+    },
   });
 
   const removerTelefone = useMutation({
-    mutationFn: (id: string) => removerTelefoneDigisac(id),
-    onSuccess: () => {
+    mutationFn: async (id: string) => {
+      await removerTelefoneDigisac(id);
+      return listarChamadosDigisac(cliente.id);
+    },
+    onSuccess: (chamados) => {
       setErroTelefone(null);
+      qc.setQueryData(['digisac_chamados', cliente.id], chamados);
       void qc.invalidateQueries({ queryKey: ['admin_digisac_telefones', cliente.id] });
-      void qc.invalidateQueries({ queryKey: ['digisac_chamados', cliente.id] });
+      void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+      void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
     },
     onError: (e) => setErroTelefone(e instanceof Error ? e.message : 'Erro ao remover telefone'),
   });
@@ -1450,7 +1465,9 @@ export function HistoricoClienteTela({
                       opacity: adicionarTelefone.isPending || !novoTelefone.trim() ? 0.55 : pressed ? 0.85 : 1,
                     })}
                   >
-                    <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 13 }}>Adicionar</Text>
+                    <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 13 }}>
+                      {adicionarTelefone.isPending ? 'Buscando…' : 'Adicionar'}
+                    </Text>
                   </Pressable>
                 </View>
                 {erroTelefone ? <Text style={{ color: theme.error, fontSize: 12 }}>{erroTelefone}</Text> : null}

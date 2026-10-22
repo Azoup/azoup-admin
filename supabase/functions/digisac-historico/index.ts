@@ -431,8 +431,10 @@ function telefonesIguais(contato: string | null, cliente: string | null): boolea
   if (!contato || !cliente) return false;
   const a = nacional(contato);
   const b = nacional(cliente);
-  if (a.length < 10 || b.length < 10) return false;
-  return a === b || comNonoDigito(a) === comNonoDigito(b);
+  if (a.length < 8 || b.length < 8) return false;
+  if (a === b) return true;
+  if (a.length >= 10 && b.length >= 10 && comNonoDigito(a) === comNonoDigito(b)) return true;
+  return a.slice(0, 2) === b.slice(0, 2) && a.slice(-8) === b.slice(-8);
 }
 
 function numeroDeTexto(value: unknown): string | null {
@@ -440,7 +442,12 @@ function numeroDeTexto(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const bruto = value.trim();
   if (!bruto) return null;
-  return telefoneDigisac(null, bruto.split('@')[0] ?? bruto);
+  const semServico = (bruto.split('@')[0] ?? bruto).split(':')[0] ?? bruto;
+  const direto = telefoneDigisac(null, semServico);
+  if (direto) return direto;
+  const digits = digitsOnlyPhone(semServico);
+  const trecho = digits.match(/55\d{10,11}/)?.[0] ?? digits.match(/\d{10,11}/)?.[0];
+  return trecho ? telefoneDigisac(null, trecho) : null;
 }
 
 function numeroDoContatoDigisac(row: Record<string, unknown>): string | null {
@@ -536,9 +543,18 @@ async function departamentoAzoupConfec(): Promise<string> {
 async function buscarContatosPorTelefone(serviceId: string, numero: string): Promise<Record<string, unknown>[]> {
   const local = nacional(numero);
   const termos = new Set<string>();
-  if (local.length >= 8) termos.add(local.slice(-8));
   if (numero) termos.add(numero);
-  if (local.length === 10) termos.add(`55${comNonoDigito(local)}`);
+  if (local) termos.add(local);
+  if (local.length >= 8) termos.add(local.slice(-8));
+  if (local.length === 10) {
+    termos.add(comNonoDigito(local));
+    termos.add(`55${comNonoDigito(local)}`);
+  }
+  if (local.length === 11 && local[2] === '9') {
+    const semNove = `${local.slice(0, 2)}${local.slice(3)}`;
+    termos.add(semNove);
+    termos.add(`55${semNove}`);
+  }
   const vistos = new Set<string>();
   const out: Record<string, unknown>[] = [];
   const guardar = (rows: Record<string, unknown>[]) => {
@@ -551,12 +567,14 @@ async function buscarContatosPorTelefone(serviceId: string, numero: string): Pro
   };
 
   for (const termo of termos) {
-    const porCampo =
-      `/api/v1/contacts?where[data.number][$iLike]=%${encodeURIComponent(termo)}%` +
-      `&where[serviceId]=${encodeURIComponent(serviceId)}&perPage=20`;
-    const porNumero =
-      `/api/v1/contacts?number=${encodeURIComponent(termo)}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`;
-    for (const path of [porCampo, porNumero]) {
+    const encoded = encodeURIComponent(termo);
+    const caminhos = [
+      `/api/v1/contacts?where[data.number][$iLike]=%${encoded}%&where[serviceId]=${encodeURIComponent(serviceId)}&perPage=20`,
+      `/api/v1/contacts?where[number][$iLike]=%${encoded}%&where[serviceId]=${encodeURIComponent(serviceId)}&perPage=20`,
+      `/api/v1/contacts?where[idFromService][$iLike]=%${encoded}%&where[serviceId]=${encodeURIComponent(serviceId)}&perPage=20`,
+      `/api/v1/contacts?number=${encoded}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`,
+    ];
+    for (const path of caminhos) {
       try {
         guardar(asRows(await digisac(path)));
       } catch (erro) {
@@ -667,7 +685,7 @@ async function contatosDoCliente(
     }
   }
 
-  const telefonesAchados = await Promise.all(listaNumeros.slice(0, 8).map((numero) => buscarContatosPorTelefone(serviceId, numero)));
+  const telefonesAchados = await Promise.all(listaNumeros.slice(0, 20).map((numero) => buscarContatosPorTelefone(serviceId, numero)));
   const nomesBusca = [...alvos].sort((a, b) => a.length - b.length).slice(0, 8);
   const nomesAchados = await Promise.all(nomesBusca.map((nome) => buscarContatosPorNome(serviceId, nome)));
   for (const lista of [...telefonesAchados, ...nomesAchados]) candidatos.push(...lista);
@@ -1012,27 +1030,45 @@ async function marcarBuscaDigisac(
   }
 }
 
-/** Clientes que ainda não têm chamado gravado: busca o último de cada um na Digisac. */
+/** Clientes sem chamado, ou com telefone extra novo, para puxar os tickets da Digisac. */
 async function importarChamadosFaltantes(
   supabaseAdmin: ReturnType<typeof createClient>,
 ): Promise<number> {
   const departmentId = await departamentoAzoupConfec();
-  const [pessoas, ja, buscas] = await Promise.all([
+  const [pessoas, ja, buscas, extras] = await Promise.all([
     supabaseAdmin.from('clientes_azoup').select('id').limit(3000),
     supabaseAdmin.from('admin_digisac_chamados').select('cliente_id').limit(5000),
     supabaseAdmin.from('admin_digisac_busca').select('cliente_id,verificado_em').limit(3000),
+    supabaseAdmin.from('admin_digisac_telefones').select('cliente_id,created_at').limit(4000),
   ]);
   if (pessoas.error) throw new Error(pessoas.error.message);
   const comChamado = new Set((ja.data ?? []).map((row) => `${(row as { cliente_id?: string }).cliente_id ?? ''}`));
+  const buscaEm = new Map<string, number>();
+  for (const row of buscas.error ? [] : buscas.data ?? []) {
+    const id = `${(row as { cliente_id?: string }).cliente_id ?? ''}`.trim();
+    const quando = Date.parse(`${(row as { verificado_em?: string }).verificado_em ?? ''}`);
+    if (id && Number.isFinite(quando)) buscaEm.set(id, quando);
+  }
+  const extraEm = new Map<string, number>();
+  if (!extras.error) {
+    for (const row of extras.data ?? []) {
+      const id = `${(row as { cliente_id?: string }).cliente_id ?? ''}`.trim();
+      const quando = Date.parse(`${(row as { created_at?: string }).created_at ?? ''}`);
+      if (!id || !Number.isFinite(quando)) continue;
+      extraEm.set(id, Math.max(extraEm.get(id) ?? 0, quando));
+    }
+  }
   const limiteBusca = Date.now() - 12 * 3_600_000;
-  const buscado = new Set(
-    (buscas.error ? [] : buscas.data ?? [])
-      .filter((row) => Date.parse(`${(row as { verificado_em?: string }).verificado_em ?? ''}`) > limiteBusca)
-      .map((row) => `${(row as { cliente_id?: string }).cliente_id ?? ''}`),
-  );
   const fila = (pessoas.data ?? [])
-    .map((row) => `${(row as { id?: string }).id ?? ''}`)
-    .filter((id) => id && !comChamado.has(id) && !buscado.has(id))
+    .map((row) => `${(row as { id?: string }).id ?? ''}`.trim())
+    .filter((id) => {
+      if (!id) return false;
+      const verificado = buscaEm.get(id) ?? 0;
+      const extraNovo = (extraEm.get(id) ?? 0) > verificado;
+      if (extraNovo) return true;
+      if (comChamado.has(id)) return false;
+      return verificado < limiteBusca;
+    })
     .slice(0, 12);
 
   let gravados = 0;
@@ -1045,7 +1081,7 @@ async function importarChamadosFaltantes(
       }
       const chamados: Chamado[] = [];
       const vistos = new Set<string>();
-      for (const contactId of contato.contactIds.slice(0, 3)) {
+      for (const contactId of contato.contactIds) {
         for (const chamado of await listarTickets(contactId, departmentId, 2)) {
           if (vistos.has(chamado.id)) continue;
           vistos.add(chamado.id);
@@ -1146,6 +1182,7 @@ serve(async (req) => {
         departamentoAzoupConfec(),
       ]);
       if (contato.situacao) {
+        await marcarBuscaDigisac(supabaseAdmin, clienteId, contato.situacao);
         return json({ situacao: contato.situacao, chamados: [] });
       }
       const vistos = new Set<string>();
@@ -1164,6 +1201,7 @@ serve(async (req) => {
       });
       await gravarChamados(supabaseAdmin, clienteId, chamados);
       await refletirUltimoChamado(supabaseAdmin);
+      await marcarBuscaDigisac(supabaseAdmin, clienteId, chamados.length ? 'ok' : 'sem_chamados');
       return json({
         situacao: chamados.length ? 'ok' : 'sem_chamados',
         chamados: chamados.map(chamadoPublico),

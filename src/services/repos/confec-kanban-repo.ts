@@ -1,6 +1,7 @@
 import { ehSecaoConfec, type ConfecSecao } from '@/src/constants/confec-notas';
 import { gerarESalvarNotaConfec } from '@/src/services/confec-notas-api';
 import { supabase } from '@/src/lib/supabase';
+import { garantirPendenciaDoTicketConfec } from '@/src/services/repos/reunioes-repo';
 
 export const BUCKET_CONFEC = 'confec-kanban-files';
 export const LIMITE_ARQUIVO_BYTES = 5 * 1024 * 1024 * 1024;
@@ -286,6 +287,33 @@ async function substituirEtiquetas(cardId: string, labelIds: string[]): Promise<
   if (error) throw erroTabela(error.message);
 }
 
+async function nomeClienteConfec(clienteId: string): Promise<string | null> {
+  const { data, error } = await supabase.from('clientes_azoup').select('nome').eq('id', clienteId).maybeSingle();
+  if (error) return null;
+  return `${(data as { nome?: string | null } | null)?.nome ?? ''}`.trim() || null;
+}
+
+async function garantirPendenciaDoCardConfec(card: {
+  id: string;
+  ticket_number?: number | null;
+  title?: string | null;
+  cliente_id?: string | null;
+  created_by_email?: string | null;
+}): Promise<void> {
+  const clienteId = `${card.cliente_id ?? ''}`.trim();
+  if (!clienteId || !card.id) return;
+  const numero = Number(card.ticket_number);
+  const codigo = Number.isFinite(numero) && numero > 0 ? `#${numeroTicket(numero)}` : '';
+  const titulo = normalizarTitulo(`${card.title ?? ''}`) || 'Ticket';
+  await garantirPendenciaDoTicketConfec({
+    cardId: card.id,
+    clienteId,
+    empresaNome: await nomeClienteConfec(clienteId),
+    pendencia: codigo ? `Ticket Confec ${codigo} — ${titulo}` : `Ticket Confec — ${titulo}`,
+    adminEmail: `${card.created_by_email ?? ''}`.trim() || null,
+  });
+}
+
 export async function criarCardConfec(params: {
   title: string;
   status: string;
@@ -328,12 +356,19 @@ export async function criarCardConfec(params: {
       tela_nova: Boolean(params.telaNova) && Boolean(tela),
       position: Number.isFinite(position) ? Number(position) + 1 : 0,
     } as never)
-    .select('id')
+    .select('id,ticket_number,title,cliente_id,created_by_email')
     .single();
   if (error) throw erroTabela(error.message);
-  const id = (data as { id: string }).id;
-  if (params.labelIds?.length) await substituirEtiquetas(id, params.labelIds);
-  return id;
+  const criado = data as {
+    id: string;
+    ticket_number?: number | null;
+    title?: string | null;
+    cliente_id?: string | null;
+    created_by_email?: string | null;
+  };
+  if (params.labelIds?.length) await substituirEtiquetas(criado.id, params.labelIds);
+  await garantirPendenciaDoCardConfec(criado);
+  return criado.id;
 }
 
 async function aposEntrarEmFinalizados(params: {
@@ -416,6 +451,14 @@ export async function atualizarCardConfec(params: {
       tela,
       telaNova: Boolean(params.telaNova),
     });
+  }
+  if (params.clienteId) {
+    const { data: card } = await supabase
+      .from('confec_kanban_cards')
+      .select('id,ticket_number,title,cliente_id,created_by_email')
+      .eq('id', params.id)
+      .maybeSingle();
+    if (card) await garantirPendenciaDoCardConfec(card as Parameters<typeof garantirPendenciaDoCardConfec>[0]);
   }
 }
 
