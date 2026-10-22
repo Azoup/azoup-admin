@@ -18,9 +18,16 @@ export type DigisacChamado = {
 
 export type DigisacChamadosSituacao = 'ok' | 'sem_telefone' | 'sem_contato' | 'sem_chamados';
 
+export type DigisacExtraResposta = {
+  telefone: string;
+  contactId: string | null;
+  chamados: number;
+};
+
 export type DigisacChamadosResposta = {
   situacao: DigisacChamadosSituacao;
   chamados: DigisacChamado[];
+  extras?: DigisacExtraResposta[];
 };
 
 export type DigisacMensagem = {

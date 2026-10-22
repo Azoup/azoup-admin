@@ -540,7 +540,7 @@ async function departamentoAzoupConfec(): Promise<string> {
   return departmentId;
 }
 
-async function buscarContatosPorTelefone(serviceId: string, numero: string): Promise<Record<string, unknown>[]> {
+function termosDeTelefone(numero: string): string[] {
   const local = nacional(numero);
   const termos = new Set<string>();
   if (numero) termos.add(numero);
@@ -555,28 +555,54 @@ async function buscarContatosPorTelefone(serviceId: string, numero: string): Pro
     termos.add(semNove);
     termos.add(`55${semNove}`);
   }
+  return [...termos].filter((termo) => termo.length >= 8);
+}
+
+async function hidratarContato(id: string): Promise<Record<string, unknown> | null> {
+  try {
+    return contatoUnico(await digisac(`/api/v1/contacts/${encodeURIComponent(id)}`));
+  } catch (erro) {
+    console.error('[digisac-historico] hidratar contato', erro instanceof Error ? erro.message : erro);
+    return null;
+  }
+}
+
+async function buscarContatosPorTelefone(serviceId: string, numero: string): Promise<Record<string, unknown>[]> {
+  const termos = termosDeTelefone(numero);
+  if (!termos.length) return [];
   const vistos = new Set<string>();
   const out: Record<string, unknown>[] = [];
-  const guardar = (rows: Record<string, unknown>[]) => {
+  const puxar = async (rows: Record<string, unknown>[]) => {
     for (const row of rows) {
       const id = pickId(row);
       if (!id || vistos.has(id)) continue;
       vistos.add(id);
-      out.push(row);
+      out.push((await hidratarContato(id)) ?? row);
     }
   };
+  const consultar = async (or: Record<string, unknown>[]) => {
+    const query = { where: { serviceId, $or: or }, perPage: 20, page: 1 };
+    await puxar(asRows(await digisac(`/api/v1/contacts?query=${encodeURIComponent(JSON.stringify(query))}`)));
+  };
 
-  for (const termo of termos) {
-    const encoded = encodeURIComponent(termo);
-    const caminhos = [
-      `/api/v1/contacts?where[data.number][$iLike]=%${encoded}%&where[serviceId]=${encodeURIComponent(serviceId)}&perPage=20`,
-      `/api/v1/contacts?where[number][$iLike]=%${encoded}%&where[serviceId]=${encodeURIComponent(serviceId)}&perPage=20`,
-      `/api/v1/contacts?where[idFromService][$iLike]=%${encoded}%&where[serviceId]=${encodeURIComponent(serviceId)}&perPage=20`,
-      `/api/v1/contacts?number=${encoded}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`,
-    ];
-    for (const path of caminhos) {
+  const orNumber = termos.map((termo) => ({ number: { $iLike: `%${termo}%` } }));
+  const orId = termos.map((termo) => ({ idFromService: { $iLike: `%${termo}%` } }));
+  try {
+    await consultar([...orNumber, ...orId]);
+  } catch (erro) {
+    console.error('[digisac-historico] busca telefone', erro instanceof Error ? erro.message : erro);
+    try {
+      await consultar(orNumber);
+    } catch (erroNumero) {
+      console.error('[digisac-historico] busca telefone', erroNumero instanceof Error ? erroNumero.message : erroNumero);
+    }
+  }
+  if (!out.length) {
+    for (const termo of termos.filter((item) => item.length >= 10).slice(0, 4)) {
       try {
-        guardar(asRows(await digisac(path)));
+        await puxar(asRows(await digisac(
+          `/api/v1/contacts?number=${encodeURIComponent(termo)}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`,
+        )));
       } catch (erro) {
         console.error('[digisac-historico] busca telefone', erro instanceof Error ? erro.message : erro);
       }
@@ -611,10 +637,60 @@ async function buscarContatosPorNome(serviceId: string, termo: string): Promise<
   return out;
 }
 
+type ExtraContato = { id: string; telefone: string; contactIds: string[] };
+
+async function gravarContactIdExtra(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  extraId: string,
+  contactId: string,
+): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('admin_digisac_telefones')
+    .update({ contact_id: contactId })
+    .eq('id', extraId);
+  if (error && !/contact_id|schema cache|admin_digisac_telefones/i.test(error.message)) {
+    console.error('[digisac-historico] extra contact_id', error.message);
+  }
+}
+
+function extrasPublicos(extras: ExtraContato[], chamados: Chamado[]) {
+  return extras.map((extra) => ({
+    telefone: extra.telefone,
+    contactId: extra.contactIds[0] ?? null,
+    chamados: chamados.filter((chamado) => extra.contactIds.includes(chamado.contactId)).length,
+  }));
+}
+
+async function listarExtrasDoCliente(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+): Promise<ExtraContato[]> {
+  const tentar = (colunas: string) =>
+    supabaseAdmin.from('admin_digisac_telefones').select(colunas).eq('cliente_id', clienteId);
+  let { data, error } = await tentar('id,telefone,contact_id');
+  if (error && /contact_id/i.test(error.message)) {
+    ({ data, error } = await tentar('id,telefone'));
+  }
+  if (error) {
+    if (!/admin_digisac_telefones|schema cache/i.test(error.message)) throw new Error(error.message);
+    return [];
+  }
+  const out: ExtraContato[] = [];
+  for (const row of data ?? []) {
+    const id = `${(row as { id?: string }).id ?? ''}`.trim();
+    const telefone = telefoneDigisac(null, (row as { telefone?: string | null }).telefone)
+      ?? `${(row as { telefone?: string | null }).telefone ?? ''}`.trim();
+    const salvo = `${(row as { contact_id?: string | null }).contact_id ?? ''}`.trim();
+    if (!id || !telefone) continue;
+    out.push({ id, telefone, contactIds: salvo ? [salvo] : [] });
+  }
+  return out;
+}
+
 async function contatosDoCliente(
   supabaseAdmin: ReturnType<typeof createClient>,
   clienteId: string,
-): Promise<{ situacao: 'sem_telefone' | 'sem_contato' | null; contactIds: string[] }> {
+): Promise<{ situacao: 'sem_telefone' | 'sem_contato' | null; contactIds: string[]; extras: ExtraContato[] }> {
   const { data: cliente, error } = await supabaseAdmin
     .from('clientes_azoup')
     .select('id, nome, telefone')
@@ -646,27 +722,27 @@ async function contatosDoCliente(
     if (razao) for (const nome of limparNomes(razao)) nomes.add(nome);
   }
   const alvos = [...nomes];
+  const extras = await listarExtrasDoCliente(supabaseAdmin, clienteId);
   const numeros = new Set<string>();
   const principal = telefoneDigisac(null, (cliente as { telefone?: string | null }).telefone);
   if (principal) numeros.add(principal);
-
-  const extras = await supabaseAdmin
-    .from('admin_digisac_telefones')
-    .select('telefone')
-    .eq('cliente_id', clienteId);
-  if (extras.error) {
-    if (!/admin_digisac_telefones|schema cache/i.test(extras.error.message)) throw new Error(extras.error.message);
-  } else {
-    for (const row of extras.data ?? []) {
-      const extra = telefoneDigisac(null, (row as { telefone?: string | null }).telefone);
-      if (extra) numeros.add(extra);
-    }
-  }
+  for (const extra of extras) numeros.add(extra.telefone);
   const listaNumeros = [...numeros];
-  if (!listaNumeros.length && !alvos.length) return { situacao: 'sem_telefone', contactIds: [] };
+  if (!listaNumeros.length && !alvos.length) return { situacao: 'sem_telefone', contactIds: [], extras };
 
   const serviceId = await serviceAzoupConfec();
-  const candidatos: Record<string, unknown>[] = [];
+  const ids = new Set<string>();
+  const aceitar = (row: Record<string, unknown> | null, exigirCombine: boolean): string | null => {
+    if (!row) return null;
+    const id = pickId(row);
+    if (!id) return null;
+    if (ids.has(id)) return id;
+    const serviceDoContato = idCampo(row.serviceId);
+    if (serviceDoContato && serviceDoContato !== serviceId) return null;
+    if (exigirCombine && !contatoDoClienteCombina(row, listaNumeros, alvos)) return null;
+    ids.add(id);
+    return id;
+  };
 
   const envio = await supabaseAdmin
     .from('admin_digisac_envio')
@@ -676,34 +752,41 @@ async function contatosDoCliente(
   const salvo = !envio.error
     ? `${(envio.data as { contact_id?: string | null } | null)?.contact_id ?? ''}`.trim()
     : '';
-  if (salvo) {
-    try {
-      const row = contatoUnico(await digisac(`/api/v1/contacts/${encodeURIComponent(salvo)}`));
-      if (row) candidatos.push(row);
-    } catch (erro) {
-      console.error('[digisac-historico] contato salvo', erro instanceof Error ? erro.message : erro);
+  if (salvo) aceitar(await hidratarContato(salvo), true);
+
+  const extrasNumeros = new Set(extras.map((extra) => extra.telefone));
+  for (const extra of extras) {
+    const confirmados: string[] = [];
+    for (const contactId of extra.contactIds) {
+      const id = aceitar(await hidratarContato(contactId), false);
+      if (id) confirmados.push(id);
     }
+    if (!confirmados.length) {
+      const achados = await buscarContatosPorTelefone(serviceId, extra.telefone);
+      for (const row of achados) {
+        const id = aceitar(row, false);
+        if (id) confirmados.push(id);
+      }
+    }
+    extra.contactIds = [...new Set(confirmados)];
+    if (extra.contactIds[0]) await gravarContactIdExtra(supabaseAdmin, extra.id, extra.contactIds[0]);
   }
 
-  const telefonesAchados = await Promise.all(listaNumeros.slice(0, 20).map((numero) => buscarContatosPorTelefone(serviceId, numero)));
+  const principais = listaNumeros.filter((numero) => !extrasNumeros.has(numero));
+  const telefonesAchados = await Promise.all(principais.slice(0, 20).map((numero) => buscarContatosPorTelefone(serviceId, numero)));
   const nomesBusca = [...alvos].sort((a, b) => a.length - b.length).slice(0, 8);
   const nomesAchados = await Promise.all(nomesBusca.map((nome) => buscarContatosPorNome(serviceId, nome)));
-  for (const lista of [...telefonesAchados, ...nomesAchados]) candidatos.push(...lista);
-
-  const ids = new Set<string>();
-  for (const row of candidatos) {
-    const id = pickId(row);
-    if (!id || ids.has(id)) continue;
-    const serviceDoContato = idCampo(row.serviceId);
-    if (serviceDoContato && serviceDoContato !== serviceId) continue;
-    if (!contatoDoClienteCombina(row, listaNumeros, alvos)) continue;
-    ids.add(id);
+  for (const lista of [...telefonesAchados, ...nomesAchados]) {
+    for (const row of lista) {
+      aceitar(row, true);
+      if (ids.size >= 15) break;
+    }
     if (ids.size >= 15) break;
   }
 
   const contactIds = [...ids];
-  if (!contactIds.length) return { situacao: 'sem_contato', contactIds: [] };
-  return { situacao: null, contactIds };
+  if (!contactIds.length) return { situacao: 'sem_contato', contactIds, extras };
+  return { situacao: null, contactIds, extras };
 }
 
 const ROTULO_ARQUIVO: Record<string, string> = {
@@ -858,7 +941,10 @@ async function indiceDeClientes(supabaseAdmin: ReturnType<typeof createClient>):
   const { data: pessoas, error } = await supabaseAdmin.from('clientes_azoup').select('id,nome,telefone').limit(2000);
   if (error) throw new Error(error.message);
   const { data: empresas } = await supabaseAdmin.from('empresas').select('cliente_id,nome_fantasia,razao_social').limit(4000);
-  const { data: extras } = await supabaseAdmin.from('admin_digisac_telefones').select('cliente_id,telefone').limit(4000);
+  let extras = await supabaseAdmin.from('admin_digisac_telefones').select('cliente_id,telefone,contact_id').limit(4000);
+  if (extras.error && /contact_id/i.test(extras.error.message)) {
+    extras = await supabaseAdmin.from('admin_digisac_telefones').select('cliente_id,telefone').limit(4000);
+  }
   const nomesPorCliente = new Map<string, string[]>();
   const numerosPorCliente = new Map<string, string[]>();
   for (const row of empresas ?? []) {
@@ -868,9 +954,11 @@ async function indiceDeClientes(supabaseAdmin: ReturnType<typeof createClient>):
     for (const nome of limparNomes(`${(row as { razao_social?: string }).razao_social ?? ''}`)) nomes.push(nome);
     nomesPorCliente.set(id, nomes);
   }
-  for (const row of extras ?? []) {
+  for (const row of extras.error ? [] : extras.data ?? []) {
     const id = `${(row as { cliente_id?: string }).cliente_id ?? ''}`;
     const numero = telefoneDigisac(null, (row as { telefone?: string }).telefone);
+    const contato = `${(row as { contact_id?: string }).contact_id ?? ''}`.trim();
+    if (contato) marcarContato(contato, id);
     if (!numero) continue;
     const lista = numerosPorCliente.get(id) ?? [];
     lista.push(numero);
@@ -1183,7 +1271,11 @@ serve(async (req) => {
       ]);
       if (contato.situacao) {
         await marcarBuscaDigisac(supabaseAdmin, clienteId, contato.situacao);
-        return json({ situacao: contato.situacao, chamados: [] });
+        return json({
+          situacao: contato.situacao,
+          chamados: [],
+          extras: extrasPublicos(contato.extras, []),
+        });
       }
       const vistos = new Set<string>();
       const chamados: Chamado[] = [];
@@ -1205,6 +1297,7 @@ serve(async (req) => {
       return json({
         situacao: chamados.length ? 'ok' : 'sem_chamados',
         chamados: chamados.map(chamadoPublico),
+        extras: extrasPublicos(contato.extras, chamados),
       });
     }
 

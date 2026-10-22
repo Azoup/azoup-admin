@@ -13,6 +13,12 @@ create table if not exists public.admin_digisac_telefones (
 create index if not exists idx_admin_digisac_telefones_cliente
   on public.admin_digisac_telefones (cliente_id);
 
+alter table public.admin_digisac_telefones
+  add column if not exists contact_id text;
+
+comment on column public.admin_digisac_telefones.contact_id is
+  'Contato da Digisac (Azoup Confec) vinculado a este telefone extra.';
+
 comment on table public.admin_digisac_telefones is
   'Telefones extras do cliente que também chamam na Digisac pela mesma empresa.';
 
@@ -79,3 +85,5 @@ on public.admin_digisac_chamados
 for select
 to authenticated
 using (public.painel_admin_ativo());
+
+notify pgrst, 'reload schema';

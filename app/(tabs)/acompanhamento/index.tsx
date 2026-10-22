@@ -27,6 +27,7 @@ import { listarMensagensAutomaticasEnviadas } from '@/src/services/repos/digisac
 import {
   adicionarTelefoneDigisac,
   listarTelefonesDigisac,
+  normalizarTelefoneCliente,
   removerTelefoneDigisac,
 } from '@/src/services/repos/digisac-telefones-repo';
 import { listarAgendaDoCliente, listarProximasReunioesGoogle } from '@/src/services/repos/google-agendamentos-repo';
@@ -37,6 +38,8 @@ import {
   listarMensagensDigisac,
   sincronizarUltimosChamadosDigisac,
   type DigisacChamado,
+  type DigisacChamadosResposta,
+  type DigisacExtraResposta,
 } from '@/src/services/digisac-historico-api';
 import { listarMensagensProntasDigisac } from '@/src/services/repos/digisac-mensagens-prontas-repo';
 import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
@@ -796,6 +799,23 @@ const VAZIO_CHAMADOS: Record<string, string> = {
   sem_chamados: 'Nenhum chamado deste cliente no departamento Azoup Confec.',
 };
 
+function extraDoNumero(extras: DigisacExtraResposta[] | undefined, numero: string | null): DigisacExtraResposta | null {
+  if (!extras?.length || !numero) return null;
+  const alvo = numero.replace(/\D/g, '');
+  if (alvo.length < 8) return null;
+  return extras.find((item) => {
+    const atual = `${item.telefone ?? ''}`.replace(/\D/g, '');
+    if (!atual) return false;
+    return atual === alvo || atual.endsWith(alvo.slice(-8)) || alvo.endsWith(atual.slice(-8));
+  }) ?? null;
+}
+
+function avisoTelefoneExtra(chamados: DigisacChamadosResposta, numero: string | null): string | null {
+  const extra = extraDoNumero(chamados.extras, numero);
+  if (extra?.contactId && extra.chamados > 0) return null;
+  return 'Não achei esse número na Digisac (Azoup Confec)';
+}
+
 function textoBusca(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
@@ -1075,17 +1095,19 @@ export function HistoricoClienteTela({
 
   const adicionarTelefone = useMutation({
     mutationFn: async () => {
+      const numero = normalizarTelefoneCliente(novoTelefone);
       await adicionarTelefoneDigisac(cliente.id, novoTelefone);
-      return listarChamadosDigisac(cliente.id);
+      const chamados = await listarChamadosDigisac(cliente.id);
+      return { chamados, numero };
     },
-    onSuccess: (chamados) => {
+    onSuccess: ({ chamados, numero }) => {
       setNovoTelefone('');
-      setErroTelefone(null);
       qc.setQueryData(['digisac_chamados', cliente.id], chamados);
       void qc.invalidateQueries({ queryKey: ['admin_digisac_telefones', cliente.id] });
       void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
       void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
       void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+      setErroTelefone(avisoTelefoneExtra(chamados, numero));
     },
     onError: (e) => {
       void qc.invalidateQueries({ queryKey: ['admin_digisac_telefones', cliente.id] });
