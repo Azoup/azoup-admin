@@ -13,6 +13,7 @@ export type DigisacChamado = {
   aberto: boolean;
   inicio: string | null;
   fim: string | null;
+  comentario?: string | null;
 };
 
 export type DigisacChamadosSituacao = 'ok' | 'sem_telefone' | 'sem_contato' | 'sem_chamados';

@@ -6,7 +6,37 @@ import { dataCalendarioBrasil } from '@/src/utils/format';
 
 export type ClienteConversaComCliente = AdminClienteConversaRow & {
   cliente?: Pick<ClienteAzoupRow, 'id' | 'nome' | 'email' | 'telefone'> | null;
+  /** Comentário informado ao finalizar o último chamado Digisac deste cliente. */
+  comentarioDigisac?: string | null;
 };
+
+async function comentariosUltimoChamadoDigisac(clienteIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (!clienteIds.length) return map;
+  const CHUNK = 200;
+  for (let i = 0; i < clienteIds.length; i += CHUNK) {
+    const chunk = clienteIds.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from('admin_digisac_chamados')
+      .select('cliente_id,comentario_finalizacao,inicio')
+      .in('cliente_id', chunk)
+      .order('inicio', { ascending: false });
+    if (error) {
+      if (/comentario_finalizacao|admin_digisac_chamados|schema cache/i.test(error.message)) return map;
+      throw new Error(error.message);
+    }
+    for (const row of (data ?? []) as {
+      cliente_id?: string | null;
+      comentario_finalizacao?: string | null;
+      inicio?: string | null;
+    }[]) {
+      const id = `${row.cliente_id ?? ''}`.trim();
+      if (!id || map.has(id)) continue;
+      map.set(id, `${row.comentario_finalizacao ?? ''}`.trim());
+    }
+  }
+  return map;
+}
 
 /** Colunas reais de `clientes_azoup` no schema Azoup (sem nome_fantasia/razao_social/celular). */
 const CLIENTE_SELECT_COLS = 'id,nome,email,telefone,created_at';
@@ -130,11 +160,15 @@ export async function listarConversasClientes(params?: {
     (row) => params?.incluirDigisac || !ehContatoDigisacAutomatico(row.descricao),
   );
   const clienteIds = [...new Set(rows.map((r) => r.cliente_id))];
-  const clientesMap = await buscarClientesPorIds(clienteIds);
+  const [clientesMap, comentariosDigisac] = await Promise.all([
+    buscarClientesPorIds(clienteIds),
+    params?.incluirDigisac ? comentariosUltimoChamadoDigisac(clienteIds) : Promise.resolve(new Map<string, string>()),
+  ]);
 
   return rows.map((row) => ({
     ...row,
     cliente: clientesMap.get(row.cliente_id) ?? null,
+    comentarioDigisac: ehContatoDigisacAutomatico(row.descricao) ? comentariosDigisac.get(row.cliente_id) || null : null,
   }));
 }
 

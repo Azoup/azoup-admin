@@ -360,7 +360,7 @@ export default function AgendamentosScreen() {
   const cobertasRegistros = useMemo(() => cobertasDeRegistrosManuais(registrosQ.data ?? []), [registrosQ.data]);
 
   const registrosPorClienteDia = useMemo(() => {
-    const map = new Map<string, { id: string; assuntos: string; autor: string; empresa: string }[]>();
+    const map = new Map<string, { id: string; assuntos: string; autor: string; empresa: string; cancelada: boolean }[]>();
     for (const row of registrosQ.data ?? []) {
       const chave = chaveClienteDia(row.cliente_id, row.created_at);
       if (!chave) continue;
@@ -370,6 +370,7 @@ export default function AgendamentosScreen() {
         assuntos: `${row.assuntos ?? ''}`.trim(),
         autor: `${row.admin_email ?? ''}`.trim(),
         empresa: `${row.empresa_nome ?? ''}`.trim(),
+        cancelada: Boolean(row.reuniao_cancelada),
       });
       map.set(chave, lista);
     }
@@ -381,7 +382,7 @@ export default function AgendamentosScreen() {
     [doDia],
   );
   const registrosSemEvento = useMemo(() => {
-    const soltos: { id: string; assuntos: string; autor: string; empresa: string }[] = [];
+    const soltos: { id: string; assuntos: string; autor: string; empresa: string; cancelada: boolean }[] = [];
     for (const [chave, lista] of registrosPorClienteDia) {
       const [clienteId, dia] = chave.split('|');
       if (dia !== diaSelecionado || clientesNoDia.has(clienteId)) continue;
@@ -728,13 +729,16 @@ export default function AgendamentosScreen() {
                   {semRegistro ? (
                     <Text style={{ color: theme.warning, fontWeight: '800', fontSize: 12 }}>Sem registro</Text>
                   ) : null}
-                  {registros.length > 0 ? (
+                  {registros.some((registro) => !registro.cancelada) ? (
                     <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Com registro</Text>
+                  ) : null}
+                  {registros.some((registro) => registro.cancelada) ? (
+                    <Text style={{ color: theme.error, fontWeight: '800', fontSize: 12 }}>Reunião cancelada</Text>
                   ) : null}
                   {registros.map((registro) => (
                     <View key={registro.id} style={{ gap: 2 }}>
                       <Text style={{ color: theme.text, fontSize: 13 }}>
-                        {registro.assuntos || 'Registro da reunião'}
+                        {registro.assuntos || (registro.cancelada ? 'Reunião cancelada' : 'Registro da reunião')}
                       </Text>
                       {registro.autor ? (
                         <Text style={{ color: theme.textMuted, fontSize: 12 }}>Registrado por {registro.autor}</Text>
@@ -745,12 +749,16 @@ export default function AgendamentosScreen() {
                 );
               })}
               {registrosSemEvento.map((registro) => (
-                <ScreenCard key={registro.id} style={{ gap: 4, borderColor: theme.cadastroAction }}>
-                  <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Com registro</Text>
+                <ScreenCard key={registro.id} style={{ gap: 4, borderColor: registro.cancelada ? theme.error : theme.cadastroAction }}>
+                  <Text style={{ color: registro.cancelada ? theme.error : theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+                    {registro.cancelada ? 'Reunião cancelada' : 'Com registro'}
+                  </Text>
                   <Text style={{ color: theme.headerText, fontWeight: '800' }}>
                     {registro.empresa || 'Registro da reunião'}
                   </Text>
-                  <Text style={{ color: theme.text, fontSize: 13 }}>{registro.assuntos || 'Registro da reunião'}</Text>
+                  <Text style={{ color: theme.text, fontSize: 13 }}>
+                    {registro.assuntos || (registro.cancelada ? 'Reunião cancelada' : 'Registro da reunião')}
+                  </Text>
                   {registro.autor ? (
                     <Text style={{ color: theme.textMuted, fontSize: 12 }}>Registrado por {registro.autor}</Text>
                   ) : null}

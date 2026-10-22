@@ -36,6 +36,12 @@ create index if not exists idx_admin_digisac_chamados_ticket
 create index if not exists idx_admin_digisac_chamados_inicio
   on public.admin_digisac_chamados (inicio desc);
 
+alter table public.admin_digisac_chamados
+  add column if not exists comentario_finalizacao text;
+
+comment on column public.admin_digisac_chamados.comentario_finalizacao is
+  'Comentário informado ao finalizar o chamado na Digisac.';
+
 comment on table public.admin_digisac_chamados is
   'Chamados da Digisac do departamento Azoup Confec ligados ao cliente, para o histórico e relatórios.';
 

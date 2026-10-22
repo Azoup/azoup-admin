@@ -14,6 +14,7 @@ export type ReuniaoClienteRow = {
   avulsa?: boolean | null;
   gerado_ia?: boolean | null;
   comentario_conclusao?: string | null;
+  reuniao_cancelada?: boolean | null;
   admin_email?: string | null;
   created_at?: string | null;
 };
@@ -31,6 +32,7 @@ const SELECT_REUNIAO =
 let suporteAvulsa: boolean | null = null;
 let suporteGeradoIa: boolean | null = null;
 let suporteComentario: boolean | null = null;
+let suporteReuniaoCancelada: boolean | null = null;
 
 function faltaColunaAvulsa(message: string): boolean {
   return /avulsa/i.test(message);
@@ -44,6 +46,7 @@ async function consultarReunioes<T>(
     suporteAvulsa === false ? '' : 'avulsa',
     suporteGeradoIa === false ? '' : 'gerado_ia',
     suporteComentario === false ? '' : 'comentario_conclusao',
+    suporteReuniaoCancelada === false ? '' : 'reuniao_cancelada',
   ].filter(Boolean);
   const colunas = [colunasBase, ...extras].join(',');
   const primeiro = await montar(colunas);
@@ -51,6 +54,7 @@ async function consultarReunioes<T>(
     if (extras.includes('avulsa')) suporteAvulsa = true;
     if (extras.includes('gerado_ia')) suporteGeradoIa = true;
     if (extras.includes('comentario_conclusao')) suporteComentario = true;
+    if (extras.includes('reuniao_cancelada')) suporteReuniaoCancelada = true;
     return primeiro;
   }
   const mensagem = primeiro.error.message;
@@ -65,6 +69,10 @@ async function consultarReunioes<T>(
   }
   if (suporteComentario !== false && /comentario_conclusao/i.test(mensagem)) {
     suporteComentario = false;
+    mudou = true;
+  }
+  if (suporteReuniaoCancelada !== false && /reuniao_cancelada/i.test(mensagem)) {
+    suporteReuniaoCancelada = false;
     mudou = true;
   }
   if (!mudou) return primeiro;
@@ -212,10 +220,13 @@ export async function criarPendenciasReuniao(params: {
   /** YYYY-MM-DD. Só o owner envia; define a data do registro em vez de agora. */
   dataRegistro?: string | null;
   geradoIa?: boolean;
+  reuniaoCancelada?: boolean;
   pendencias: { texto: string; dataRetorno: string }[];
 }): Promise<ReuniaoClienteRow[]> {
   if (!params.clienteId) throw new Error('Cliente inválido.');
-  if (!params.participanteIds.length) throw new Error('Selecione ao menos um participante.');
+  if (!params.reuniaoCancelada && !params.participanteIds.length) {
+    throw new Error('Selecione ao menos um participante.');
+  }
 
   const itens = params.pendencias
     .map((item) => ({ texto: item.texto.trim(), dataRetorno: item.dataRetorno.trim() }))
@@ -246,6 +257,7 @@ export async function criarPendenciasReuniao(params: {
       concluida: false,
       admin_email: params.adminEmail ?? null,
       ...(params.geradoIa ? { gerado_ia: true } : {}),
+      ...(params.reuniaoCancelada ? { reuniao_cancelada: true } : {}),
       ...(comData && createdAt ? { created_at: createdAt } : {}),
     })) as never;
 
@@ -255,7 +267,7 @@ export async function criarPendenciasReuniao(params: {
   }
 
   if (error) {
-    if (/gerado_ia/i.test(error.message)) {
+    if (/gerado_ia|reuniao_cancelada/i.test(error.message)) {
       throw new Error('Execute supabase/sql/admin_cliente_reunioes.sql no Supabase.');
     }
     if (/admin_cliente_reunioes|schema cache/i.test(error.message)) {

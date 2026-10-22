@@ -21,6 +21,7 @@ type Chamado = {
   fim: string | null;
   contactId: string;
   departmentId: string;
+  comentario: string | null;
 };
 
 type Mensagem = {
@@ -196,6 +197,148 @@ function assuntoDoChamado(row: Record<string, unknown>): string | null {
   return nomes.length ? nomes.join(', ') : null;
 }
 
+function textoLivre(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const texto = value.trim();
+    return texto || null;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return `${value}`;
+  if (Array.isArray(value)) {
+    const partes = value.map(textoLivre).filter((item): item is string => Boolean(item));
+    return partes.length ? partes.join('\n') : null;
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return textoLivre(obj.comments ?? obj.comment ?? obj.text ?? obj.body ?? obj.message ?? obj.observation ?? obj.notes);
+  }
+  return null;
+}
+
+function jsonObjeto(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== 'string') return null;
+  const bruto = value.trim();
+  if (!bruto.startsWith('{') && !bruto.startsWith('[')) return null;
+  try {
+    const lido = JSON.parse(bruto) as unknown;
+    return lido && typeof lido === 'object' && !Array.isArray(lido) ? (lido as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function comentarioDoTicket(row: Record<string, unknown>): string | null {
+  return (
+    textoLivre(row.comments) ||
+    textoLivre(row.comment) ||
+    textoLivre(row.observations) ||
+    textoLivre(row.notes) ||
+    textoLivre(row.closingComment) ||
+    textoLivre(row.lastComment)
+  );
+}
+
+function comentarioDeMensagem(row: Record<string, unknown>): { fechar: string | null; interno: string | null } {
+  const tipo = `${row.type ?? ''}`.trim().toLowerCase();
+  const texto = `${row.text ?? row.body ?? ''}`.trim();
+  const data = jsonObjeto(row.data);
+  const evento = `${data?.type ?? data?.event ?? data?.action ?? data?.name ?? ''}`.toLowerCase();
+  const doEvento = textoLivre(data?.comments ?? data?.comment ?? data?.text ?? data?.message);
+  const fechou = tipo === 'ticket' || evento.includes('close') || evento.includes('end');
+  return {
+    fechar: fechou ? doEvento : null,
+    interno: tipo === 'comment' || tipo === 'annotation' ? textoLivre(texto) || doEvento : null,
+  };
+}
+
+async function buscarComentarioFinalizacao(ticketId: string): Promise<string | null> {
+  const query = {
+    where: { ticketId },
+    order: [['createdAt', 'DESC']],
+    page: 1,
+    perPage: 40,
+  };
+  const data = await digisac(`/api/v1/messages?query=${encodeURIComponent(JSON.stringify(query))}`);
+  let interno: string | null = null;
+  for (const row of asRows(data)) {
+    const achado = comentarioDeMensagem(row);
+    if (achado.fechar) return achado.fechar;
+    if (achado.interno && !interno) interno = achado.interno;
+  }
+  return interno;
+}
+
+function linhaChamado(clienteId: string, chamado: Chamado, departmentId?: string | null, agora = new Date().toISOString()) {
+  return {
+    cliente_id: clienteId,
+    ticket_id: chamado.id,
+    contact_id: chamado.contactId || null,
+    protocolo: chamado.protocolo,
+    assunto: chamado.assunto,
+    aberto: chamado.aberto,
+    inicio: chamado.inicio,
+    fim: chamado.fim,
+    department_id: chamado.departmentId || departmentId || null,
+    comentario_finalizacao: chamado.comentario,
+    updated_at: agora,
+  };
+}
+
+async function upsertChamados(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  linhas: ReturnType<typeof linhaChamado>[],
+): Promise<void> {
+  if (!linhas.length) return;
+  const tentar = (payload: unknown[]) =>
+    supabaseAdmin.from('admin_digisac_chamados').upsert(payload, { onConflict: 'cliente_id,ticket_id' });
+  let { error } = await tentar(linhas);
+  if (error && /comentario_finalizacao/i.test(error.message)) {
+    ({ error } = await tentar(linhas.map(({ comentario_finalizacao: _c, ...resto }) => resto)));
+  }
+  if (error) {
+    if (/admin_digisac_chamados|schema cache/i.test(error.message)) {
+      console.error('[digisac-historico] tabela de chamados ausente');
+      return;
+    }
+    throw new Error(error.message);
+  }
+}
+
+async function preencherComentariosChamados(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  chamados: Array<{ clienteId: string; chamado: Chamado }>,
+  limite: number,
+): Promise<void> {
+  const porCliente = new Map<string, Chamado>();
+  for (const item of chamados) {
+    if (item.chamado.aberto) continue;
+    const atual = porCliente.get(item.clienteId);
+    const inicio = item.chamado.inicio ?? '';
+    if (!atual || inicio > (atual.inicio ?? '')) porCliente.set(item.clienteId, item.chamado);
+  }
+  let n = 0;
+  for (const [clienteId, chamado] of porCliente) {
+    if (n >= limite) break;
+    if (chamado.comentario) continue;
+    n += 1;
+    try {
+      const comentario = await buscarComentarioFinalizacao(chamado.id);
+      if (!comentario) continue;
+      chamado.comentario = comentario;
+      const { error } = await supabaseAdmin
+        .from('admin_digisac_chamados')
+        .update({ comentario_finalizacao: comentario, updated_at: new Date().toISOString() })
+        .eq('cliente_id', clienteId)
+        .eq('ticket_id', chamado.id);
+      if (error && !/comentario_finalizacao|schema cache/i.test(error.message)) {
+        console.error('[digisac-historico] comentario', error.message);
+      }
+    } catch (erro) {
+      console.error('[digisac-historico] comentario', erro instanceof Error ? erro.message : erro);
+    }
+  }
+}
+
 function mapChamado(row: Record<string, unknown>): Chamado | null {
   const id = `${row.id ?? ''}`.trim();
   if (!id) return null;
@@ -213,6 +356,7 @@ function mapChamado(row: Record<string, unknown>): Chamado | null {
     fim: fim || null,
     contactId,
     departmentId,
+    comentario: comentarioDoTicket(row),
   };
 }
 
@@ -621,6 +765,7 @@ function chamadoPublico(chamado: Chamado) {
     aberto: chamado.aberto,
     inicio: chamado.inicio,
     fim: chamado.fim,
+    comentario: chamado.comentario,
   };
 }
 
@@ -631,28 +776,15 @@ async function gravarChamados(
 ): Promise<void> {
   const agora = new Date().toISOString();
   if (chamados.length) {
-    const { error } = await supabaseAdmin.from('admin_digisac_chamados').upsert(
-      chamados.map((chamado) => ({
-        cliente_id: clienteId,
-        ticket_id: chamado.id,
-        contact_id: chamado.contactId || null,
-        protocolo: chamado.protocolo,
-        assunto: chamado.assunto,
-        aberto: chamado.aberto,
-        inicio: chamado.inicio,
-        fim: chamado.fim,
-        department_id: chamado.departmentId || null,
-        updated_at: agora,
-      })),
-      { onConflict: 'cliente_id,ticket_id' },
+    await upsertChamados(
+      supabaseAdmin,
+      chamados.map((chamado) => linhaChamado(clienteId, chamado, chamado.departmentId, agora)),
     );
-    if (error) {
-      if (/admin_digisac_chamados|schema cache/i.test(error.message)) {
-        console.error('[digisac-historico] tabela de chamados ausente');
-        return;
-      }
-      throw new Error(error.message);
-    }
+    await preencherComentariosChamados(
+      supabaseAdmin,
+      chamados.map((chamado) => ({ clienteId, chamado })),
+      8,
+    );
   }
 
   const { data: atuais, error: listErr } = await supabaseAdmin
@@ -838,24 +970,12 @@ async function importarChamadosRecentes(
   }
 
   const agora = new Date().toISOString();
-  const linhas = [...porCliente.entries()].flatMap(([clienteId, chamados]) =>
-    chamados.map((chamado) => ({
-      cliente_id: clienteId,
-      ticket_id: chamado.id,
-      contact_id: chamado.contactId || null,
-      protocolo: chamado.protocolo,
-      assunto: chamado.assunto,
-      aberto: chamado.aberto,
-      inicio: chamado.inicio,
-      fim: chamado.fim,
-      department_id: chamado.departmentId || departmentId,
-      updated_at: agora,
-    })),
+  const pares = [...porCliente.entries()].flatMap(([clienteId, chamados]) =>
+    chamados.map((chamado) => ({ clienteId, chamado })),
   );
-  if (linhas.length) {
-    const { error } = await supabaseAdmin.from('admin_digisac_chamados').upsert(linhas, { onConflict: 'cliente_id,ticket_id' });
-    if (error && !/schema cache|does not exist/i.test(error.message)) throw new Error(error.message);
-  }
+  const linhas = pares.map(({ clienteId, chamado }) => linhaChamado(clienteId, chamado, departmentId, agora));
+  await upsertChamados(supabaseAdmin, linhas);
+  await preencherComentariosChamados(supabaseAdmin, pares, 20);
   return linhas.length;
 }
 
@@ -867,22 +987,15 @@ async function gravarChamadosSemApagar(
 ): Promise<void> {
   if (!chamados.length) return;
   const agora = new Date().toISOString();
-  const { error } = await supabaseAdmin.from('admin_digisac_chamados').upsert(
-    chamados.map((chamado) => ({
-      cliente_id: clienteId,
-      ticket_id: chamado.id,
-      contact_id: chamado.contactId || null,
-      protocolo: chamado.protocolo,
-      assunto: chamado.assunto,
-      aberto: chamado.aberto,
-      inicio: chamado.inicio,
-      fim: chamado.fim,
-      department_id: chamado.departmentId || departmentId,
-      updated_at: agora,
-    })),
-    { onConflict: 'cliente_id,ticket_id' },
+  await upsertChamados(
+    supabaseAdmin,
+    chamados.map((chamado) => linhaChamado(clienteId, chamado, departmentId, agora)),
   );
-  if (error && !/schema cache|does not exist/i.test(error.message)) throw new Error(error.message);
+  await preencherComentariosChamados(
+    supabaseAdmin,
+    chamados.map((chamado) => ({ clienteId, chamado })),
+    8,
+  );
 }
 
 async function marcarBuscaDigisac(

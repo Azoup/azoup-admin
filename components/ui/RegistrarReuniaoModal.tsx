@@ -65,21 +65,22 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
   }
 
   const salvarMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (reuniaoCancelada: boolean) => {
       if (!cliente) throw new Error('Cliente inválido.');
-      if (!selecionados.length) throw new Error('Selecione ao menos um participante.');
+      if (!reuniaoCancelada && !selecionados.length) throw new Error('Selecione ao menos um participante.');
       if (podeAlterarData && !/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro.trim())) {
         throw new Error('Informe a data do registro.');
       }
       const criadas = await criarPendenciasReuniao({
         clienteId: cliente.id,
         empresaNome: cliente.empresa_nome?.trim() || cliente.nome,
-        assuntos,
+        assuntos: reuniaoCancelada ? assuntos.trim() || 'Reunião cancelada' : assuntos,
         proximaAcao,
         participanteIds: selecionados,
         adminEmail: adminProfile?.email ?? session?.user?.email ?? null,
         dataRegistro: podeAlterarData ? dataRegistro : null,
         geradoIa,
+        reuniaoCancelada,
         pendencias: linhas.map((linha) => ({ texto: linha.texto, dataRetorno: linha.dataRetorno })),
       });
       const primeiraData = criadas.map((item) => item.data_retorno).sort()[0] ?? null;
@@ -296,12 +297,41 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
 
               <PrimaryButton
                 label="SALVAR REUNIÃO"
-                loading={salvarMutation.isPending}
+                loading={salvarMutation.isPending && salvarMutation.variables !== true}
+                disabled={salvarMutation.isPending}
                 onPress={() => {
                   setErro(null);
-                  salvarMutation.mutate();
+                  salvarMutation.mutate(false);
                 }}
               />
+              <Pressable
+                disabled={salvarMutation.isPending}
+                onPress={() => {
+                  setErro(null);
+                  salvarMutation.mutate(true);
+                }}
+                style={({ pressed }) => [
+                  styles.adicionar,
+                  {
+                    borderColor: theme.error,
+                    opacity: pressed || salvarMutation.isPending ? 0.7 : 1,
+                  },
+                ]}
+              >
+                {salvarMutation.isPending && salvarMutation.variables === true ? (
+                  <ActivityIndicator color={theme.error} />
+                ) : (
+                  <FontAwesome name="ban" size={13} color={theme.error} />
+                )}
+                <Text style={{ color: theme.error, fontWeight: '800', fontSize: 13 }}>
+                  {salvarMutation.isPending && salvarMutation.variables === true
+                    ? 'Salvando…'
+                    : 'Marcar reunião cancelada'}
+                </Text>
+              </Pressable>
+              <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                Use quando a reunião da agenda não aconteceu. O dia fica com registro e aparece como cancelada.
+              </Text>
             </ScrollView>
           </View>
         </View>

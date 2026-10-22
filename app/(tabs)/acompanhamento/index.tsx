@@ -844,6 +844,11 @@ function ChamadoDigisacModal({
             </Pressable>
           </View>
           {chamado ? <Text style={{ color: theme.textMuted, fontSize: 12 }}>{detalheChamado(chamado)}</Text> : null}
+          {chamado?.comentario?.trim() ? (
+            <Text style={{ color: theme.text, fontSize: 13 }}>
+              Comentário ao finalizar: {chamado.comentario.trim()}
+            </Text>
+          ) : null}
           <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
             {mensagensQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
             {mensagensQ.error ? <Text style={{ color: theme.error }}>{(mensagensQ.error as Error).message}</Text> : null}
@@ -1096,6 +1101,8 @@ export function HistoricoClienteTela({
     void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
     void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
     void qc.invalidateQueries({ queryKey: ['admin_audit_logs'] });
+    void qc.invalidateQueries({ queryKey: ['reunioes_sem_registro'] });
+    void qc.invalidateQueries({ queryKey: ['registros_reuniao_periodo'] });
   }
 
   const salvarReuniao = useMutation({
@@ -1561,6 +1568,9 @@ export function HistoricoClienteTela({
                     >
                       <Text style={{ color: theme.headerText, fontWeight: '800' }}>{tituloChamado(chamado)}</Text>
                       <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>{detalheChamado(chamado)}</Text>
+                      {chamado.comentario?.trim() ? (
+                        <Text style={{ color: theme.text, fontSize: 13, marginTop: 4 }}>{chamado.comentario.trim()}</Text>
+                      ) : null}
                     </Pressable>
                   ))}
                 </View>
@@ -1696,8 +1706,10 @@ export function HistoricoClienteTela({
                                   gap: 2,
                                 }}
                               >
-                                <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
-                                  Registro do mesmo dia{reuniao.gerado_ia ? ' · IA' : ''}
+                                <Text style={{ color: reuniao.reuniao_cancelada ? theme.error : theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+                                  {reuniao.reuniao_cancelada
+                                    ? 'Reunião cancelada'
+                                    : `Registro do mesmo dia${reuniao.gerado_ia ? ' · IA' : ''}`}
                                 </Text>
                                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                                   {formatDateTimeBR(reuniao.created_at)} · {reuniao.admin_email?.trim() || '—'}
@@ -1740,6 +1752,9 @@ export function HistoricoClienteTela({
                         <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                           {formatDateTimeBR(reuniao.created_at)}
                         </Text>
+                        {reuniao.reuniao_cancelada ? (
+                          <Text style={{ color: theme.error, fontSize: 12, fontWeight: '800' }}>Reunião cancelada</Text>
+                        ) : null}
                         <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                           {reuniao.gerado_ia ? 'Registrado pela IA' : `Registrado por ${reuniao.admin_email?.trim() || '—'}`}
                         </Text>
@@ -1827,7 +1842,9 @@ export function HistoricoClienteTela({
                           </Text>
                           <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                             {digisac
-                              ? 'Contato automático pelo último chamado'
+                              ? conversa.comentarioDigisac?.trim()
+                                ? 'Comentário ao finalizar o chamado na Digisac'
+                                : 'Contato automático pelo último chamado'
                               : `Registrado por ${conversa.admin_email?.trim() || '—'}`}
                           </Text>
                         </View>
@@ -1869,7 +1886,10 @@ export function HistoricoClienteTela({
                         />
                       ) : (
                         <Text style={{ color: theme.text, fontSize: 14, marginTop: 4 }}>
-                          {digisac ? 'Último chamado sincronizado da Digisac (mesma data do card de acompanhamento).' : conversa.descricao}
+                          {digisac
+                            ? conversa.comentarioDigisac?.trim() ||
+                              'Último chamado sincronizado da Digisac (mesma data do card de acompanhamento).'
+                            : conversa.descricao}
                         </Text>
                       )}
                     </View>
@@ -3291,6 +3311,8 @@ export default function AcompanhamentoScreen() {
           void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
           void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
           void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+          void qc.invalidateQueries({ queryKey: ['reunioes_sem_registro'] });
+          void qc.invalidateQueries({ queryKey: ['registros_reuniao_periodo'] });
         }}
       />
       <FichaModal

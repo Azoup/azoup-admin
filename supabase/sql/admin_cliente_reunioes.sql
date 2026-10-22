@@ -35,6 +35,12 @@ alter table public.admin_cliente_reunioes
 comment on column public.admin_cliente_reunioes.comentario_conclusao is
   'Comentário obrigatório informado ao concluir a pendência.';
 
+alter table public.admin_cliente_reunioes
+  add column if not exists reuniao_cancelada boolean not null default false;
+
+comment on column public.admin_cliente_reunioes.reuniao_cancelada is
+  'true = a reunião da agenda correspondente a este registro foi cancelada.';
+
 create index if not exists idx_admin_cliente_reunioes_cliente
   on public.admin_cliente_reunioes (cliente_id, data_retorno);
 
