@@ -565,16 +565,9 @@ function nomeCompativel(nomeDigisac: string, alvos: string[]): boolean {
   return false;
 }
 
-function contatoDoClienteCombina(row: Record<string, unknown>, numeros: string[], nomes: string[]): boolean {
+function contatoDoClienteCombina(row: Record<string, unknown>, numeros: string[], _nomes: string[] = []): boolean {
   const numeroContato = numeroDoContatoDigisac(row);
-  if (numeroContato && numeros.some((numero) => telefonesIguais(numeroContato, numero))) return true;
-  const name = `${row.name ?? ''}`.trim();
-  const internal = `${row.internalName ?? ''}`.trim();
-  if (name && nomeCompativel(name, nomes)) return true;
-  const alternativa = `${row.alternativeName ?? ''}`.trim();
-  if (alternativa && nomeCompativel(alternativa, nomes)) return true;
-  if (internal && internal !== name && nomeCompativel(internal, nomes)) return true;
-  return false;
+  return Boolean(numeroContato && numeros.some((numero) => telefonesIguaisForte(numeroContato, numero)));
 }
 
 function contatoUnico(data: unknown): Record<string, unknown> | null {
@@ -799,11 +792,11 @@ async function buscarContatosNosChamados(
       if (!contactId || vistos.has(contactId)) continue;
       let contato = embutido;
       let numero = contato ? numeroDoContatoDigisac(contato) : null;
-      if (numero && !numeros.some((item) => telefonesIguais(numero, item))) continue;
+      if (numero && !numeros.some((item) => telefonesIguaisForte(numero, item))) continue;
       contato = (await hidratarContato(contactId)) ?? contato;
       if (!contato) continue;
       numero = numeroDoContatoDigisac(contato);
-      if (!numero || !numeros.some((item) => telefonesIguais(numero, item))) continue;
+      if (!numero || !numeros.some((item) => telefonesIguaisForte(numero, item))) continue;
       contato[MARCA_NUMERO_OK] = true;
       vistos.add(contactId);
       out.push(contato);
@@ -985,7 +978,7 @@ async function contatosDoCliente(
   for (const extra of extras) numeros.add(extra.telefone);
   const listaNumeros = [...numeros];
   const numerosCadastro = [...new Set([principal, outroCadastro].filter((item): item is string => Boolean(item)))];
-  if (!listaNumeros.length && !alvos.length) return vazio('sem_telefone', extras);
+  if (!listaNumeros.length) return vazio('sem_telefone', extras);
 
   const serviceId = await serviceAzoupConfec();
   const vistos = new Set<string>();
@@ -1001,7 +994,12 @@ async function contatosDoCliente(
     if (soEnvio && !contatoNaConexao(row, serviceId)) return null;
     if (!soEnvio && vistos.has(id)) return id;
     if (numero) {
-      if (!contatoConfereTelefone(row, numero) && row[MARCA_NUMERO_OK] !== true) return null;
+      const atual = numeroDoContatoDigisac(row);
+      if (atual) {
+        if (!telefonesIguaisForte(atual, numero)) return null;
+      } else if (row[MARCA_NUMERO_OK] !== true) {
+        return null;
+      }
     } else if (!contatoDoClienteCombina(row, listaNumeros, alvos)) {
       return null;
     }
@@ -1044,26 +1042,12 @@ async function contatosDoCliente(
     if (extra.contactIds[0]) await gravarContactIdExtra(supabaseAdmin, extra.id, extra.contactIds[0]);
   }
 
-  const nomeIds: string[] = [];
-  if (vistos.size < 15) {
-    const nomesBusca = [...alvos].sort((a, b) => b.length - a.length).slice(0, 8);
-    const nomesAchados = await Promise.all(nomesBusca.map((nome) => buscarContatosPorNome(serviceId, nome)));
-    for (const lista of nomesAchados) {
-      for (const row of lista) {
-        const id = aceitar(row);
-        if (id) nomeIds.push(id);
-        if (vistos.size >= 15) break;
-      }
-      if (vistos.size >= 15) break;
-    }
-  }
-
   const idsPorTelefone = new Set([...principalIds, ...extras.flatMap((extra) => extra.contactIds)]);
   if (!idsPorTelefone.size && listaNumeros.length) {
     const departmentId = await departamentoAzoupConfec();
     for (const row of await buscarContatosNosChamados(departmentId, listaNumeros)) {
       const numero = numeroDoContatoDigisac(row);
-      const alvo = numero ? listaNumeros.find((item) => telefonesIguais(numero, item)) : null;
+      const alvo = numero ? listaNumeros.find((item) => telefonesIguaisForte(numero, item)) : null;
       const id = aceitar(row, alvo);
       if (id && alvo && numerosCadastro.includes(alvo)) principalIds.push(id);
     }
@@ -1082,13 +1066,7 @@ async function contatosDoCliente(
     envioContactId = principalIds.find((id) => naConexao(id)) ?? null;
   }
 
-  const contactIds = [...new Set([
-    ...(envioContactId ? [envioContactId] : []),
-    ...principalIds,
-    ...extraIds,
-    ...nomeIds,
-    ...vistos,
-  ])];
+  const contactIds = [...new Set([...principalIds, ...extraIds])];
   if (!contactIds.length) return vazio('sem_contato', extras);
   return { situacao: null, contactIds, extras, envioContactId };
 }
@@ -1220,27 +1198,6 @@ async function indiceDeClientes(supabaseAdmin: ReturnType<typeof createClient>):
   clientes: ClienteIndice[];
 }> {
   const porContato = new Map<string, string>();
-  const marcarContato = (contactId: string, clienteId: string) => {
-    const contato = contactId.trim();
-    const cliente = clienteId.trim();
-    if (!contato || !cliente) return;
-    const atual = porContato.get(contato);
-    if (atual && atual !== cliente) porContato.set(contato, '');
-    else porContato.set(contato, cliente);
-  };
-
-  const chamados = await supabaseAdmin.from('admin_digisac_chamados').select('cliente_id,contact_id').limit(5000);
-  if (!chamados.error) {
-    for (const row of chamados.data ?? []) {
-      marcarContato(`${(row as { contact_id?: string }).contact_id ?? ''}`, `${(row as { cliente_id?: string }).cliente_id ?? ''}`);
-    }
-  }
-  const envios = await supabaseAdmin.from('admin_digisac_envio').select('cliente_id,contact_id').limit(5000);
-  if (!envios.error) {
-    for (const row of envios.data ?? []) {
-      marcarContato(`${(row as { contact_id?: string }).contact_id ?? ''}`, `${(row as { cliente_id?: string }).cliente_id ?? ''}`);
-    }
-  }
 
   let pessoas = await supabaseAdmin.from('clientes_azoup').select('id,nome,telefone,celular').limit(2000);
   if (pessoas.error && /celular/i.test(pessoas.error.message)) {
@@ -1265,8 +1222,6 @@ async function indiceDeClientes(supabaseAdmin: ReturnType<typeof createClient>):
   for (const row of extras.error ? [] : extras.data ?? []) {
     const id = `${(row as { cliente_id?: string }).cliente_id ?? ''}`;
     const numero = telefoneDigisac(null, (row as { telefone?: string }).telefone);
-    const contato = `${(row as { contact_id?: string }).contact_id ?? ''}`.trim();
-    if (contato) marcarContato(contato, id);
     if (!numero) continue;
     const lista = numerosPorCliente.get(id) ?? [];
     lista.push(numero);
@@ -1291,17 +1246,23 @@ async function indiceDeClientes(supabaseAdmin: ReturnType<typeof createClient>):
   return { porContato, clientes };
 }
 
+function clientePorTelefone(contato: Record<string, unknown> | null, clientes: ClienteIndice[]): string | null {
+  if (!contato) return null;
+  const numero = numeroDoContatoDigisac(contato);
+  if (!numero) return null;
+  const achados = clientes.filter((cliente) => cliente.numeros.some((item) => telefonesIguaisForte(numero, item)));
+  if (achados.length !== 1) return null;
+  return achados[0].id;
+}
+
 function clienteDoTicket(row: Record<string, unknown>, porContato: Map<string, string>, clientes: ClienteIndice[]): string | null {
-  const contactId = idCampo(row.contactId);
-  const conhecido = porContato.get(contactId);
-  if (conhecido) return conhecido;
   const contato = row.contact && typeof row.contact === 'object' && !Array.isArray(row.contact)
     ? (row.contact as Record<string, unknown>)
     : null;
-  if (!contato) return null;
-  const achados = clientes.filter((cliente) => contatoDoClienteCombina(contato, cliente.numeros, cliente.nomes));
-  if (achados.length !== 1) return null;
-  return achados[0].id;
+  const porNumero = clientePorTelefone(contato, clientes);
+  if (porNumero) return porNumero;
+  const conhecido = porContato.get(idCampo(row.contactId));
+  return conhecido || null;
 }
 
 function diaDoChamado(valor: string): string | null {
@@ -1367,8 +1328,8 @@ async function importarChamadosRecentes(
       try {
         const contato = contatoUnico(await digisac(`/api/v1/contacts/${encodeURIComponent(contactId)}`));
         if (!contato) return;
-        const achados = clientes.filter((cliente) => contatoDoClienteCombina(contato, cliente.numeros, cliente.nomes));
-        if (achados.length === 1) porContato.set(contactId, achados[0].id);
+        const clienteId = clientePorTelefone(contato, clientes);
+        if (clienteId) porContato.set(contactId, clienteId);
       } catch (erro) {
         console.error('[digisac-historico] contato do chamado', erro instanceof Error ? erro.message : erro);
       }
