@@ -13,6 +13,7 @@ export default function BillingStackLayout() {
       }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="trial" />
+      <Stack.Screen name="anual" />
       <Stack.Screen name="coupons" />
       <Stack.Screen name="plans" />
     </Stack>

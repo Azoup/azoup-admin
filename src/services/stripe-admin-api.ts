@@ -300,3 +300,12 @@ export async function atualizarExibicaoPlanoStripe(planoId: number, exibirParaCl
 export async function atualizarOpcoesPlanoStripe(payload: UpdatePlanoOpcoesPayload) {
   return invoke<{ plano: Record<string, unknown> }>('update_plano_opcoes', payload);
 }
+
+export type UpdateDescontoPlanoAnualPayload = {
+  desconto_plano_anual_percent: number;
+  updated_by_admin?: string | null;
+};
+
+export async function atualizarDescontoPlanoAnualViaFunction(payload: UpdateDescontoPlanoAnualPayload) {
+  return invoke<{ settings: Record<string, unknown> }>('update_desconto_plano_anual', payload);
+}

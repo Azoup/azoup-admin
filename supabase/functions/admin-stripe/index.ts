@@ -1428,6 +1428,34 @@ serve(async (req) => {
       });
     }
 
+    if (body.op === 'update_desconto_plano_anual') {
+      const bruto = Number(body.payload?.desconto_plano_anual_percent);
+      if (!Number.isFinite(bruto) || bruto < 0 || bruto > 100) {
+        throw new Error('O desconto deve ser de 0 a 100.');
+      }
+      const percent = Math.round(bruto * 100) / 100;
+      const adminEmail = `${body.payload?.updated_by_admin ?? adminRow.email ?? ''}`.trim() || null;
+      const { data: settings, error: updErr } = await supabaseAdmin
+        .from('admin_billing_settings')
+        .update({
+          desconto_plano_anual_percent: percent,
+          updated_by_admin: adminEmail,
+        } as never)
+        .eq('id', 1)
+        .select('*')
+        .maybeSingle();
+      if (updErr) {
+        if (/desconto_plano_anual_percent/i.test(updErr.message)) {
+          throw new Error('Coluna desconto_plano_anual_percent ausente. Rode migration_asaas_plano_anual.sql no Supabase.');
+        }
+        throw updErr;
+      }
+      if (!settings) throw new Error('Configuração de cobrança não encontrada (admin_billing_settings id = 1).');
+      return new Response(JSON.stringify({ settings }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const stripe = new Stripe(stripeSecret, { apiVersion: '2023-10-16' });
 
     if (body.op === 'list_servicos_contratados') {

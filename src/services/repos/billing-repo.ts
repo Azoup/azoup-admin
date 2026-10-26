@@ -1,5 +1,10 @@
 import { supabase } from '@/src/lib/supabase';
-import { atualizarExibicaoPlanoStripe, atualizarOpcoesPlanoStripe, type UpdatePlanoOpcoesPayload } from '@/src/services/stripe-admin-api';
+import {
+  atualizarDescontoPlanoAnualViaFunction,
+  atualizarExibicaoPlanoStripe,
+  atualizarOpcoesPlanoStripe,
+  type UpdatePlanoOpcoesPayload,
+} from '@/src/services/stripe-admin-api';
 import type {
   AdminBillingSettingsRow,
   AdminCouponRow,
@@ -50,10 +55,50 @@ export function montarLinhaAdminCoupon(input: InserirCupomAdminInput): Omit<Admi
   };
 }
 
+function numeroOuNulo(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizarBillingSettings(row: AdminBillingSettingsRow): AdminBillingSettingsRow {
+  const trial = numeroOuNulo(row.trial_dias_padrao) ?? numeroOuNulo(row.trial_days_default);
+  return {
+    ...row,
+    trial_dias_padrao: trial,
+    trial_days_default: trial,
+    desconto_plano_anual_percent: numeroOuNulo(row.desconto_plano_anual_percent) ?? 0,
+    updated_by_admin: `${row.updated_by_admin ?? ''}`.trim() || null,
+  };
+}
+
+/** Percentual 0–100 com até duas casas. Aceita vírgula. */
+export function parseDescontoPlanoAnualPercent(raw: string): number {
+  const texto = raw.trim().replace(/\s/g, '').replace(',', '.');
+  if (!texto) throw new Error('Informe o desconto do plano anual.');
+  if (!/^\d+(\.\d{1,2})?$/.test(texto)) {
+    throw new Error('Use um número de 0 a 100, com até duas casas decimais.');
+  }
+  const n = Number(texto);
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
+    throw new Error('O desconto deve ser de 0 a 100.');
+  }
+  return Math.round(n * 100) / 100;
+}
+
 export async function obterBillingSettings(): Promise<AdminBillingSettingsRow | null> {
   const { data, error } = await supabase.from('admin_billing_settings').select('*').limit(1).maybeSingle();
   if (error && error.code !== 'PGRST116') throw new Error(error.message);
-  return (data as AdminBillingSettingsRow) ?? null;
+  return data ? normalizarBillingSettings(data as AdminBillingSettingsRow) : null;
+}
+
+export async function atualizarDescontoPlanoAnual(percent: number, adminEmail?: string | null): Promise<AdminBillingSettingsRow> {
+  const valor = parseDescontoPlanoAnualPercent(String(percent));
+  const res = await atualizarDescontoPlanoAnualViaFunction({
+    desconto_plano_anual_percent: valor,
+    updated_by_admin: adminEmail?.trim() || null,
+  });
+  return normalizarBillingSettings(res.settings as AdminBillingSettingsRow);
 }
 
 export async function atualizarTrialDias(dias: number): Promise<void> {

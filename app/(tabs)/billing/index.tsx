@@ -16,6 +16,12 @@ const LINKS = [
     icon: 'clock-o' as const,
   },
   {
+    href: '/billing/anual' as const,
+    title: 'Desconto do plano anual',
+    body: 'Percentual único no Anual do Asaas (admin_billing_settings.desconto_plano_anual_percent).',
+    icon: 'tag' as const,
+  },
+  {
     href: '/billing/coupons' as const,
     title: 'Cupons Stripe / Asaas',
     body: 'Cria cupom no Stripe ou só para o Confec Asaas (admin_coupons).',
@@ -34,7 +40,7 @@ export default function BillingHubScreen() {
 
   return (
     <Screen scroll>
-      <PageHeader title="Cobrança" subtitle="Gerencie período de teste, cupons Stripe/Asaas e planos disponíveis." />
+      <PageHeader title="Cobrança" subtitle="Gerencie período de teste, desconto do plano anual, cupons Stripe/Asaas e planos disponíveis." />
 
       {LINKS.map((item) => (
         <Link key={item.href} href={item.href} asChild>

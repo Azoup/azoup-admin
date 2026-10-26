@@ -201,10 +201,13 @@ export interface AssinaturaLimitesOverrideRow {
 }
 
 export interface AdminBillingSettingsRow {
-  id?: string;
+  id?: string | number;
   trial_dias_padrao?: number | null;
+  trial_days_default?: number | null;
+  desconto_plano_anual_percent?: number | null;
   stripe_webhook_secret_rotacao?: string | null;
   metadata?: Record<string, unknown> | null;
+  updated_by_admin?: string | null;
   updated_at?: string | null;
   [key: string]: unknown;
 }
