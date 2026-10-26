@@ -446,6 +446,18 @@ function telefonesIguaisForte(contato: string | null, cliente: string | null): b
   return comNonoDigito(a) === comNonoDigito(b);
 }
 
+function assinanteLocal(numero: string): string {
+  const local = comNonoDigito(nacional(numero));
+  return local.length >= 10 ? local.slice(2) : '';
+}
+
+function telefonesIguaisAssinante(contato: string | null, cliente: string | null): boolean {
+  if (!contato || !cliente) return false;
+  const a = assinanteLocal(contato);
+  const b = assinanteLocal(cliente);
+  return a.length >= 8 && a === b;
+}
+
 function numeroDeTexto(value: unknown): string | null {
   if (typeof value === 'number') return telefoneDigisac(null, `${value}`);
   if (typeof value !== 'string') return null;
@@ -567,7 +579,10 @@ function nomeCompativel(nomeDigisac: string, alvos: string[]): boolean {
 
 function contatoDoClienteCombina(row: Record<string, unknown>, numeros: string[], _nomes: string[] = []): boolean {
   const numeroContato = numeroDoContatoDigisac(row);
-  return Boolean(numeroContato && numeros.some((numero) => telefonesIguaisForte(numeroContato, numero)));
+  return Boolean(
+    numeroContato &&
+      numeros.some((numero) => telefonesIguaisForte(numeroContato, numero) || telefonesIguaisAssinante(numeroContato, numero)),
+  );
 }
 
 function contatoUnico(data: unknown): Record<string, unknown> | null {
@@ -676,9 +691,10 @@ async function buscarContatosPorTelefone(
       const cheio = (await hidratarContato(id)) ?? row;
       if (soEnvio && !contatoNaConexao(cheio, serviceId)) continue;
       const forte = contatoConfereTelefoneForte(cheio, numero);
-      const confere = forte || contatoConfereTelefone(cheio, numero);
+      const mesmoNumero = forte || telefonesIguaisAssinante(numeroDoContatoDigisac(cheio), numero);
+      const confere = mesmoNumero || contatoConfereTelefone(cheio, numero);
       if (soEnvio) {
-        if (!forte && !confiarBusca) continue;
+        if (!mesmoNumero && !confiarBusca) continue;
       } else if (!confere && !confiarBusca) {
         continue;
       }
@@ -720,10 +736,14 @@ async function buscarContatosPorTelefone(
 
   const orNumber = (lista: string[]) => lista.map((termo) => ({ number: { $iLike: `%${termo}%` } }));
   const orId = (lista: string[]) => lista.map((termo) => ({ idFromService: { $iLike: `%${termo}%` } }));
-  const termosEnvio = cheios.filter((termo) => digitsOnlyPhone(termo).length >= 10);
+  const assinante = assinanteLocal(numero);
+  const termosEnvio = [...cheios.filter((termo) => digitsOnlyPhone(termo).length >= 10), ...(assinante.length >= 8 ? [assinante] : [])];
   await consultar([...orNumber(soEnvio ? termosEnvio : cheios), ...orId(soEnvio ? termosEnvio : cheios)], true);
   if (!out.length) await consultar(orNumber(soEnvio ? termosEnvio : cheios), true);
   if (!out.length) await consultarNumero(true);
+  if (soEnvio && !out.length && assinante.length >= 8) {
+    await consultar(orNumber([assinante]), true);
+  }
   if (!soEnvio) {
     if (!out.length) await consultar([...orNumber(cheios), ...orId(cheios)], false);
     if (!out.length) await consultarNumero(false);
@@ -792,11 +812,11 @@ async function buscarContatosNosChamados(
       if (!contactId || vistos.has(contactId)) continue;
       let contato = embutido;
       let numero = contato ? numeroDoContatoDigisac(contato) : null;
-      if (numero && !numeros.some((item) => telefonesIguaisForte(numero, item))) continue;
+      if (numero && !numeros.some((item) => telefonesIguaisForte(numero, item) || telefonesIguaisAssinante(numero, item))) continue;
       contato = (await hidratarContato(contactId)) ?? contato;
       if (!contato) continue;
       numero = numeroDoContatoDigisac(contato);
-      if (!numero || !numeros.some((item) => telefonesIguaisForte(numero, item))) continue;
+      if (!numero || !numeros.some((item) => telefonesIguaisForte(numero, item) || telefonesIguaisAssinante(numero, item))) continue;
       contato[MARCA_NUMERO_OK] = true;
       vistos.add(contactId);
       out.push(contato);
@@ -897,17 +917,25 @@ async function contactIdParaMensagem(
 
   const serviceId = await serviceAzoupConfec();
   const rows = await buscarContatosPorTelefone(serviceId, numero, true);
-  const ids: string[] = [];
-  for (const row of rows) {
-    if (!contatoNaConexao(row, serviceId)) continue;
+  const escolher = (pred: (row: Record<string, unknown>) => boolean): string[] => {
+    const ids: string[] = [];
+    for (const row of rows) {
+      if (!contatoNaConexao(row, serviceId) || !pred(row)) continue;
+      const id = pickId(row);
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+    return ids;
+  };
+  const forte = escolher((row) => {
     const atual = numeroDoContatoDigisac(row);
-    if (atual && !telefonesIguaisForte(atual, numero)) continue;
-    if (!atual && row[MARCA_NUMERO_OK] !== true) continue;
-    const id = pickId(row);
-    if (id && !ids.includes(id)) ids.push(id);
-  }
-  if (ids.length === 1) return ids[0];
-  if (ids.length > 1) falha('Há mais de um contato com este telefone na Azoup Confec', 409);
+    if (atual) return telefonesIguaisForte(atual, numero);
+    return row[MARCA_NUMERO_OK] === true;
+  });
+  if (forte.length === 1) return forte[0];
+  if (forte.length > 1) falha('Há mais de um contato com este telefone na Azoup Confec', 409);
+  const mesmoNumero = escolher((row) => telefonesIguaisAssinante(numeroDoContatoDigisac(row), numero));
+  if (mesmoNumero.length === 1) return mesmoNumero[0];
+  if (mesmoNumero.length > 1) falha('Há mais de um contato com este telefone na Azoup Confec', 409);
   falha('Nenhum contato deste telefone na conexão Azoup Confec', 404);
 }
 
@@ -996,7 +1024,7 @@ async function contatosDoCliente(
     if (numero) {
       const atual = numeroDoContatoDigisac(row);
       if (atual) {
-        if (!telefonesIguaisForte(atual, numero)) return null;
+        if (!telefonesIguaisForte(atual, numero) && !telefonesIguaisAssinante(atual, numero)) return null;
       } else if (row[MARCA_NUMERO_OK] !== true) {
         return null;
       }
@@ -1047,7 +1075,9 @@ async function contatosDoCliente(
     const departmentId = await departamentoAzoupConfec();
     for (const row of await buscarContatosNosChamados(departmentId, listaNumeros)) {
       const numero = numeroDoContatoDigisac(row);
-      const alvo = numero ? listaNumeros.find((item) => telefonesIguaisForte(numero, item)) : null;
+      const alvo = numero
+        ? listaNumeros.find((item) => telefonesIguaisForte(numero, item) || telefonesIguaisAssinante(numero, item))
+        : null;
       const id = aceitar(row, alvo);
       if (id && alvo && numerosCadastro.includes(alvo)) principalIds.push(id);
     }
@@ -1250,7 +1280,9 @@ function clientePorTelefone(contato: Record<string, unknown> | null, clientes: C
   if (!contato) return null;
   const numero = numeroDoContatoDigisac(contato);
   if (!numero) return null;
-  const achados = clientes.filter((cliente) => cliente.numeros.some((item) => telefonesIguaisForte(numero, item)));
+  const achados = clientes.filter((cliente) =>
+    cliente.numeros.some((item) => telefonesIguaisForte(numero, item) || telefonesIguaisAssinante(numero, item)),
+  );
   if (achados.length !== 1) return null;
   return achados[0].id;
 }
