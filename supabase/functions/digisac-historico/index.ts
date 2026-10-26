@@ -614,11 +614,31 @@ async function departamentoAzoupConfec(): Promise<string> {
   return departmentId;
 }
 
+function variantesNonoDigito(numero: string): string[] {
+  const local = nacional(numero);
+  const out: string[] = [];
+  const add = (value: string) => {
+    const digits = value.replace(/\D/g, '');
+    if (digits.length >= 10 && !out.includes(digits)) out.push(digits);
+  };
+  add(numero);
+  add(local);
+  if (local.length === 11 && local[2] === '9') {
+    const semNove = `${local.slice(0, 2)}${local.slice(3)}`;
+    add(semNove);
+    add(`55${semNove}`);
+  }
+  if (local.length === 10) {
+    const comNove = comNonoDigito(local);
+    add(comNove);
+    add(`55${comNove}`);
+  }
+  return out;
+}
+
 function termosDeTelefone(numero: string): string[] {
   const local = nacional(numero);
-  const termos = new Set<string>();
-  if (numero) termos.add(numero);
-  if (local) termos.add(local);
+  const termos = new Set<string>(variantesNonoDigito(numero));
   if (local.length >= 8) termos.add(local.slice(-8));
   if (local.length === 10 || local.length === 11) {
     const ddd = local.slice(0, 2);
@@ -632,15 +652,6 @@ function termosDeTelefone(numero: string): string[] {
     termos.add(`+55 ${ddd} ${hifen}`);
     termos.add(`+55${local}`);
     termos.add(`+${numero}`);
-  }
-  if (local.length === 10) {
-    termos.add(comNonoDigito(local));
-    termos.add(`55${comNonoDigito(local)}`);
-  }
-  if (local.length === 11 && local[2] === '9') {
-    const semNove = `${local.slice(0, 2)}${local.slice(3)}`;
-    termos.add(semNove);
-    termos.add(`55${semNove}`);
   }
   return [...termos].filter((termo) => termo.length >= 8);
 }
@@ -721,9 +732,9 @@ async function buscarContatosPorTelefone(
     }
   };
   const consultarNumero = async (comServico: boolean) => {
-    const exatos = (soEnvio ? [numero, nacional(numero)].filter((termo, i, all) => termo.length >= 10 && all.indexOf(termo) === i) : cheios)
+    const exatos = (soEnvio ? variantesNonoDigito(numero) : cheios)
       .filter((termo) => /^\+?\d{10,15}$/.test(termo))
-      .slice(0, 4);
+      .slice(0, 6);
     for (const termo of exatos) {
       const qs = comServico
         ? `number=${encodeURIComponent(termo)}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`
@@ -734,15 +745,37 @@ async function buscarContatosPorTelefone(
         console.error('[digisac-historico] busca telefone', erro instanceof Error ? erro.message : erro);
       }
       if (out.length) break;
+      if (comServico) {
+        try {
+          await puxar(
+            asRows(
+              await digisac(
+                `/api/v1/contacts?search=${encodeURIComponent(termo)}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`,
+              ),
+            ),
+            true,
+          );
+        } catch (erro) {
+          console.error('[digisac-historico] busca telefone', erro instanceof Error ? erro.message : erro);
+        }
+        if (out.length) break;
+      }
     }
   };
 
-  const orNumber = (lista: string[]) => lista.map((termo) => ({ number: { $iLike: `%${termo}%` } }));
-  const orId = (lista: string[]) => lista.map((termo) => ({ idFromService: { $iLike: `%${termo}%` } }));
+  const orCampo = (campo: string, lista: string[]) => lista.map((termo) => ({ [campo]: { $iLike: `%${termo}%` } }));
+  const orNumber = (lista: string[]) => orCampo('number', lista);
+  const orId = (lista: string[]) => orCampo('idFromService', lista);
   const assinante = assinanteLocal(numero);
-  const termosEnvio = [...cheios.filter((termo) => digitsOnlyPhone(termo).length >= 10), ...(assinante.length >= 8 ? [assinante] : [])];
-  await consultar([...orNumber(soEnvio ? termosEnvio : cheios), ...orId(soEnvio ? termosEnvio : cheios)], true);
-  if (!out.length) await consultar(orNumber(soEnvio ? termosEnvio : cheios), true);
+  const termosEnvio = [
+    ...cheios.filter((termo) => digitsOnlyPhone(termo).length >= 10),
+    ...variantesNonoDigito(numero),
+    ...(assinante.length >= 8 ? [assinante] : []),
+  ].filter((termo, i, all) => all.indexOf(termo) === i);
+  const listaBusca = soEnvio ? termosEnvio : cheios;
+  await consultar([...orNumber(listaBusca), ...orId(listaBusca)], true);
+  if (!out.length) await consultar(orNumber(listaBusca), true);
+  if (!out.length) await consultar(orCampo('data.number', listaBusca), true);
   if (!out.length) await consultarNumero(true);
   if (soEnvio && !out.length && assinante.length >= 8) {
     await consultar(orNumber([assinante]), true);
@@ -919,7 +952,11 @@ async function contactIdParaMensagem(
   if (!numero) falha('Telefone inválido para envio', 400);
 
   const serviceId = await serviceAzoupConfec();
-  const rows = await buscarContatosPorTelefone(serviceId, numero, true);
+  let rows = await buscarContatosPorTelefone(serviceId, numero, true);
+  if (!rows.length) {
+    const departmentId = await departamentoAzoupConfec();
+    rows = await buscarContatosNosChamados(departmentId, [numero]);
+  }
   const escolher = (pred: (row: Record<string, unknown>) => boolean): string[] => {
     const ids: string[] = [];
     for (const row of rows) {
