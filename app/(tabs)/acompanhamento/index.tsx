@@ -27,6 +27,8 @@ import { carregarAcompanhamentoClientes } from '@/src/services/repos/acompanhame
 import { listarMensagensAutomaticasEnviadas } from '@/src/services/repos/digisac-boas-vindas-repo';
 import {
   adicionarTelefoneDigisac,
+  atualizarDescricaoTelefoneDigisac,
+  formatarTelefoneDigisac,
   listarTelefonesDigisac,
   normalizarTelefoneCliente,
   removerTelefoneDigisac,
@@ -771,13 +773,6 @@ function NovaPendenciaClienteModal({
   );
 }
 
-function exibirTelefone(digits: string): string {
-  const local = digits.startsWith('55') && digits.length > 11 ? digits.slice(2) : digits;
-  if (local.length === 11) return `(${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7)}`;
-  if (local.length === 10) return `(${local.slice(0, 2)}) ${local.slice(2, 6)}-${local.slice(6)}`;
-  return digits;
-}
-
 function tituloChamado(chamado: DigisacChamado): string {
   const assunto = chamado.assunto?.trim();
   if (assunto) return assunto;
@@ -967,6 +962,9 @@ export function HistoricoClienteTela({
   const [periodoDe, setPeriodoDe] = useState('');
   const [periodoAte, setPeriodoAte] = useState('');
   const [novoTelefone, setNovoTelefone] = useState('');
+  const [novaDescricao, setNovaDescricao] = useState('');
+  const [editandoDescricaoId, setEditandoDescricaoId] = useState<string | null>(null);
+  const [descricaoEdit, setDescricaoEdit] = useState('');
   const [erroTelefone, setErroTelefone] = useState<string | null>(null);
   const telefone = cliente?.telefone?.trim() || '';
   const celular = cliente?.celular?.trim() || '';
@@ -1095,12 +1093,13 @@ export function HistoricoClienteTela({
   const adicionarTelefone = useMutation({
     mutationFn: async () => {
       const numero = normalizarTelefoneCliente(novoTelefone);
-      await adicionarTelefoneDigisac(cliente.id, novoTelefone);
+      await adicionarTelefoneDigisac(cliente.id, novoTelefone, novaDescricao);
       const chamados = await listarChamadosDigisac(cliente.id);
       return { chamados, numero };
     },
     onSuccess: ({ chamados, numero }) => {
       setNovoTelefone('');
+      setNovaDescricao('');
       qc.setQueryData(['digisac_chamados', cliente.id], chamados);
       void qc.invalidateQueries({ queryKey: ['admin_digisac_telefones', cliente.id] });
       void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
@@ -1128,6 +1127,18 @@ export function HistoricoClienteTela({
       void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
     },
     onError: (e) => setErroTelefone(e instanceof Error ? e.message : 'Erro ao remover telefone'),
+  });
+
+  const salvarDescricaoTelefone = useMutation({
+    mutationFn: async ({ id, descricao }: { id: string; descricao: string }) => {
+      await atualizarDescricaoTelefoneDigisac(id, descricao);
+    },
+    onSuccess: () => {
+      setEditandoDescricaoId(null);
+      setDescricaoEdit('');
+      void qc.invalidateQueries({ queryKey: ['admin_digisac_telefones', cliente.id] });
+    },
+    onError: (e) => setErroTelefone(e instanceof Error ? e.message : 'Erro ao salvar descrição'),
   });
 
   function invalidarHistorico() {
@@ -1446,33 +1457,86 @@ export function HistoricoClienteTela({
                   Outros telefones da mesma empresa no departamento Azoup Confec
                 </Text>
                 {(telefonesQ.data ?? []).map((item) => (
-                  <View key={item.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={{ color: theme.text, fontSize: 14, fontWeight: '800', flex: 1 }}>
-                      {exibirTelefone(item.telefone)}
-                    </Text>
-                    <Pressable
-                      onPress={() => removerTelefone.mutate(item.id)}
-                      hitSlop={8}
-                      disabled={removerTelefone.isPending}
-                    >
-                      <FontAwesome name="times" size={14} color={theme.textMuted} />
-                    </Pressable>
+                  <View key={item.id} style={{ gap: 4 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={{ color: theme.text, fontSize: 14, fontWeight: '800' }}>
+                          {formatarTelefoneDigisac(item.telefone)}
+                        </Text>
+                        {editandoDescricaoId === item.id ? null : (
+                          <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                            {item.descricao.trim() || 'Sem descrição — de quem é este contato?'}
+                          </Text>
+                        )}
+                      </View>
+                      <Pressable
+                        onPress={() => {
+                          setErroTelefone(null);
+                          setEditandoDescricaoId(item.id);
+                          setDescricaoEdit(item.descricao);
+                        }}
+                        hitSlop={8}
+                        accessibilityLabel="Editar descrição do contato"
+                      >
+                        <FontAwesome name="pencil" size={13} color={theme.cadastroAction} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => removerTelefone.mutate(item.id)}
+                        hitSlop={8}
+                        disabled={removerTelefone.isPending}
+                      >
+                        <FontAwesome name="times" size={14} color={theme.textMuted} />
+                      </Pressable>
+                    </View>
+                    {editandoDescricaoId === item.id ? (
+                      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                        <View style={{ flex: 1 }}>
+                          <FormInput
+                            value={descricaoEdit}
+                            onChangeText={setDescricaoEdit}
+                            placeholder="De quem é este contato?"
+                            autoCorrect={false}
+                          />
+                        </View>
+                        <Pressable
+                          onPress={() => salvarDescricaoTelefone.mutate({ id: item.id, descricao: descricaoEdit })}
+                          disabled={salvarDescricaoTelefone.isPending}
+                          style={({ pressed }) => ({
+                            minHeight: 40,
+                            paddingHorizontal: 12,
+                            borderRadius: 8,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backgroundColor: theme.cadastroAction,
+                            opacity: salvarDescricaoTelefone.isPending ? 0.55 : pressed ? 0.85 : 1,
+                          })}
+                        >
+                          <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 13 }}>
+                            {salvarDescricaoTelefone.isPending ? '…' : 'Salvar'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
                   </View>
                 ))}
                 {telefonesQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
                 {telefonesQ.error ? (
                   <Text style={{ color: theme.error, fontSize: 12 }}>{(telefonesQ.error as Error).message}</Text>
                 ) : null}
-                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                  <View style={{ flex: 1 }}>
-                    <FormInput
-                      value={novoTelefone}
-                      onChangeText={setNovoTelefone}
-                      placeholder="DDD e número"
-                      keyboardType="phone-pad"
-                      autoCorrect={false}
-                    />
-                  </View>
+                <View style={{ gap: 8 }}>
+                  <FormInput
+                    value={novoTelefone}
+                    onChangeText={setNovoTelefone}
+                    placeholder="DDD e número"
+                    keyboardType="phone-pad"
+                    autoCorrect={false}
+                  />
+                  <FormInput
+                    value={novaDescricao}
+                    onChangeText={setNovaDescricao}
+                    placeholder="De quem é este contato? (opcional)"
+                    autoCorrect={false}
+                  />
                   <Pressable
                     onPress={() => adicionarTelefone.mutate()}
                     disabled={adicionarTelefone.isPending || !novoTelefone.trim()}
@@ -2002,6 +2066,7 @@ export function HistoricoClienteTela({
       <EnviarMensagemProntaModal
         clienteId={cliente.id}
         clienteNome={cliente.nome}
+        telefoneCadastro={telefone || celular}
         visible={mensagemAberta}
         onClose={() => setMensagemAberta(false)}
       />
@@ -3262,6 +3327,7 @@ export default function AcompanhamentoScreen() {
         <EnviarMensagemProntaModal
           clienteId={clienteMensagem.id}
           clienteNome={clienteMensagem.nome}
+          telefoneCadastro={clienteMensagem.telefone || clienteMensagem.celular}
           visible
           onClose={() => setClienteMensagem(null)}
         />

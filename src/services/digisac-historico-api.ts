@@ -76,8 +76,16 @@ export async function listarChamadosDigisac(clienteId: string) {
   return invoke<DigisacChamadosResposta>('listar_chamados', { clienteId });
 }
 
-export async function enviarMensagemProntaDigisac(clienteId: string, texto: string) {
-  return invoke<{ ok: boolean }>('enviar_mensagem_pronta', { clienteId, texto });
+export async function enviarMensagemProntaDigisac(
+  clienteId: string,
+  texto: string,
+  extraId?: string | null,
+) {
+  return invoke<{ ok: boolean }>('enviar_mensagem_pronta', {
+    clienteId,
+    texto,
+    extraId: extraId?.trim() || undefined,
+  });
 }
 
 export async function listarMensagensDigisac(clienteId: string, ticketId: string) {

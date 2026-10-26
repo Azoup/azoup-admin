@@ -797,6 +797,7 @@ export default function ClientDetailScreen() {
       <EnviarMensagemProntaModal
         clienteId={data.id}
         clienteNome={nome}
+        telefoneCadastro={data.telefone || data.celular}
         visible={mensagemAberta}
         onClose={() => setMensagemAberta(false)}
       />

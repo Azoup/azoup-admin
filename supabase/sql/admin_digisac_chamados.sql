@@ -16,8 +16,14 @@ create index if not exists idx_admin_digisac_telefones_cliente
 alter table public.admin_digisac_telefones
   add column if not exists contact_id text;
 
+alter table public.admin_digisac_telefones
+  add column if not exists descricao text;
+
 comment on column public.admin_digisac_telefones.contact_id is
   'Contato da Digisac (Azoup Confec) vinculado a este telefone extra.';
+
+comment on column public.admin_digisac_telefones.descricao is
+  'Nome ou papel da pessoa deste telefone extra (ex.: João, financeiro).';
 
 comment on table public.admin_digisac_telefones is
   'Telefones extras do cliente que também chamam na Digisac pela mesma empresa.';
@@ -51,7 +57,7 @@ comment on column public.admin_digisac_chamados.comentario_finalizacao is
 comment on table public.admin_digisac_chamados is
   'Chamados da Digisac do departamento Azoup Confec ligados ao cliente, para o histórico e relatórios.';
 
-grant select, insert, delete on table public.admin_digisac_telefones to authenticated;
+grant select, insert, update, delete on table public.admin_digisac_telefones to authenticated;
 grant select on table public.admin_digisac_chamados to authenticated;
 
 alter table public.admin_digisac_telefones enable row level security;
@@ -59,6 +65,7 @@ alter table public.admin_digisac_chamados enable row level security;
 
 drop policy if exists painel_admin_digisac_telefones_select on public.admin_digisac_telefones;
 drop policy if exists painel_admin_digisac_telefones_insert on public.admin_digisac_telefones;
+drop policy if exists painel_admin_digisac_telefones_update on public.admin_digisac_telefones;
 drop policy if exists painel_admin_digisac_telefones_delete on public.admin_digisac_telefones;
 drop policy if exists painel_admin_digisac_chamados_select on public.admin_digisac_chamados;
 
@@ -72,6 +79,13 @@ create policy painel_admin_digisac_telefones_insert
 on public.admin_digisac_telefones
 for insert
 to authenticated
+with check (public.painel_admin_ativo());
+
+create policy painel_admin_digisac_telefones_update
+on public.admin_digisac_telefones
+for update
+to authenticated
+using (public.painel_admin_ativo())
 with check (public.painel_admin_ativo());
 
 create policy painel_admin_digisac_telefones_delete

@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { FormField } from '@/components/ui/FormField';
@@ -9,41 +9,86 @@ import { Text } from '@/components/Themed';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { enviarMensagemProntaDigisac } from '@/src/services/digisac-historico-api';
 import { listarMensagensProntasDigisac } from '@/src/services/repos/digisac-mensagens-prontas-repo';
+import {
+  formatarTelefoneDigisac,
+  listarTelefonesDigisac,
+} from '@/src/services/repos/digisac-telefones-repo';
 
 export function EnviarMensagemProntaModal({
   clienteId,
   clienteNome,
+  telefoneCadastro,
   visible,
   onClose,
 }: {
   clienteId: string;
   clienteNome: string;
+  telefoneCadastro?: string | null;
   visible: boolean;
   onClose: () => void;
 }) {
   const { theme } = useTheme();
   const [escolhaId, setEscolhaId] = useState<string | null>(null);
+  const [destinoId, setDestinoId] = useState<string | null>(null);
   const [texto, setTexto] = useState('');
   const q = useQuery({
     queryKey: ['digisac_mensagens_prontas'],
     queryFn: listarMensagensProntasDigisac,
     enabled: visible,
   });
+  const extrasQ = useQuery({
+    queryKey: ['admin_digisac_telefones', clienteId],
+    queryFn: () => listarTelefonesDigisac(clienteId),
+    enabled: visible && Boolean(clienteId),
+  });
+  const destinos = useMemo(() => {
+    const lista: { id: string; titulo: string; telefone: string }[] = [];
+    const cadastro = `${telefoneCadastro ?? ''}`.trim();
+    if (cadastro) {
+      lista.push({
+        id: 'cadastro',
+        titulo: 'Cadastro',
+        telefone: cadastro,
+      });
+    }
+    for (const extra of extrasQ.data ?? []) {
+      lista.push({
+        id: extra.id,
+        titulo: extra.descricao.trim() || 'Contato extra',
+        telefone: extra.telefone,
+      });
+    }
+    return lista;
+  }, [extrasQ.data, telefoneCadastro]);
+  const escolherDestino = destinos.length > 1;
+  const destino = destinos.find((item) => item.id === destinoId) ?? destinos[0] ?? null;
   const enviar = useMutation({
-    mutationFn: (mensagem: string) => enviarMensagemProntaDigisac(clienteId, mensagem),
+    mutationFn: (mensagem: string) =>
+      enviarMensagemProntaDigisac(
+        clienteId,
+        mensagem,
+        destino?.id && destino.id !== 'cadastro' ? destino.id : null,
+      ),
   });
   const mensagens = q.data ?? [];
   const escolha = mensagens.find((item) => item.id === escolhaId) ?? null;
 
   useEffect(() => {
-    if (visible) return;
-    setEscolhaId(null);
-    setTexto('');
+    if (!visible) {
+      setEscolhaId(null);
+      setDestinoId(null);
+      setTexto('');
+    }
   }, [visible]);
+
+  useEffect(() => {
+    setDestinoId(null);
+  }, [clienteId]);
 
   function fechar() {
     enviar.reset();
     setEscolhaId(null);
+    setDestinoId(null);
     setTexto('');
     onClose();
   }
@@ -76,6 +121,42 @@ export function EnviarMensagemProntaModal({
               ? `Edite se quiser. A alteração vale só para ${clienteNome} neste envio.`
               : `Escolha uma mensagem pronta para enviar a ${clienteNome}.`}
           </Text>
+          {escolherDestino ? (
+            <View style={{ gap: 6 }}>
+              <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '800' }}>Enviar para</Text>
+              {extrasQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+              {destinos.map((item) => {
+                const ativo = (destinoId ?? destinos[0]?.id) === item.id;
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => {
+                      enviar.reset();
+                      setDestinoId(item.id);
+                    }}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: ativo ? theme.cadastroAction : theme.border,
+                      backgroundColor: ativo ? theme.surfaceMuted : theme.surface,
+                      borderRadius: 10,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      gap: 2,
+                    }}
+                  >
+                    <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 13 }}>{item.titulo}</Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                      {formatarTelefoneDigisac(item.telefone)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : destino ? (
+            <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+              {destino.titulo}: {formatarTelefoneDigisac(destino.telefone)}
+            </Text>
+          ) : null}
           {enviar.isSuccess ? (
             <Text style={{ color: theme.success, fontWeight: '700' }}>Mensagem enviada no Digisac.</Text>
           ) : null}
@@ -136,9 +217,9 @@ export function EnviarMensagemProntaModal({
           </ScrollView>
           {escolha ? (
             <PrimaryButton
-              label={enviar.isPending ? 'Enviando…' : 'Enviar'}
+              label={enviar.isPending ? 'Enviando…' : destino ? `Enviar para ${destino.titulo}` : 'Enviar'}
               loading={enviar.isPending}
-              disabled={!texto.trim() || enviar.isPending}
+              disabled={!texto.trim() || enviar.isPending || !destino}
               onPress={() => enviar.mutate(texto.trim())}
             />
           ) : null}

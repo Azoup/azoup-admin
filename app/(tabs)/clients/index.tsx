@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Linking, Pressable, StyleSheet, View } from 'react-native';
 
 import { ClientsFiltersBar } from '@/components/ui/ClientsFiltersBar';
+import { EnviarMensagemProntaModal } from '@/components/ui/EnviarMensagemProntaModal';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { ScreenCard } from '@/components/ui/ScreenCard';
 import { Text } from '@/components/Themed';
@@ -36,6 +37,16 @@ import { clientePrecisaChamar } from '@/src/services/repos/congelamento-repo';
 const WHATSAPP_GREEN = '#25D366';
 const MENSAGEM_OK = '#16a34a';
 
+function nomeClienteLista(item: ClienteAzoupAdminView): string {
+  return (
+    item.nome_fantasia ??
+    item.nome ??
+    item.razao_social ??
+    item.email ??
+    `Cliente ${item.id.slice(0, 8)}`
+  );
+}
+
 export default function ClientsListScreen() {
   const { theme } = useTheme();
   const { session } = useAdminAuth();
@@ -43,6 +54,7 @@ export default function ClientsListScreen() {
   const qc = useQueryClient();
   const [filtro, setFiltro] = useState<ClientesFiltroState>(CLIENTES_FILTRO_INICIAL);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [clienteMensagem, setClienteMensagem] = useState<ClienteAzoupAdminView | null>(null);
 
   const { data, isLoading, error, refetch, isRefetching } = useQuery({
     queryKey: ['clientes_azoup_admin'],
@@ -128,12 +140,7 @@ export default function ClientsListScreen() {
           </View>
         }
         renderItem={({ item }) => {
-          const nome =
-            item.nome_fantasia ??
-            item.nome ??
-            item.razao_social ??
-            item.email ??
-            `Cliente ${item.id.slice(0, 8)}`;
+          const nome = nomeClienteLista(item);
           const whatsappUrl = resolveClienteWhatsAppUrl(item.celular, item.telefone);
           const inicioSistema = item.created_at ?? item.assinatura?.data_inicio ?? item.assinatura?.criado_em ?? null;
           const mensagemOk = Boolean(item.mensagem_enviada_hoje);
@@ -146,7 +153,8 @@ export default function ClientsListScreen() {
 
           return (
             <View style={{ marginHorizontal: 12, marginVertical: 6 }}>
-              <ScreenCard style={styles.row}>
+              <ScreenCard style={{ gap: 10 }}>
+                <View style={styles.row}>
                 <Link href={`/clients/${item.id}`} asChild>
                   <Pressable style={styles.rowMain}>
                     <View style={{ flex: 1, gap: 4 }}>
@@ -265,10 +273,34 @@ export default function ClientsListScreen() {
                     <FontAwesome name="whatsapp" size={22} color={WHATSAPP_GREEN} />
                   </Pressable>
                 </View>
+                </View>
+                <Pressable
+                  accessibilityLabel={`Enviar mensagem pronta para ${nome}`}
+                  onPress={() => setClienteMensagem(item)}
+                  style={({ pressed }) => [
+                    styles.enviarBtn,
+                    {
+                      borderWidth: 1,
+                      borderColor: theme.cadastroAction,
+                      opacity: pressed ? 0.88 : 1,
+                    },
+                  ]}
+                >
+                  <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+                    Enviar mensagem
+                  </Text>
+                </Pressable>
               </ScreenCard>
             </View>
           );
         }}
+      />
+      <EnviarMensagemProntaModal
+        clienteId={clienteMensagem?.id ?? ''}
+        clienteNome={clienteMensagem ? nomeClienteLista(clienteMensagem) : ''}
+        telefoneCadastro={clienteMensagem?.telefone || clienteMensagem?.celular}
+        visible={clienteMensagem != null}
+        onClose={() => setClienteMensagem(null)}
       />
     </View>
   );
@@ -284,6 +316,12 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 10,
     borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  enviarBtn: {
+    minHeight: 36,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },

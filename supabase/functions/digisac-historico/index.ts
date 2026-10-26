@@ -442,31 +442,72 @@ function numeroDeTexto(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const bruto = value.trim();
   if (!bruto) return null;
+  const dominio = (bruto.split('@')[1] ?? '').toLowerCase();
   const semServico = (bruto.split('@')[0] ?? bruto).split(':')[0] ?? bruto;
+  const digits = digitsOnlyPhone(semServico);
+  if (dominio.startsWith('lid')) {
+    const trecho = digits.match(/55\d{10,11}/)?.[0];
+    return trecho ? telefoneDigisac(null, trecho) : null;
+  }
   const direto = telefoneDigisac(null, semServico);
   if (direto) return direto;
-  const digits = digitsOnlyPhone(semServico);
   const trecho = digits.match(/55\d{10,11}/)?.[0] ?? digits.match(/\d{10,11}/)?.[0];
   return trecho ? telefoneDigisac(null, trecho) : null;
 }
 
-function numeroDoContatoDigisac(row: Record<string, unknown>): string | null {
-  const direto = numeroDeTexto(row.number) ?? numeroDeTexto(row.phone) ?? numeroDeTexto(row.idFromService);
-  if (direto) return direto;
-  const data = row.data;
-  if (typeof data === 'string') {
-    try {
-      const parsed = JSON.parse(data) as Record<string, unknown>;
-      return numeroDeTexto(parsed.number) ?? numeroDeTexto(parsed.phone);
-    } catch {
-      return null;
-    }
-  }
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    const obj = data as Record<string, unknown>;
-    return numeroDeTexto(obj.number) ?? numeroDeTexto(obj.phone);
+const CAMPOS_TELEFONE = [
+  'number',
+  'phone',
+  'phoneNumber',
+  'phonenumber',
+  'formattedNumber',
+  'msisdn',
+  'e164',
+  'wid',
+  'jid',
+  'waId',
+  'wa_id',
+  'pn',
+  'lidPn',
+  'idFromService',
+];
+
+function numeroEmObjeto(obj: Record<string, unknown> | null | undefined): string | null {
+  if (!obj) return null;
+  for (const chave of CAMPOS_TELEFONE) {
+    const atual = numeroDeTexto(obj[chave]);
+    if (atual) return atual;
   }
   return null;
+}
+
+function objetoAninhado(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== 'string') return null;
+  const bruto = value.trim();
+  if (!bruto.startsWith('{')) return null;
+  try {
+    const parsed = JSON.parse(bruto) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function numeroDoContatoDigisac(row: Record<string, unknown>): string | null {
+  const direto = numeroEmObjeto(row);
+  if (direto) return direto;
+  const data = objetoAninhado(row.data);
+  const daData = numeroEmObjeto(data);
+  if (daData) return daData;
+  const interno = objetoAninhado(data?.contact) ?? objetoAninhado(row.contact);
+  return numeroEmObjeto(interno);
+}
+
+function semParticulas(value: string): string {
+  return semAcento(value).replace(/\b(de|da|do|das|dos|e)\b/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function limparNomes(value: string): string[] {
@@ -476,12 +517,19 @@ function limparNomes(value: string): string[] {
   const saida = new Set<string>();
   saida.add(bruto);
   if (semAspas.length >= 3) saida.add(semAspas);
+  const tokens = semAspas.split(/\s+/).filter(Boolean);
+  if (tokens.length >= 3) {
+    const tres = tokens.slice(0, 3).join(' ');
+    if (tres.length >= 8) saida.add(tres);
+  }
   const palavras = semAspas.split(' ').filter((parte) => parte.length >= 3);
   if (palavras[0] && palavras[0].length >= 8) saida.add(palavras[0]);
   if (palavras.length >= 2) {
     const dois = `${palavras[0]} ${palavras[1]}`;
     if (dois.length >= 8) saida.add(dois);
   }
+  const sem = semParticulas(semAspas);
+  if (sem.length >= 8 && sem !== semAcento(semAspas)) saida.add(sem);
   return [...saida];
 }
 
@@ -489,13 +537,19 @@ function limparNomes(value: string): string[] {
 function nomeCompativel(nomeDigisac: string, alvos: string[]): boolean {
   const nome = semAcento(nomeDigisac);
   if (!nome) return false;
-  const partes = [nome, ...nome.split(/\s*-\s*/).map((parte) => parte.trim())].filter((parte) => parte.length >= 3);
+  const partesBrutas = [nome, ...nome.split(/\s*-\s*/).map((parte) => parte.trim())].filter((parte) => parte.length >= 3);
+  const partes = [...partesBrutas, ...partesBrutas.map(semParticulas).filter((parte) => parte.length >= 3)];
   for (const alvo of alvos) {
     const comparado = semAcento(alvo);
+    const comparadoLimpo = semParticulas(alvo);
     if (comparado.length < 3) continue;
-    if (partes.some((parte) => parte === comparado)) return true;
-    if (comparado.length < 8) continue;
-    if (partes.some((parte) => parte.startsWith(`${comparado} `) || (parte.length >= 8 && comparado.startsWith(`${parte} `)))) {
+    if (partes.some((parte) => parte === comparado || parte === comparadoLimpo)) return true;
+    if (comparado.length < 8 && comparadoLimpo.length < 8) continue;
+    if (partes.some((parte) => {
+      const base = comparado.length >= 8 ? comparado : comparadoLimpo;
+      if (base.length < 8) return false;
+      return parte.startsWith(`${base} `) || (parte.length >= 8 && base.startsWith(`${parte} `));
+    })) {
       return true;
     }
   }
@@ -546,6 +600,19 @@ function termosDeTelefone(numero: string): string[] {
   if (numero) termos.add(numero);
   if (local) termos.add(local);
   if (local.length >= 8) termos.add(local.slice(-8));
+  if (local.length === 10 || local.length === 11) {
+    const ddd = local.slice(0, 2);
+    const resto = local.slice(2);
+    const hifen = resto.length === 9 ? `${resto.slice(0, 5)}-${resto.slice(5)}` : `${resto.slice(0, 4)}-${resto.slice(4)}`;
+    termos.add(hifen);
+    termos.add(`${ddd} ${hifen}`);
+    termos.add(`(${ddd}) ${hifen}`);
+    termos.add(`(${ddd})${hifen}`);
+    termos.add(`(${ddd}) ${resto}`);
+    termos.add(`+55 ${ddd} ${hifen}`);
+    termos.add(`+55${local}`);
+    termos.add(`+${numero}`);
+  }
   if (local.length === 10) {
     termos.add(comNonoDigito(local));
     termos.add(`55${comNonoDigito(local)}`);
@@ -568,14 +635,21 @@ async function hidratarContato(id: string): Promise<Record<string, unknown> | nu
 }
 
 function contatoNaConexao(row: Record<string, unknown>, serviceId: string): boolean {
-  const atual = idCampo(row.serviceId);
-  return !atual || atual === serviceId;
+  const atual = idCampo(row.serviceId) || idCampo(row.service);
+  if (atual === serviceId) return true;
+  const servico = row.service && typeof row.service === 'object' && !Array.isArray(row.service)
+    ? (row.service as { name?: unknown; id?: unknown })
+    : null;
+  if (servico && semAcento(`${servico.name ?? ''}`) === semAcento(NOME_CONEXAO)) return true;
+  return !atual;
 }
 
 function contatoConfereTelefone(row: Record<string, unknown>, numero: string): boolean {
   const atual = numeroDoContatoDigisac(row);
   return Boolean(atual && telefonesIguais(atual, numero));
 }
+
+const MARCA_NUMERO_OK = '__digisacNumeroOk';
 
 async function buscarContatosPorTelefone(serviceId: string, numero: string): Promise<Record<string, unknown>[]> {
   const termos = termosDeTelefone(numero);
@@ -584,22 +658,24 @@ async function buscarContatosPorTelefone(serviceId: string, numero: string): Pro
   const curtos = termos.filter((termo) => termo.length === 8);
   const vistos = new Set<string>();
   const out: Record<string, unknown>[] = [];
-  const puxar = async (rows: Record<string, unknown>[]) => {
+  const puxar = async (rows: Record<string, unknown>[], confiarBusca = false) => {
     for (const row of rows) {
       const id = pickId(row);
       if (!id || vistos.has(id)) continue;
-      vistos.add(id);
       const cheio = (await hidratarContato(id)) ?? row;
-      if (!contatoNaConexao(cheio, serviceId) || !contatoConfereTelefone(cheio, numero)) continue;
+      const confere = contatoConfereTelefone(cheio, numero);
+      if (!confere && !confiarBusca) continue;
+      vistos.add(id);
+      cheio[MARCA_NUMERO_OK] = true;
       out.push(cheio);
     }
   };
-  const consultar = async (or: Record<string, unknown>[]) => {
+  const consultar = async (or: Record<string, unknown>[], comServico: boolean) => {
     if (!or.length) return;
     try {
       await puxar(asRows(await digisac(
         `/api/v1/contacts?query=${encodeURIComponent(JSON.stringify({
-          where: { serviceId, $or: or },
+          where: comServico ? { serviceId, $or: or } : { $or: or },
           perPage: 20,
           page: 1,
         }))}`,
@@ -608,24 +684,30 @@ async function buscarContatosPorTelefone(serviceId: string, numero: string): Pro
       console.error('[digisac-historico] busca telefone', erro instanceof Error ? erro.message : erro);
     }
   };
-
-  const orNumber = (lista: string[]) => lista.map((termo) => ({ number: { $iLike: `%${termo}%` } }));
-  const orId = (lista: string[]) => lista.map((termo) => ({ idFromService: { $iLike: `%${termo}%` } }));
-  await consultar([...orNumber(cheios), ...orId(cheios)]);
-  if (!out.length) await consultar(orNumber(cheios));
-  if (!out.length) await consultar([...orNumber(curtos), ...orId(curtos)]);
-  if (!out.length) {
-    for (const termo of cheios.slice(0, 4)) {
+  const consultarNumero = async (comServico: boolean) => {
+    const exatos = cheios.filter((termo) => /^\+?\d{10,15}$/.test(termo)).slice(0, 4);
+    for (const termo of exatos) {
+      const qs = comServico
+        ? `number=${encodeURIComponent(termo)}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`
+        : `number=${encodeURIComponent(termo)}&perPage=10`;
       try {
-        await puxar(asRows(await digisac(
-          `/api/v1/contacts?number=${encodeURIComponent(termo)}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`,
-        )));
+        await puxar(asRows(await digisac(`/api/v1/contacts?${qs}`)), true);
       } catch (erro) {
         console.error('[digisac-historico] busca telefone', erro instanceof Error ? erro.message : erro);
       }
       if (out.length) break;
     }
-  }
+  };
+
+  const orNumber = (lista: string[]) => lista.map((termo) => ({ number: { $iLike: `%${termo}%` } }));
+  const orId = (lista: string[]) => lista.map((termo) => ({ idFromService: { $iLike: `%${termo}%` } }));
+  await consultar([...orNumber(cheios), ...orId(cheios)], true);
+  if (!out.length) await consultar(orNumber(cheios), true);
+  if (!out.length) await consultarNumero(true);
+  if (!out.length) await consultar([...orNumber(cheios), ...orId(cheios)], false);
+  if (!out.length) await consultarNumero(false);
+  if (!out.length) await consultar([...orNumber(curtos), ...orId(curtos)], true);
+  if (!out.length) await consultar([...orNumber(curtos), ...orId(curtos)], false);
   return out;
 }
 
@@ -666,7 +748,6 @@ async function buscarContatosPorNome(serviceId: string, termo: string): Promise<
 
 async function buscarContatosNosChamados(
   departmentId: string,
-  serviceId: string,
   numeros: string[],
 ): Promise<Record<string, unknown>[]> {
   if (!numeros.length) return [];
@@ -691,9 +772,10 @@ async function buscarContatosNosChamados(
       let numero = contato ? numeroDoContatoDigisac(contato) : null;
       if (numero && !numeros.some((item) => telefonesIguais(numero, item))) continue;
       contato = (await hidratarContato(contactId)) ?? contato;
-      if (!contato || !contatoNaConexao(contato, serviceId)) continue;
+      if (!contato) continue;
       numero = numeroDoContatoDigisac(contato);
       if (!numero || !numeros.some((item) => telefonesIguais(numero, item))) continue;
+      contato[MARCA_NUMERO_OK] = true;
       vistos.add(contactId);
       out.push(contato);
     }
@@ -703,7 +785,7 @@ async function buscarContatosNosChamados(
   return out;
 }
 
-type ExtraContato = { id: string; telefone: string; contactIds: string[] };
+type ExtraContato = { id: string; telefone: string; contactIds: string[]; envioContactId: string | null };
 
 async function gravarContactIdExtra(
   supabaseAdmin: ReturnType<typeof createClient>,
@@ -748,7 +830,7 @@ async function listarExtrasDoCliente(
       ?? `${(row as { telefone?: string | null }).telefone ?? ''}`.trim();
     const salvo = `${(row as { contact_id?: string | null }).contact_id ?? ''}`.trim();
     if (!id || !telefone) continue;
-    out.push({ id, telefone, contactIds: salvo ? [salvo] : [] });
+    out.push({ id, telefone, contactIds: salvo ? [salvo] : [], envioContactId: null });
   }
   return out;
 }
@@ -770,12 +852,20 @@ async function contatosDoCliente(
     extras,
     envioContactId: null,
   });
-  const { data: cliente, error } = await supabaseAdmin
+  let clienteQuery = await supabaseAdmin
     .from('clientes_azoup')
-    .select('id, nome, telefone')
+    .select('id, nome, telefone, celular')
     .eq('id', clienteId)
     .maybeSingle();
-  if (error) throw new Error(error.message);
+  if (clienteQuery.error && /celular/i.test(clienteQuery.error.message)) {
+    clienteQuery = await supabaseAdmin
+      .from('clientes_azoup')
+      .select('id, nome, telefone')
+      .eq('id', clienteId)
+      .maybeSingle();
+  }
+  if (clienteQuery.error) throw new Error(clienteQuery.error.message);
+  const cliente = clienteQuery.data;
   if (!cliente) falha('Cliente não encontrado', 404);
 
   const { data: empresas, error: empErr } = await supabaseAdmin
@@ -803,26 +893,37 @@ async function contatosDoCliente(
   const alvos = [...nomes];
   const extras = await listarExtrasDoCliente(supabaseAdmin, clienteId);
   const numeros = new Set<string>();
-  const principal = telefoneDigisac(null, (cliente as { telefone?: string | null }).telefone);
+  const telCadastro = (cliente as { telefone?: string | null }).telefone;
+  const celCadastro = (cliente as { celular?: string | null }).celular;
+  const principal = telefoneDigisac(celCadastro, telCadastro);
+  const outroCadastro = telefoneDigisac(null, telCadastro);
   if (principal) numeros.add(principal);
+  if (outroCadastro) numeros.add(outroCadastro);
   for (const extra of extras) numeros.add(extra.telefone);
   const listaNumeros = [...numeros];
+  const numerosCadastro = [...new Set([principal, outroCadastro].filter((item): item is string => Boolean(item)))];
   if (!listaNumeros.length && !alvos.length) return vazio('sem_telefone', extras);
 
   const serviceId = await serviceAzoupConfec();
   const vistos = new Set<string>();
-  const aceitar = (row: Record<string, unknown> | null, numero?: string | null): string | null => {
+  const porId = new Map<string, Record<string, unknown>>();
+  const aceitar = (
+    row: Record<string, unknown> | null,
+    numero?: string | null,
+    soEnvio = false,
+  ): string | null => {
     if (!row) return null;
     const id = pickId(row);
     if (!id) return null;
-    if (vistos.has(id)) return id;
-    if (!contatoNaConexao(row, serviceId)) return null;
+    if (soEnvio && !contatoNaConexao(row, serviceId)) return null;
+    if (!soEnvio && vistos.has(id)) return id;
     if (numero) {
-      if (!contatoConfereTelefone(row, numero)) return null;
+      if (!contatoConfereTelefone(row, numero) && row[MARCA_NUMERO_OK] !== true) return null;
     } else if (!contatoDoClienteCombina(row, listaNumeros, alvos)) {
       return null;
     }
-    vistos.add(id);
+    porId.set(id, row);
+    if (!soEnvio) vistos.add(id);
     return id;
   };
 
@@ -834,12 +935,12 @@ async function contatosDoCliente(
   const salvo = !envio.error
     ? `${(envio.data as { contact_id?: string | null } | null)?.contact_id ?? ''}`.trim()
     : '';
-  let envioContactId = salvo ? aceitar(await hidratarContato(salvo)) : null;
+  let envioContactId = salvo ? aceitar(await hidratarContato(salvo), principal, true) : null;
 
   const principalIds: string[] = [];
-  if (principal) {
-    for (const row of await buscarContatosPorTelefone(serviceId, principal)) {
-      const id = aceitar(row, principal);
+  for (const numero of numerosCadastro) {
+    for (const row of await buscarContatosPorTelefone(serviceId, numero)) {
+      const id = aceitar(row, numero);
       if (id) principalIds.push(id);
     }
   }
@@ -862,7 +963,7 @@ async function contatosDoCliente(
 
   const nomeIds: string[] = [];
   if (vistos.size < 15) {
-    const nomesBusca = [...alvos].sort((a, b) => a.length - b.length).slice(0, 8);
+    const nomesBusca = [...alvos].sort((a, b) => b.length - a.length).slice(0, 8);
     const nomesAchados = await Promise.all(nomesBusca.map((nome) => buscarContatosPorNome(serviceId, nome)));
     for (const lista of nomesAchados) {
       for (const row of lista) {
@@ -874,18 +975,39 @@ async function contatosDoCliente(
     }
   }
 
-  if (!vistos.size && listaNumeros.length) {
+  const idsPorTelefone = new Set([...principalIds, ...extras.flatMap((extra) => extra.contactIds)]);
+  if (!idsPorTelefone.size && listaNumeros.length) {
     const departmentId = await departamentoAzoupConfec();
-    for (const row of await buscarContatosNosChamados(departmentId, serviceId, listaNumeros)) {
+    for (const row of await buscarContatosNosChamados(departmentId, listaNumeros)) {
       const numero = numeroDoContatoDigisac(row);
       const alvo = numero ? listaNumeros.find((item) => telefonesIguais(numero, item)) : null;
-      aceitar(row, alvo);
+      const id = aceitar(row, alvo);
+      if (id && alvo && numerosCadastro.includes(alvo)) principalIds.push(id);
     }
   }
 
   const extraIds = extras.flatMap((extra) => extra.contactIds);
   const extraUnicos = [...new Set(extraIds)];
-  if (!envioContactId) envioContactId = principalIds[0] ?? (extraUnicos.length === 1 ? extraUnicos[0] : null);
+  const naConexao = (id: string | null | undefined) => {
+    if (!id) return false;
+    const row = porId.get(id);
+    return Boolean(row && contatoNaConexao(row, serviceId));
+  };
+  for (const extra of extras) {
+    extra.envioContactId = extra.contactIds.find((id) => naConexao(id)) ?? null;
+  }
+  if (!envioContactId) {
+    const confec = [...new Set([...principalIds, ...nomeIds, ...vistos, ...extraUnicos])].filter((id) => naConexao(id));
+    const comTelefone = confec.filter((id) => {
+      const row = porId.get(id);
+      if (!row) return false;
+      return listaNumeros.some((numero) => contatoConfereTelefone(row, numero) || row[MARCA_NUMERO_OK] === true);
+    });
+    envioContactId = principalIds.find((id) => naConexao(id))
+      ?? (comTelefone.length === 1 ? comTelefone[0] : null)
+      ?? (confec.length === 1 ? confec[0] : null)
+      ?? (extraUnicos.length === 1 && naConexao(extraUnicos[0]) ? extraUnicos[0] : null);
+  }
 
   const contactIds = [...new Set([
     ...(envioContactId ? [envioContactId] : []),
@@ -1047,7 +1169,11 @@ async function indiceDeClientes(supabaseAdmin: ReturnType<typeof createClient>):
     }
   }
 
-  const { data: pessoas, error } = await supabaseAdmin.from('clientes_azoup').select('id,nome,telefone').limit(2000);
+  let pessoas = await supabaseAdmin.from('clientes_azoup').select('id,nome,telefone,celular').limit(2000);
+  if (pessoas.error && /celular/i.test(pessoas.error.message)) {
+    pessoas = await supabaseAdmin.from('clientes_azoup').select('id,nome,telefone').limit(2000);
+  }
+  const { error } = pessoas;
   if (error) throw new Error(error.message);
   const { data: empresas } = await supabaseAdmin.from('empresas').select('cliente_id,nome_fantasia,razao_social').limit(4000);
   let extras = await supabaseAdmin.from('admin_digisac_telefones').select('cliente_id,telefone,contact_id').limit(4000);
@@ -1075,12 +1201,17 @@ async function indiceDeClientes(supabaseAdmin: ReturnType<typeof createClient>):
   }
 
   const clientes: ClienteIndice[] = [];
-  for (const row of pessoas ?? []) {
+  for (const row of pessoas.data ?? []) {
     const id = `${(row as { id?: string }).id ?? ''}`;
     if (!id) continue;
-    const numero = telefoneDigisac(null, (row as { telefone?: string }).telefone);
+    const numero = telefoneDigisac(
+      (row as { celular?: string }).celular,
+      (row as { telefone?: string }).telefone,
+    );
+    const outro = telefoneDigisac(null, (row as { telefone?: string }).telefone);
     const numeros = [...(numerosPorCliente.get(id) ?? [])];
     if (numero) numeros.push(numero);
+    if (outro && outro !== numero) numeros.push(outro);
     const nomes = [...limparNomes(`${(row as { nome?: string }).nome ?? ''}`), ...(nomesPorCliente.get(id) ?? [])];
     clientes.push({ id, numeros, nomes });
   }
@@ -1426,15 +1557,22 @@ serve(async (req) => {
     if (op === 'enviar_mensagem_pronta') {
       const clienteId = clienteIdDoPayload(payload);
       const texto = `${payload.texto ?? ''}`.trim();
+      const extraId = `${payload.extraId ?? ''}`.trim();
       if (!texto || texto.length > 4000) falha('Mensagem inválida');
+      if (extraId && !/^[0-9a-f-]{36}$/i.test(extraId)) falha('Contato extra inválido');
       const [contato, departmentId] = await Promise.all([
         contatosDoCliente(supabaseAdmin, clienteId),
         departamentoAzoupConfec(),
       ]);
-      if (contato.situacao || !contato.envioContactId) {
-        falha('Nenhum contato deste cliente na conexão Azoup Confec', 404);
+      let contactId: string | null = null;
+      if (extraId) {
+        const extra = contato.extras.find((item) => item.id === extraId);
+        if (!extra) falha('Contato extra não encontrado', 404);
+        contactId = extra.envioContactId;
+      } else {
+        contactId = contato.envioContactId;
       }
-      const contactId = contato.envioContactId;
+      if (!contactId) falha('Nenhum contato deste telefone na conexão Azoup Confec', 404);
       const userId = pickId(await digisac('/api/v1/me'));
       if (!userId) falha('Token Digisac sem usuário');
       await digisac('/api/v1/messages', {
