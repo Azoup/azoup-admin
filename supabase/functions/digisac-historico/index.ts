@@ -308,18 +308,21 @@ async function preencherComentariosChamados(
   supabaseAdmin: ReturnType<typeof createClient>,
   chamados: Array<{ clienteId: string; chamado: Chamado }>,
   limite: number,
+  soMaisRecentePorCliente = false,
 ): Promise<void> {
-  const porCliente = new Map<string, Chamado>();
-  for (const item of chamados) {
-    if (item.chamado.aberto) continue;
-    const atual = porCliente.get(item.clienteId);
-    const inicio = item.chamado.inicio ?? '';
-    if (!atual || inicio > (atual.inicio ?? '')) porCliente.set(item.clienteId, item.chamado);
+  let fila = chamados.filter((item) => !item.chamado.aberto && !item.chamado.comentario);
+  fila.sort((a, b) => `${b.chamado.inicio ?? ''}`.localeCompare(`${a.chamado.inicio ?? ''}`));
+  if (soMaisRecentePorCliente) {
+    const vistos = new Set<string>();
+    fila = fila.filter((item) => {
+      if (vistos.has(item.clienteId)) return false;
+      vistos.add(item.clienteId);
+      return true;
+    });
   }
   let n = 0;
-  for (const [clienteId, chamado] of porCliente) {
+  for (const { clienteId, chamado } of fila) {
     if (n >= limite) break;
-    if (chamado.comentario) continue;
     n += 1;
     try {
       const comentario = await buscarComentarioFinalizacao(chamado.id);
@@ -1196,7 +1199,7 @@ async function gravarChamados(
     await preencherComentariosChamados(
       supabaseAdmin,
       chamados.map((chamado) => ({ clienteId, chamado })),
-      8,
+      30,
     );
   }
 
@@ -1387,7 +1390,7 @@ async function importarChamadosRecentes(
   );
   const linhas = pares.map(({ clienteId, chamado }) => linhaChamado(clienteId, chamado, departmentId, agora));
   await upsertChamados(supabaseAdmin, linhas);
-  await preencherComentariosChamados(supabaseAdmin, pares, 20);
+  await preencherComentariosChamados(supabaseAdmin, pares, 20, true);
   return linhas.length;
 }
 
@@ -1406,7 +1409,7 @@ async function gravarChamadosSemApagar(
   await preencherComentariosChamados(
     supabaseAdmin,
     chamados.map((chamado) => ({ clienteId, chamado })),
-    8,
+    20,
   );
 }
 

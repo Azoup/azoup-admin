@@ -51,7 +51,9 @@ import {
   excluirConversaCliente,
   listarConversasClientes,
   listarUltimoContatoPorCliente,
+  MARCADOR_CONTATO_DIGISAC,
   registrarUltimoChamadoVisto,
+  type ClienteConversaComCliente,
 } from '@/src/services/repos/conversas-repo';
 import {
   atualizarReuniaoCliente,
@@ -827,6 +829,55 @@ function chamadoCombina(chamado: DigisacChamado, assunto: string, de: string, at
   return true;
 }
 
+function comentariosPorDiaChamado(chamados: DigisacChamado[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const chamado of chamados) {
+    const texto = chamado.comentario?.trim();
+    const dia = dataCalendarioBrasil(chamado.inicio);
+    if (!texto || !dia || map.has(dia)) continue;
+    map.set(dia, texto);
+  }
+  return map;
+}
+
+function mesclarConversasComComentariosDigisac(
+  conversas: ClienteConversaComCliente[],
+  chamados: DigisacChamado[],
+  clienteId: string,
+): ClienteConversaComCliente[] {
+  const comentariosPorDia = comentariosPorDiaChamado(chamados);
+  const diasNaLista = new Set<string>();
+  const lista = conversas.map((conversa) => {
+    const dia = `${conversa.data_conversa ?? ''}`.slice(0, 10);
+    const digisac = ehContatoDigisacAutomatico(conversa.descricao);
+    if (digisac) diasNaLista.add(dia);
+    if (!digisac) return conversa;
+    const texto = conversa.comentarioDigisac?.trim() || comentariosPorDia.get(dia) || '';
+    if (!texto || texto === conversa.comentarioDigisac) return conversa;
+    return { ...conversa, comentarioDigisac: texto };
+  });
+  for (const [dia, texto] of comentariosPorDia) {
+    if (diasNaLista.has(dia)) continue;
+    lista.push({
+      id: `digisac-comentario-${clienteId}-${dia}`,
+      cliente_id: clienteId,
+      data_conversa: dia,
+      hora_conversa: null,
+      descricao: MARCADOR_CONTATO_DIGISAC,
+      admin_email: null,
+      created_at: null,
+      comentarioDigisac: texto,
+    });
+  }
+  lista.sort((a, b) => {
+    const da = `${a.data_conversa ?? ''}`.slice(0, 10);
+    const db = `${b.data_conversa ?? ''}`.slice(0, 10);
+    if (da !== db) return db.localeCompare(da);
+    return `${b.hora_conversa ?? ''}`.localeCompare(`${a.hora_conversa ?? ''}`);
+  });
+  return lista;
+}
+
 function ChamadoDigisacModal({
   clienteId,
   chamado,
@@ -1054,8 +1105,13 @@ export function HistoricoClienteTela({
   const chamadosQ = useQuery({
     queryKey: ['digisac_chamados', cliente.id],
     queryFn: () => listarChamadosDigisac(cliente.id),
-    enabled: Boolean(cliente.id) && historicoAberto,
+    enabled: Boolean(cliente.id),
   });
+
+  const conversasExibidas = useMemo(
+    () => mesclarConversasComComentariosDigisac(conversasQ.data ?? [], chamadosQ.data?.chamados ?? [], cliente.id),
+    [conversasQ.data, chamadosQ.data, cliente.id],
+  );
 
   useEffect(() => {
     const chamados = chamadosQ.data?.chamados ?? [];
@@ -1077,6 +1133,7 @@ export function HistoricoClienteTela({
     }
     if (!chamadosQ.isSuccess) return;
     void qc.invalidateQueries({ queryKey: ['acompanhamento_ultimos_contatos'] });
+    void qc.invalidateQueries({ queryKey: ['admin_cliente_conversas'] });
   }, [chamadosQ.isSuccess, chamadosQ.dataUpdatedAt, chamadosQ.data, cliente.id, qc]);
 
   const chamadosFiltrados = useMemo(() => {
@@ -1923,16 +1980,16 @@ export function HistoricoClienteTela({
             <View style={{ gap: 8 }}>
               <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>CONVERSAS</Text>
               <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                Inclui registros manuais e o último contato Digisac (mesma data do card).
+                Inclui registros manuais, o último contato Digisac e o comentário ao finalizar o chamado.
               </Text>
               {conversasQ.isLoading ? (
                 <ActivityIndicator color={theme.cadastroAction} />
               ) : conversasQ.error ? (
                 <Text style={{ color: theme.error }}>{(conversasQ.error as Error).message}</Text>
-              ) : (conversasQ.data ?? []).length === 0 ? (
+              ) : conversasExibidas.length === 0 ? (
                 <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhuma conversa registrada.</Text>
               ) : (
-                (conversasQ.data ?? []).map((conversa) => {
+                conversasExibidas.map((conversa) => {
                   const digisac = ehContatoDigisacAutomatico(conversa.descricao);
                   return (
                     <View key={conversa.id} style={[styles.historicoItem, { borderColor: theme.border }]}>

@@ -10,9 +10,20 @@ export type ClienteConversaComCliente = AdminClienteConversaRow & {
   comentarioDigisac?: string | null;
 };
 
-async function comentariosUltimoChamadoDigisac(clienteIds: string[]): Promise<Map<string, string>> {
-  const map = new Map<string, string>();
-  if (!clienteIds.length) return map;
+type ComentariosChamadoDigisac = {
+  porCliente: Map<string, string>;
+  porDia: Map<string, string>;
+};
+
+function chaveComentarioDia(clienteId: string, inicio: string | null): string | null {
+  const dia = dataCalendarioBrasil(inicio);
+  return dia ? `${clienteId}|${dia}` : null;
+}
+
+async function comentariosChamadosDigisac(clienteIds: string[]): Promise<ComentariosChamadoDigisac> {
+  const porCliente = new Map<string, string>();
+  const porDia = new Map<string, string>();
+  if (!clienteIds.length) return { porCliente, porDia };
   const CHUNK = 200;
   for (let i = 0; i < clienteIds.length; i += CHUNK) {
     const chunk = clienteIds.slice(i, i + CHUNK);
@@ -22,7 +33,9 @@ async function comentariosUltimoChamadoDigisac(clienteIds: string[]): Promise<Ma
       .in('cliente_id', chunk)
       .order('inicio', { ascending: false });
     if (error) {
-      if (/comentario_finalizacao|admin_digisac_chamados|schema cache/i.test(error.message)) return map;
+      if (/comentario_finalizacao|admin_digisac_chamados|schema cache/i.test(error.message)) {
+        return { porCliente, porDia };
+      }
       throw new Error(error.message);
     }
     for (const row of (data ?? []) as {
@@ -31,11 +44,23 @@ async function comentariosUltimoChamadoDigisac(clienteIds: string[]): Promise<Ma
       inicio?: string | null;
     }[]) {
       const id = `${row.cliente_id ?? ''}`.trim();
-      if (!id || map.has(id)) continue;
-      map.set(id, `${row.comentario_finalizacao ?? ''}`.trim());
+      const texto = `${row.comentario_finalizacao ?? ''}`.trim();
+      if (!id || !texto) continue;
+      if (!porCliente.has(id)) porCliente.set(id, texto);
+      const chave = chaveComentarioDia(id, row.inicio ?? null);
+      if (chave && !porDia.has(chave)) porDia.set(chave, texto);
     }
   }
-  return map;
+  return { porCliente, porDia };
+}
+
+function comentarioDigisacDaConversa(
+  row: Pick<AdminClienteConversaRow, 'cliente_id' | 'data_conversa' | 'descricao'>,
+  comentarios: ComentariosChamadoDigisac,
+): string | null {
+  if (!ehContatoDigisacAutomatico(row.descricao)) return null;
+  const dia = `${row.data_conversa ?? ''}`.slice(0, 10);
+  return comentarios.porDia.get(`${row.cliente_id}|${dia}`) || comentarios.porCliente.get(row.cliente_id) || null;
 }
 
 /** Colunas reais de `clientes_azoup` no schema Azoup (sem nome_fantasia/razao_social/celular). */
@@ -162,13 +187,15 @@ export async function listarConversasClientes(params?: {
   const clienteIds = [...new Set(rows.map((r) => r.cliente_id))];
   const [clientesMap, comentariosDigisac] = await Promise.all([
     buscarClientesPorIds(clienteIds),
-    params?.incluirDigisac ? comentariosUltimoChamadoDigisac(clienteIds) : Promise.resolve(new Map<string, string>()),
+    params?.incluirDigisac
+      ? comentariosChamadosDigisac(clienteIds)
+      : Promise.resolve({ porCliente: new Map<string, string>(), porDia: new Map<string, string>() }),
   ]);
 
   return rows.map((row) => ({
     ...row,
     cliente: clientesMap.get(row.cliente_id) ?? null,
-    comentarioDigisac: ehContatoDigisacAutomatico(row.descricao) ? comentariosDigisac.get(row.cliente_id) || null : null,
+    comentarioDigisac: comentarioDigisacDaConversa(row, comentariosDigisac),
   }));
 }
 
