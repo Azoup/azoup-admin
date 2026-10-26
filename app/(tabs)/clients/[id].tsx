@@ -6,6 +6,7 @@ import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, View } fro
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
 import { BackLink } from '@/components/ui/BackLink';
+import { EnviarMensagemProntaModal } from '@/components/ui/EnviarMensagemProntaModal';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Screen } from '@/components/ui/Screen';
@@ -150,6 +151,7 @@ export default function ClientDetailScreen() {
   const [cobrancaPdf, setCobrancaPdf] = useState<GerarCobrancaPdfResponse['cobranca'] | null>(null);
   const [cobrancaPdfErro, setCobrancaPdfErro] = useState<string | null>(null);
   const [copiaHint, setCopiaHint] = useState<string | null>(null);
+  const [mensagemAberta, setMensagemAberta] = useState(false);
 
   useEffect(() => {
     setLimU('');
@@ -161,6 +163,7 @@ export default function ClientDetailScreen() {
     setCobrancaPdf(null);
     setCobrancaPdfErro(null);
     setCopiaHint(null);
+    setMensagemAberta(false);
     setAba('cliente');
   }, [id]);
 
@@ -431,6 +434,9 @@ export default function ClientDetailScreen() {
         )
       ) : (
       <>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <PrimaryButton label="Enviar mensagem" onPress={() => setMensagemAberta(true)} />
+      </View>
       {digisacQ.data ? (
         <ScreenCard>
           <SectionTitle>Digisac</SectionTitle>
@@ -788,6 +794,12 @@ export default function ClientDetailScreen() {
       </ScreenCard>
       </>
       )}
+      <EnviarMensagemProntaModal
+        clienteId={data.id}
+        clienteNome={nome}
+        visible={mensagemAberta}
+        onClose={() => setMensagemAberta(false)}
+      />
     </Screen>
   );
 }
