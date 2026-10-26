@@ -437,6 +437,15 @@ function telefonesIguais(contato: string | null, cliente: string | null): boolea
   return a.slice(0, 2) === b.slice(0, 2) && a.slice(-8) === b.slice(-8);
 }
 
+function telefonesIguaisForte(contato: string | null, cliente: string | null): boolean {
+  if (!contato || !cliente) return false;
+  const a = nacional(contato);
+  const b = nacional(cliente);
+  if (a.length < 10 || b.length < 10) return false;
+  if (a === b) return true;
+  return comNonoDigito(a) === comNonoDigito(b);
+}
+
 function numeroDeTexto(value: unknown): string | null {
   if (typeof value === 'number') return telefoneDigisac(null, `${value}`);
   if (typeof value !== 'string') return null;
@@ -649,9 +658,18 @@ function contatoConfereTelefone(row: Record<string, unknown>, numero: string): b
   return Boolean(atual && telefonesIguais(atual, numero));
 }
 
+function contatoConfereTelefoneForte(row: Record<string, unknown>, numero: string): boolean {
+  const atual = numeroDoContatoDigisac(row);
+  return Boolean(atual && telefonesIguaisForte(atual, numero));
+}
+
 const MARCA_NUMERO_OK = '__digisacNumeroOk';
 
-async function buscarContatosPorTelefone(serviceId: string, numero: string): Promise<Record<string, unknown>[]> {
+async function buscarContatosPorTelefone(
+  serviceId: string,
+  numero: string,
+  soEnvio = false,
+): Promise<Record<string, unknown>[]> {
   const termos = termosDeTelefone(numero);
   if (!termos.length) return [];
   const cheios = termos.filter((termo) => termo.length >= 10);
@@ -663,8 +681,14 @@ async function buscarContatosPorTelefone(serviceId: string, numero: string): Pro
       const id = pickId(row);
       if (!id || vistos.has(id)) continue;
       const cheio = (await hidratarContato(id)) ?? row;
-      const confere = contatoConfereTelefone(cheio, numero);
-      if (!confere && !confiarBusca) continue;
+      if (soEnvio && !contatoNaConexao(cheio, serviceId)) continue;
+      const forte = contatoConfereTelefoneForte(cheio, numero);
+      const confere = forte || contatoConfereTelefone(cheio, numero);
+      if (soEnvio) {
+        if (!forte && !confiarBusca) continue;
+      } else if (!confere && !confiarBusca) {
+        continue;
+      }
       vistos.add(id);
       cheio[MARCA_NUMERO_OK] = true;
       out.push(cheio);
@@ -685,7 +709,9 @@ async function buscarContatosPorTelefone(serviceId: string, numero: string): Pro
     }
   };
   const consultarNumero = async (comServico: boolean) => {
-    const exatos = cheios.filter((termo) => /^\+?\d{10,15}$/.test(termo)).slice(0, 4);
+    const exatos = (soEnvio ? [numero, nacional(numero)].filter((termo, i, all) => termo.length >= 10 && all.indexOf(termo) === i) : cheios)
+      .filter((termo) => /^\+?\d{10,15}$/.test(termo))
+      .slice(0, 4);
     for (const termo of exatos) {
       const qs = comServico
         ? `number=${encodeURIComponent(termo)}&serviceId=${encodeURIComponent(serviceId)}&perPage=10`
@@ -701,13 +727,16 @@ async function buscarContatosPorTelefone(serviceId: string, numero: string): Pro
 
   const orNumber = (lista: string[]) => lista.map((termo) => ({ number: { $iLike: `%${termo}%` } }));
   const orId = (lista: string[]) => lista.map((termo) => ({ idFromService: { $iLike: `%${termo}%` } }));
-  await consultar([...orNumber(cheios), ...orId(cheios)], true);
-  if (!out.length) await consultar(orNumber(cheios), true);
+  const termosEnvio = cheios.filter((termo) => digitsOnlyPhone(termo).length >= 10);
+  await consultar([...orNumber(soEnvio ? termosEnvio : cheios), ...orId(soEnvio ? termosEnvio : cheios)], true);
+  if (!out.length) await consultar(orNumber(soEnvio ? termosEnvio : cheios), true);
   if (!out.length) await consultarNumero(true);
-  if (!out.length) await consultar([...orNumber(cheios), ...orId(cheios)], false);
-  if (!out.length) await consultarNumero(false);
-  if (!out.length) await consultar([...orNumber(curtos), ...orId(curtos)], true);
-  if (!out.length) await consultar([...orNumber(curtos), ...orId(curtos)], false);
+  if (!soEnvio) {
+    if (!out.length) await consultar([...orNumber(cheios), ...orId(cheios)], false);
+    if (!out.length) await consultarNumero(false);
+    if (!out.length) await consultar([...orNumber(curtos), ...orId(curtos)], true);
+    if (!out.length) await consultar([...orNumber(curtos), ...orId(curtos)], false);
+  }
   return out;
 }
 
@@ -833,6 +862,60 @@ async function listarExtrasDoCliente(
     out.push({ id, telefone, contactIds: salvo ? [salvo] : [], envioContactId: null });
   }
   return out;
+}
+
+async function numeroCadastroCliente(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+): Promise<string | null> {
+  let clienteQuery = await supabaseAdmin
+    .from('clientes_azoup')
+    .select('telefone, celular')
+    .eq('id', clienteId)
+    .maybeSingle();
+  if (clienteQuery.error && /celular/i.test(clienteQuery.error.message)) {
+    clienteQuery = await supabaseAdmin
+      .from('clientes_azoup')
+      .select('telefone')
+      .eq('id', clienteId)
+      .maybeSingle();
+  }
+  if (clienteQuery.error) throw new Error(clienteQuery.error.message);
+  const row = clienteQuery.data as { telefone?: string | null; celular?: string | null } | null;
+  if (!row) falha('Cliente não encontrado', 404);
+  return telefoneDigisac(row.celular, row.telefone);
+}
+
+async function contactIdParaMensagem(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+  extraId: string,
+): Promise<string> {
+  let numero: string | null = null;
+  if (extraId) {
+    const extras = await listarExtrasDoCliente(supabaseAdmin, clienteId);
+    const extra = extras.find((item) => item.id === extraId);
+    if (!extra) falha('Contato extra não encontrado', 404);
+    numero = telefoneDigisac(null, extra.telefone);
+  } else {
+    numero = await numeroCadastroCliente(supabaseAdmin, clienteId);
+  }
+  if (!numero) falha('Telefone inválido para envio', 400);
+
+  const serviceId = await serviceAzoupConfec();
+  const rows = await buscarContatosPorTelefone(serviceId, numero, true);
+  const ids: string[] = [];
+  for (const row of rows) {
+    if (!contatoNaConexao(row, serviceId)) continue;
+    const atual = numeroDoContatoDigisac(row);
+    if (atual && !telefonesIguaisForte(atual, numero)) continue;
+    if (!atual && row[MARCA_NUMERO_OK] !== true) continue;
+    const id = pickId(row);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  if (ids.length === 1) return ids[0];
+  if (ids.length > 1) falha('Há mais de um contato com este telefone na Azoup Confec', 409);
+  falha('Nenhum contato deste telefone na conexão Azoup Confec', 404);
 }
 
 type ContatosCliente = {
@@ -987,7 +1070,6 @@ async function contatosDoCliente(
   }
 
   const extraIds = extras.flatMap((extra) => extra.contactIds);
-  const extraUnicos = [...new Set(extraIds)];
   const naConexao = (id: string | null | undefined) => {
     if (!id) return false;
     const row = porId.get(id);
@@ -997,16 +1079,7 @@ async function contatosDoCliente(
     extra.envioContactId = extra.contactIds.find((id) => naConexao(id)) ?? null;
   }
   if (!envioContactId) {
-    const confec = [...new Set([...principalIds, ...nomeIds, ...vistos, ...extraUnicos])].filter((id) => naConexao(id));
-    const comTelefone = confec.filter((id) => {
-      const row = porId.get(id);
-      if (!row) return false;
-      return listaNumeros.some((numero) => contatoConfereTelefone(row, numero) || row[MARCA_NUMERO_OK] === true);
-    });
-    envioContactId = principalIds.find((id) => naConexao(id))
-      ?? (comTelefone.length === 1 ? comTelefone[0] : null)
-      ?? (confec.length === 1 ? confec[0] : null)
-      ?? (extraUnicos.length === 1 && naConexao(extraUnicos[0]) ? extraUnicos[0] : null);
+    envioContactId = principalIds.find((id) => naConexao(id)) ?? null;
   }
 
   const contactIds = [...new Set([
@@ -1560,19 +1633,10 @@ serve(async (req) => {
       const extraId = `${payload.extraId ?? ''}`.trim();
       if (!texto || texto.length > 4000) falha('Mensagem inválida');
       if (extraId && !/^[0-9a-f-]{36}$/i.test(extraId)) falha('Contato extra inválido');
-      const [contato, departmentId] = await Promise.all([
-        contatosDoCliente(supabaseAdmin, clienteId),
+      const [contactId, departmentId] = await Promise.all([
+        contactIdParaMensagem(supabaseAdmin, clienteId, extraId),
         departamentoAzoupConfec(),
       ]);
-      let contactId: string | null = null;
-      if (extraId) {
-        const extra = contato.extras.find((item) => item.id === extraId);
-        if (!extra) falha('Contato extra não encontrado', 404);
-        contactId = extra.envioContactId;
-      } else {
-        contactId = contato.envioContactId;
-      }
-      if (!contactId) falha('Nenhum contato deste telefone na conexão Azoup Confec', 404);
       const userId = pickId(await digisac('/api/v1/me'));
       if (!userId) falha('Token Digisac sem usuário');
       await digisac('/api/v1/messages', {

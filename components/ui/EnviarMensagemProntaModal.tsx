@@ -61,14 +61,10 @@ export function EnviarMensagemProntaModal({
     return lista;
   }, [extrasQ.data, telefoneCadastro]);
   const escolherDestino = destinos.length > 1;
-  const destino = destinos.find((item) => item.id === destinoId) ?? destinos[0] ?? null;
+  const destino = destinos.find((item) => item.id === destinoId) ?? null;
   const enviar = useMutation({
-    mutationFn: (mensagem: string) =>
-      enviarMensagemProntaDigisac(
-        clienteId,
-        mensagem,
-        destino?.id && destino.id !== 'cadastro' ? destino.id : null,
-      ),
+    mutationFn: ({ mensagem, extraId }: { mensagem: string; extraId: string | null }) =>
+      enviarMensagemProntaDigisac(clienteId, mensagem, extraId),
   });
   const mensagens = q.data ?? [];
   const escolha = mensagens.find((item) => item.id === escolhaId) ?? null;
@@ -84,6 +80,11 @@ export function EnviarMensagemProntaModal({
   useEffect(() => {
     setDestinoId(null);
   }, [clienteId]);
+
+  useEffect(() => {
+    if (!visible || destinoId || !destinos.length) return;
+    setDestinoId(destinos[0].id);
+  }, [visible, destinos, destinoId]);
 
   function fechar() {
     enviar.reset();
@@ -220,7 +221,13 @@ export function EnviarMensagemProntaModal({
               label={enviar.isPending ? 'Enviando…' : destino ? `Enviar para ${destino.titulo}` : 'Enviar'}
               loading={enviar.isPending}
               disabled={!texto.trim() || enviar.isPending || !destino}
-              onPress={() => enviar.mutate(texto.trim())}
+              onPress={() => {
+                if (!destino) return;
+                enviar.mutate({
+                  mensagem: texto.trim(),
+                  extraId: destino.id === 'cadastro' ? null : destino.id,
+                });
+              }}
             />
           ) : null}
           <Pressable onPress={fechar} hitSlop={6}>
