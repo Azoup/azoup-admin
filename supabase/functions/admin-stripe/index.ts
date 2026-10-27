@@ -17,6 +17,7 @@ const ADMIN_SCREEN_KEYS = [
   'marketing',
   'config_suporte',
   'metodo360',
+  'cfop',
   'acompanhamento',
   'pendencias',
   'agendamentos',
@@ -1506,6 +1507,40 @@ serve(async (req) => {
       }
       if (!settings) throw new Error('Configuração de cobrança não encontrada (admin_billing_settings id = 1).');
       return new Response(JSON.stringify({ settings }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (body.op === 'upsert_cfop_padrao') {
+      const p = body.payload ?? {};
+      const codigo = `${p.codigo ?? ''}`.replace(/\D/g, '');
+      if (codigo.length < 4 || codigo.length > 10) throw new Error('O CFOP precisa ter de 4 a 10 dígitos.');
+      const descricao = `${p.descricao ?? ''}`.trim();
+      if (!descricao) throw new Error('Informe a descrição do CFOP.');
+      if (descricao.length > 255) throw new Error('A descrição pode ter no máximo 255 caracteres.');
+      const ativo = p.ativo !== false;
+      const adminEmail = `${p.updated_by_admin ?? adminRow.email ?? ''}`.trim() || null;
+      const { data: cfop, error: upsertErr } = await supabaseAdmin
+        .from('cfop_codigos_padrao')
+        .upsert(
+          {
+            codigo,
+            descricao,
+            ativo,
+            updated_by_admin: adminEmail,
+            updated_at: new Date().toISOString(),
+          } as never,
+          { onConflict: 'codigo' },
+        )
+        .select('codigo,descricao,ativo,updated_by_admin,created_at,updated_at')
+        .single();
+      if (upsertErr) {
+        if (/cfop_codigos_padrao|schema cache/i.test(upsertErr.message)) {
+          throw new Error('Tabela de CFOP padrão ausente. Rode supabase/sql/cfop_codigos_padrao.sql no Supabase.');
+        }
+        throw upsertErr;
+      }
+      return new Response(JSON.stringify({ cfop }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

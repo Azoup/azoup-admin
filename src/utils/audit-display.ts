@@ -9,6 +9,7 @@ const ACAO_LABELS: Record<string, string> = {
   BILLING_TRIAL_DIAS_UPDATE: 'Período de trial alterado',
   BILLING_DESCONTO_ANUAL_UPDATE: 'Desconto do plano anual alterado',
   BILLING_PROMOCAO_UPDATE: 'Promoção de planos anuais alterada',
+  CFOP_UPSERT: 'CFOP do sistema gravado',
   CONVERSA_UPDATE: 'Conversa editada',
   CONVERSA_DELETE: 'Conversa excluída',
   REUNIAO_UPDATE: 'Reunião editada',
@@ -24,6 +25,7 @@ const ENTIDADE_LABELS: Record<string, string> = {
   clientes_azoup: 'Cliente',
   admin_cliente_conversas: 'Conversa',
   admin_cliente_reunioes: 'Reunião',
+  cfop_codigos_padrao: 'CFOP padrão',
 };
 
 const CAMPO_LABELS: Record<string, string> = {

@@ -11,6 +11,7 @@ export type AdminScreenKey =
   | 'marketing'
   | 'config_suporte'
   | 'metodo360'
+  | 'cfop'
   | 'acompanhamento'
   | 'pendencias'
   | 'agendamentos'
@@ -41,6 +42,7 @@ export const ADMIN_SCREENS: readonly AdminScreenDef[] = [
   { key: 'marketing', label: 'Marketing' },
   { key: 'config_suporte', label: 'Config. Suporte' },
   { key: 'metodo360', label: 'Método 360' },
+  { key: 'cfop', label: 'CFOP' },
   { key: 'admins', label: 'Acessos', ownerOnly: true },
   { key: 'excluir', label: 'Excluir registros', permissao: true },
 ] as const;
@@ -66,6 +68,7 @@ export function telasPadraoPorPapel(papel: AdminPapel): AdminScreenKey[] {
         'marketing',
         'config_suporte',
         'metodo360',
+        'cfop',
       ];
     case 'viewer':
       return [

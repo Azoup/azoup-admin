@@ -59,6 +59,7 @@ export default function AppLayout() {
         <Stack.Screen name="marketing" />
         <Stack.Screen name="config-suporte" />
         <Stack.Screen name="metodo360" />
+        <Stack.Screen name="cfop" />
         <Stack.Screen name="admins" />
       </Stack>
       </AvisoReunioesSemRegistroProvider>

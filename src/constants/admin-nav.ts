@@ -30,6 +30,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.filter((screen) => 
         ? '/(tabs)/config-suporte'
         : screen.key === 'metodo360'
           ? '/(tabs)/metodo360'
+          : screen.key === 'cfop'
+            ? '/(tabs)/cfop'
           : screen.key === 'acompanhamento'
             ? '/(tabs)/acompanhamento'
             : screen.key === 'pendencias'
@@ -69,6 +71,8 @@ export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_SCREENS.filter((screen) => 
                     ? 'youtube-play'
                     : screen.key === 'metodo360'
                       ? 'graduation-cap'
+                      : screen.key === 'cfop'
+                        ? 'barcode'
                       : 'shield';
 
   const group: AdminNavItem['group'] =

@@ -324,3 +324,14 @@ export type UpdatePromocaoPlanosPayload = {
 export async function atualizarPromocaoPlanosViaFunction(payload: UpdatePromocaoPlanosPayload) {
   return invoke<{ settings: Record<string, unknown> }>('update_promocao_planos', payload);
 }
+
+export type UpsertCfopPadraoPayload = {
+  codigo: string;
+  descricao: string;
+  ativo: boolean;
+  updated_by_admin?: string | null;
+};
+
+export async function upsertCfopPadraoViaFunction(payload: UpsertCfopPadraoPayload) {
+  return invoke<{ cfop: Record<string, unknown> }>('upsert_cfop_padrao', payload);
+}

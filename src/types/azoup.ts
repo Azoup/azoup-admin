@@ -264,6 +264,15 @@ export type InserirCupomAdminInput = {
   created_by_admin?: string | null;
 };
 
+export interface CfopPadraoRow {
+  codigo: string;
+  descricao: string;
+  ativo: boolean;
+  updated_by_admin?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface AdminClienteConversaRow {
   id: string;
   cliente_id: string;
