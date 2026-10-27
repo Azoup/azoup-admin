@@ -205,12 +205,29 @@ export interface AdminBillingSettingsRow {
   trial_dias_padrao?: number | null;
   trial_days_default?: number | null;
   desconto_plano_anual_percent?: number | null;
+  promocao_ativa?: boolean | null;
+  promocao_inicio?: string | null;
+  promocao_fim?: string | null;
+  promocao_nome?: string | null;
+  promocao_desconto_percent?: number | null;
+  promocao_meses_ate_cobranca?: number | null;
+  promocao_imagem_url?: string | null;
   stripe_webhook_secret_rotacao?: string | null;
   metadata?: Record<string, unknown> | null;
   updated_by_admin?: string | null;
   updated_at?: string | null;
   [key: string]: unknown;
 }
+
+export type PromocaoPlanosPayload = {
+  promocao_ativa: boolean;
+  promocao_inicio: string | null;
+  promocao_fim: string | null;
+  promocao_nome: string;
+  promocao_desconto_percent: number;
+  promocao_meses_ate_cobranca: number;
+  promocao_imagem_url: string | null;
+};
 
 export interface AdminCouponRow {
   id: string;

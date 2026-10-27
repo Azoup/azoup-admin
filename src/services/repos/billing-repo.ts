@@ -3,6 +3,7 @@ import {
   atualizarDescontoPlanoAnualViaFunction,
   atualizarExibicaoPlanoStripe,
   atualizarOpcoesPlanoStripe,
+  atualizarPromocaoPlanosViaFunction,
   type UpdatePlanoOpcoesPayload,
 } from '@/src/services/stripe-admin-api';
 import type {
@@ -10,6 +11,7 @@ import type {
   AdminCouponRow,
   InserirCupomAdminInput,
   PlanoAssinaturaRow,
+  PromocaoPlanosPayload,
 } from '@/src/types/azoup';
 
 export function montarLinhaAdminCoupon(input: InserirCupomAdminInput): Omit<AdminCouponRow, 'id' | 'created_at' | 'updated_at'> {
@@ -61,6 +63,11 @@ function numeroOuNulo(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function dataYmd(value: unknown): string | null {
+  const m = `${value ?? ''}`.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
 function normalizarBillingSettings(row: AdminBillingSettingsRow): AdminBillingSettingsRow {
   const trial = numeroOuNulo(row.trial_dias_padrao) ?? numeroOuNulo(row.trial_days_default);
   return {
@@ -68,6 +75,13 @@ function normalizarBillingSettings(row: AdminBillingSettingsRow): AdminBillingSe
     trial_dias_padrao: trial,
     trial_days_default: trial,
     desconto_plano_anual_percent: numeroOuNulo(row.desconto_plano_anual_percent) ?? 0,
+    promocao_ativa: Boolean(row.promocao_ativa),
+    promocao_inicio: dataYmd(row.promocao_inicio),
+    promocao_fim: dataYmd(row.promocao_fim),
+    promocao_nome: `${row.promocao_nome ?? ''}`.trim(),
+    promocao_desconto_percent: numeroOuNulo(row.promocao_desconto_percent) ?? 0,
+    promocao_meses_ate_cobranca: numeroOuNulo(row.promocao_meses_ate_cobranca) ?? 0,
+    promocao_imagem_url: `${row.promocao_imagem_url ?? ''}`.trim() || null,
     updated_by_admin: `${row.updated_by_admin ?? ''}`.trim() || null,
   };
 }
@@ -96,6 +110,69 @@ export async function atualizarDescontoPlanoAnual(percent: number, adminEmail?: 
   const valor = parseDescontoPlanoAnualPercent(String(percent));
   const res = await atualizarDescontoPlanoAnualViaFunction({
     desconto_plano_anual_percent: valor,
+    updated_by_admin: adminEmail?.trim() || null,
+  });
+  return normalizarBillingSettings(res.settings as AdminBillingSettingsRow);
+}
+
+export function parseDataPromocao(raw: string, campo: string): string | null {
+  const texto = raw.trim();
+  if (!texto) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(texto)) {
+    throw new Error(`${campo} inválida. Use o seletor de data.`);
+  }
+  return texto;
+}
+
+export function parseMesesAteCobranca(raw: string): number {
+  const texto = raw.trim();
+  if (!texto) throw new Error('Informe os meses grátis (0 a 12).');
+  if (!/^\d+$/.test(texto)) throw new Error('Os meses grátis precisam ser um número inteiro de 0 a 12.');
+  const n = Number(texto);
+  if (!Number.isFinite(n) || n < 0 || n > 12) throw new Error('Os meses grátis devem ser de 0 a 12.');
+  return n;
+}
+
+export function parsePromocaoImagemUrl(raw: string): string | null {
+  const texto = raw.trim();
+  if (!texto) return null;
+  if (!/^https:\/\//i.test(texto)) throw new Error('A URL da imagem precisa começar com https://');
+  return texto;
+}
+
+export function montarPromocaoPlanos(input: {
+  ativa: boolean;
+  inicio: string;
+  fim: string;
+  nome: string;
+  desconto: string;
+  meses: string;
+  imagemUrl: string;
+}): PromocaoPlanosPayload {
+  const promocao_inicio = parseDataPromocao(input.inicio, 'Data de início');
+  const promocao_fim = parseDataPromocao(input.fim, 'Data de fim');
+  if (promocao_inicio && promocao_fim && promocao_fim < promocao_inicio) {
+    throw new Error('A data de fim não pode ser anterior à de início.');
+  }
+  const promocao_nome = input.nome.trim();
+  if (input.ativa && !promocao_nome) throw new Error('Informe o nome da promoção.');
+  return {
+    promocao_ativa: input.ativa,
+    promocao_inicio,
+    promocao_fim,
+    promocao_nome,
+    promocao_desconto_percent: parseDescontoPlanoAnualPercent(input.desconto),
+    promocao_meses_ate_cobranca: parseMesesAteCobranca(input.meses),
+    promocao_imagem_url: parsePromocaoImagemUrl(input.imagemUrl),
+  };
+}
+
+export async function atualizarPromocaoPlanos(
+  payload: PromocaoPlanosPayload,
+  adminEmail?: string | null,
+): Promise<AdminBillingSettingsRow> {
+  const res = await atualizarPromocaoPlanosViaFunction({
+    ...payload,
     updated_by_admin: adminEmail?.trim() || null,
   });
   return normalizarBillingSettings(res.settings as AdminBillingSettingsRow);

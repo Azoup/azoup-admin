@@ -1456,6 +1456,60 @@ serve(async (req) => {
       });
     }
 
+    if (body.op === 'update_promocao_planos') {
+      const p = body.payload ?? {};
+      const ativa = p.promocao_ativa === true;
+      const nome = `${p.promocao_nome ?? ''}`.trim();
+      if (ativa && !nome) throw new Error('Informe o nome da promoção.');
+      const bruto = Number(p.promocao_desconto_percent);
+      if (!Number.isFinite(bruto) || bruto < 0 || bruto > 100) {
+        throw new Error('O desconto deve ser de 0 a 100.');
+      }
+      const meses = Number(p.promocao_meses_ate_cobranca);
+      if (!Number.isInteger(meses) || meses < 0 || meses > 12) {
+        throw new Error('Os meses grátis devem ser um número inteiro de 0 a 12.');
+      }
+      const ymd = (value: unknown, campo: string): string | null => {
+        const texto = `${value ?? ''}`.trim();
+        if (!texto) return null;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(texto)) throw new Error(`${campo} inválida.`);
+        return texto;
+      };
+      const inicio = ymd(p.promocao_inicio, 'Data de início');
+      const fim = ymd(p.promocao_fim, 'Data de fim');
+      if (inicio && fim && fim < inicio) throw new Error('A data de fim não pode ser anterior à de início.');
+      const imagem = `${p.promocao_imagem_url ?? ''}`.trim();
+      if (imagem && !/^https:\/\//i.test(imagem)) {
+        throw new Error('A URL da imagem precisa começar com https://');
+      }
+      const adminEmail = `${p.updated_by_admin ?? adminRow.email ?? ''}`.trim() || null;
+      const { data: settings, error: updErr } = await supabaseAdmin
+        .from('admin_billing_settings')
+        .update({
+          promocao_ativa: ativa,
+          promocao_inicio: inicio,
+          promocao_fim: fim,
+          promocao_nome: nome,
+          promocao_desconto_percent: Math.round(bruto * 100) / 100,
+          promocao_meses_ate_cobranca: meses,
+          promocao_imagem_url: imagem || null,
+          updated_by_admin: adminEmail,
+        } as never)
+        .eq('id', 1)
+        .select('*')
+        .maybeSingle();
+      if (updErr) {
+        if (/promocao_/i.test(updErr.message)) {
+          throw new Error('Colunas da promoção ausentes. Rode migration_asaas_promocao_planos.sql no Supabase.');
+        }
+        throw updErr;
+      }
+      if (!settings) throw new Error('Configuração de cobrança não encontrada (admin_billing_settings id = 1).');
+      return new Response(JSON.stringify({ settings }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const stripe = new Stripe(stripeSecret, { apiVersion: '2023-10-16' });
 
     if (body.op === 'list_servicos_contratados') {

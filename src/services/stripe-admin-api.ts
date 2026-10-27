@@ -309,3 +309,18 @@ export type UpdateDescontoPlanoAnualPayload = {
 export async function atualizarDescontoPlanoAnualViaFunction(payload: UpdateDescontoPlanoAnualPayload) {
   return invoke<{ settings: Record<string, unknown> }>('update_desconto_plano_anual', payload);
 }
+
+export type UpdatePromocaoPlanosPayload = {
+  promocao_ativa: boolean;
+  promocao_inicio: string | null;
+  promocao_fim: string | null;
+  promocao_nome: string;
+  promocao_desconto_percent: number;
+  promocao_meses_ate_cobranca: number;
+  promocao_imagem_url: string | null;
+  updated_by_admin?: string | null;
+};
+
+export async function atualizarPromocaoPlanosViaFunction(payload: UpdatePromocaoPlanosPayload) {
+  return invoke<{ settings: Record<string, unknown> }>('update_promocao_planos', payload);
+}
