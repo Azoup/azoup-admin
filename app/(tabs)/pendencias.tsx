@@ -8,7 +8,6 @@ import { EditarPendenciaModal } from '@/components/ui/EditarPendenciaModal';
 import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
-import { FormSelect } from '@/components/ui/FormSelect';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Text } from '@/components/Themed';
@@ -40,7 +39,21 @@ const COL_WIDTH = 320;
 const SCROLL_PENDENCIAS = '[data-kanban-scroll="pendencias"]';
 /** Espaço livre embaixo das colunas para a barra horizontal não cobrir o último card. */
 const FOLGA_BARRA_HORIZONTAL = 28;
-const FILTRO_TODOS = '__todos__';
+
+function semAcento(valor: string): string {
+  return valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function pendenciaBateBusca(item: ReuniaoClienteRow, termo: string): boolean {
+  if (!termo) return true;
+  const cliente = semAcento(item.empresa_nome ?? '');
+  const autor = semAcento(item.admin_email ?? '');
+  return cliente.includes(termo) || autor.includes(termo);
+}
 
 const COLUNAS: { key: PendenciaColuna; label: string; cor: string }[] = [
   { key: 'atrasada', label: 'Atrasada', cor: '#F07167' },
@@ -226,7 +239,7 @@ export default function PendenciasScreen() {
   const [erro, setErro] = useState<string | null>(null);
   const [concluirAlvo, setConcluirAlvo] = useState<ReuniaoClienteRow | null>(null);
   const [editarAlvo, setEditarAlvo] = useState<ReuniaoClienteRow | null>(null);
-  const [autorFiltro, setAutorFiltro] = useState('');
+  const [busca, setBusca] = useState('');
   const fantasmaRef = useRef<View>(null);
   const posicaoArraste = useRef({ x: 0, y: 0 });
   const colunaSobre = useRef<string | null>(null);
@@ -243,28 +256,19 @@ export default function PendenciasScreen() {
     enabled: pode,
   });
 
-  const autores = useMemo(() => {
-    const emails = new Set<string>();
-    for (const row of q.data ?? []) {
-      const email = row.admin_email?.trim();
-      if (email) emails.add(email);
-    }
-    return [...emails].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [q.data]);
-
   const porColuna = useMemo(() => {
+    const termo = semAcento(busca);
     const out: Record<PendenciaColuna, ReuniaoClienteRow[]> = {
       atrasada: [],
       em_andamento: [],
       concluida: [],
     };
     for (const row of q.data ?? []) {
-      const autor = row.admin_email?.trim() || '';
-      if (autorFiltro && autor !== autorFiltro) continue;
+      if (!pendenciaBateBusca(row, termo)) continue;
       out[colunaPendencia(row)].push(row);
     }
     return out;
-  }, [q.data, autorFiltro]);
+  }, [q.data, busca]);
 
   const statusMutation = useMutation({
     mutationFn: ({ id, concluida, comentario }: { id: string; concluida: boolean; comentario?: string }) =>
@@ -357,13 +361,14 @@ export default function PendenciasScreen() {
             </Pressable>
           }
         />
-        <View style={{ maxWidth: 360, zIndex: 2 }}>
-          <FormField label="Quem escreveu">
-            <FormSelect
-              options={[FILTRO_TODOS, ...autores]}
-              value={autorFiltro || FILTRO_TODOS}
-              onChange={(valor) => setAutorFiltro(valor === FILTRO_TODOS ? '' : valor)}
-              labels={{ [FILTRO_TODOS]: 'Todos' }}
+        <View style={{ maxWidth: 480, zIndex: 2 }}>
+          <FormField label="Buscar">
+            <FormInput
+              value={busca}
+              onChangeText={setBusca}
+              placeholder="Nome do cliente ou e-mail de quem escreveu"
+              autoCapitalize="none"
+              autoCorrect={false}
             />
           </FormField>
         </View>
