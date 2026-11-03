@@ -26,6 +26,29 @@ export function mascaraDataBR(valor: string): string {
   return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`;
 }
 
+/**
+ * Máscara de reais enquanto digita (centavos à direita).
+ * Ex.: 1 → 0,01 · 50 → 0,50 · 5000 → 50,00 · 123456 → 1.234,56
+ */
+export function mascaraReaisBR(valor: string): string {
+  const digits = `${valor}`.replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, 12);
+  if (!digits) return '';
+  const centavos = Number(digits);
+  if (!Number.isFinite(centavos)) return '';
+  return (centavos / 100).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** Converte texto mascarado (1.234,56) em número de reais. */
+export function parseReaisBR(valor: string): number | null {
+  const limpo = `${valor}`.trim().replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+  if (!limpo) return null;
+  const n = Number(limpo);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /** Converte DD/MM/AAAA (ou YYYY-MM-DD) em YYYY-MM-DD. Data inválida → null. */
 export function dataBrParaYmd(valor: string): string | null {
   const t = valor.trim();

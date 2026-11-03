@@ -26,6 +26,8 @@ import {
   dataHojeBrasil,
   formatBRLFromReais,
   mascaraDataBR,
+  mascaraReaisBR,
+  parseReaisBR,
   rotuloDuracaoCupom,
   rotuloValidadeCupom,
 } from '@/src/utils/format';
@@ -54,13 +56,6 @@ function redeemByYmd(value: string): string | null {
   return dataBrParaYmd(raw);
 }
 
-function parseReais(valor: string): number | null {
-  const limpo = valor.trim().replace(/\s/g, '').replace(',', '.');
-  if (!limpo) return null;
-  const n = Number(limpo);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 function rotuloPlanos(item: AdminCouponRow): string {
   const ids = item.aplicavel_planos_ids?.length ? item.aplicavel_planos_ids : item.plan_id != null ? [item.plan_id] : [];
   if (!ids.length) return 'Qualquer plano';
@@ -83,7 +78,6 @@ export default function CouponsScreen() {
   const [codigo, setCodigo] = useState('');
   const [nome, setNome] = useState('');
   const [percent, setPercent] = useState('');
-  const [amountOff, setAmountOff] = useState('');
   const [amountReais, setAmountReais] = useState('');
   const [tipoDesconto, setTipoDesconto] = useState<TipoDesconto>('percent');
   const [duration, setDuration] = useState<'once' | 'repeating' | 'forever'>('once');
@@ -136,7 +130,6 @@ export default function CouponsScreen() {
     setCodigo('');
     setNome('');
     setPercent('');
-    setAmountOff('');
     setAmountReais('');
     setMonths('3');
     setMaxRedemptions('');
@@ -146,11 +139,15 @@ export default function CouponsScreen() {
 
   const stripeMutation = useMutation({
     mutationFn: async () => {
+      const reais = amountReais.trim() ? parseReaisBR(amountReais) : null;
+      if (amountReais.trim() && reais == null) {
+        throw new Error('Informe um valor fixo válido em reais (ex.: 50,00).');
+      }
       const payload = {
         codigo: codigo.trim(),
         nome: nome.trim() || undefined,
         percent_off: percent.trim() ? Number(percent) : undefined,
-        amount_off_centavos: amountOff.trim() ? Number(amountOff) : undefined,
+        amount_off_centavos: reais != null ? Math.round(reais * 100) : undefined,
         currency: 'brl',
         duration,
         duration_in_months: duration === 'repeating' ? Number(months || '3') : undefined,
@@ -161,6 +158,9 @@ export default function CouponsScreen() {
 
       if (!payload.codigo) throw new Error('Código é obrigatório');
       if (!selectedPlanIds.length) throw new Error('Selecione ao menos um plano vinculado ao cupom.');
+      if (!payload.percent_off && !payload.amount_off_centavos) {
+        throw new Error('Informe o desconto percentual ou o valor fixo em reais.');
+      }
 
       const erroData = validarRedeemByLocal(redeemBy);
       if (erroData) throw new Error(erroData);
@@ -232,7 +232,7 @@ export default function CouponsScreen() {
       }
 
       const percentOff = tipoDesconto === 'percent' ? Number(percent.trim()) : null;
-      const reais = tipoDesconto === 'amount' ? parseReais(amountReais) : null;
+      const reais = tipoDesconto === 'amount' ? parseReaisBR(amountReais) : null;
       if (tipoDesconto === 'percent' && (!percentOff || percentOff <= 0 || percentOff > 100)) {
         throw new Error('Informe um percentual entre 0,01 e 100.');
       }
@@ -342,10 +342,15 @@ export default function CouponsScreen() {
                 <FormInput placeholder="Opcional" value={nome} onChangeText={setNome} />
               </FormField>
               <FormField label="Desconto percentual" helper="Ex.: 20">
-                <FormInput placeholder="percent_off" value={percent} onChangeText={setPercent} keyboardType="decimal-pad" />
+                <FormInput placeholder="20" value={percent} onChangeText={setPercent} keyboardType="decimal-pad" />
               </FormField>
-              <FormField label="Ou valor fixo (centavos)">
-                <FormInput placeholder="amount_off_centavos" value={amountOff} onChangeText={setAmountOff} keyboardType="number-pad" />
+              <FormField label="Ou valor fixo (R$)" helper="Máscara automática com duas casas. Ex.: digite 5000 → 50,00.">
+                <FormInput
+                  placeholder="0,00"
+                  value={amountReais}
+                  onChangeText={(v) => setAmountReais(mascaraReaisBR(v))}
+                  keyboardType="number-pad"
+                />
               </FormField>
               <FormField label="Duração">
                 <ChipSelect options={['once', 'repeating', 'forever'] as const} value={duration} onChange={setDuration} />
@@ -413,8 +418,13 @@ export default function CouponsScreen() {
                   <FormInput placeholder="10" value={percent} onChangeText={setPercent} keyboardType="decimal-pad" />
                 </FormField>
               ) : (
-                <FormField label="Valor do desconto (R$)" required helper="Em reais. O total não fica negativo. Mínimo Asaas da cobrança: R$ 5,00.">
-                  <FormInput placeholder="50,00" value={amountReais} onChangeText={setAmountReais} keyboardType="decimal-pad" />
+                <FormField label="Valor do desconto (R$)" required helper="Máscara automática com duas casas. Ex.: digite 5000 → 50,00. O total não fica negativo. Mínimo Asaas da cobrança: R$ 5,00.">
+                  <FormInput
+                    placeholder="0,00"
+                    value={amountReais}
+                    onChangeText={(v) => setAmountReais(mascaraReaisBR(v))}
+                    keyboardType="number-pad"
+                  />
                 </FormField>
               )}
               <FormField label="Duração" required>
