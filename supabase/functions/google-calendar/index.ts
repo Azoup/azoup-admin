@@ -533,6 +533,9 @@ async function gravarResumoIa(
   if (error) throw new Error(error.message);
 }
 
+/** Mesmo corte das reuniões sem registro no painel: outubro/2026 em diante. */
+const RESUMO_IA_DESDE = '2026-10-01T00:00:00-03:00';
+
 async function gerarResumosPendentes(
   supabaseAdmin: ReturnType<typeof createClient>,
   accessToken: string,
@@ -547,6 +550,7 @@ async function gerarResumosPendentes(
     .select('google_event_id,titulo,inicio,fim,status,cliente_id,calendar_id')
     .eq('calendar_id', calendarId)
     .not('cliente_id', 'is', null)
+    .gte('inicio', RESUMO_IA_DESDE)
     .lt('fim', agora)
     .order('fim', { ascending: false })
     .limit(500);
@@ -555,13 +559,16 @@ async function gerarResumosPendentes(
   const registros = await supabaseAdmin
     .from('admin_cliente_reunioes')
     .select('cliente_id,created_at,avulsa')
+    .gte('created_at', RESUMO_IA_DESDE)
+    .order('created_at', { ascending: false })
     .limit(5000);
   let reunioes = (registros.data ?? []) as Array<{ cliente_id?: string; created_at?: string; avulsa?: boolean }>;
   if (registros.error && /avulsa/i.test(registros.error.message)) {
     const semAvulsa = await supabaseAdmin
       .from('admin_cliente_reunioes')
       .select('cliente_id,created_at')
-      .gte('created_at', new Date(Date.now() - 800 * 86_400_000).toISOString())
+      .gte('created_at', RESUMO_IA_DESDE)
+      .order('created_at', { ascending: false })
       .limit(2000);
     if (semAvulsa.error) throw new Error(semAvulsa.error.message);
     reunioes = (semAvulsa.data ?? []) as typeof reunioes;
@@ -591,7 +598,7 @@ async function gerarResumosPendentes(
     const clienteId = `${row.cliente_id ?? ''}`.trim();
     const eventId = `${row.google_event_id ?? ''}`.trim();
     const dia = diaBrasil(`${row.inicio ?? ''}`);
-    if (!clienteId || !eventId || !dia) continue;
+    if (!clienteId || !eventId || !dia || dia < '2026-10-01') continue;
     const chave = `${clienteId}|${dia}`;
     if (vistos.has(chave) || cobertas.has(chave) || pular.has(chave)) continue;
     vistos.add(chave);

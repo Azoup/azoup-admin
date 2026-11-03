@@ -355,35 +355,34 @@ function quando(item: ReuniaoSemRegistro): string {
   return fim && fim !== inicio ? `${inicio} ate ${fim}` : inicio;
 }
 
-function ordenar(itens: ReuniaoSemRegistro[]): ReuniaoSemRegistro[][] {
-  const grupos = new Map<string, ReuniaoSemRegistro[]>();
-  for (const item of itens) {
-    const lista = grupos.get(item.clienteId) ?? [];
-    lista.push(item);
-    grupos.set(item.clienteId, lista);
-  }
-  return [...grupos.values()]
-    .map((lista) => [...lista].sort((a, b) => (a.inicio < b.inicio ? 1 : -1)))
-    .sort((a, b) => a[0].clienteNome.localeCompare(b[0].clienteNome, 'pt-BR'));
+/** Ordem do PDF: data crescente e, no mesmo horário, nome do cliente e título. */
+function ordenar(itens: ReuniaoSemRegistro[]): ReuniaoSemRegistro[] {
+  return [...itens].sort((a, b) => {
+    const porData = `${a.inicio}`.localeCompare(`${b.inicio}`);
+    if (porData !== 0) return porData;
+    const porNome = a.clienteNome.localeCompare(b.clienteNome, 'pt-BR');
+    if (porNome !== 0) return porNome;
+    return a.titulo.localeCompare(b.titulo, 'pt-BR');
+  });
 }
 
 export function gerarPdfReunioesSemRegistro(itens: ReuniaoSemRegistro[]): Uint8Array {
   const geradoEmMs = Date.now();
-  const grupos = ordenar(itens);
-  const lista = grupos.flat();
+  const lista = ordenar(itens);
+  const clientes = new Set(lista.map((item) => item.clienteId));
   const geradoEm = `Gerado em ${formatDataHoraBrasil(new Date(geradoEmMs).toISOString())}`;
   const pdf = new RelatorioPdf();
-  const maisAntiga = [...lista].sort((a, b) => (a.inicio < b.inicio ? -1 : 1))[0];
-  const maisRecente = lista[0] ? [...lista].sort((a, b) => (a.inicio < b.inicio ? 1 : -1))[0] : undefined;
+  const maisAntiga = lista[0];
+  const maisRecente = lista.length ? lista[lista.length - 1] : undefined;
 
   pdf.paragrafo('Reuniões sem registro', { tamanho: 18, negrito: true, espacoDepois: 6 });
   pdf.paragrafo(
-    'Mesma regra da agenda: reuniões a partir de outubro/2026 que já começaram e ainda não têm registro manual no dia (incluindo eventos sem cliente vinculado). Resumo gerado por IA não conta como registro.',
+    'Mesma regra da agenda: reuniões a partir de outubro/2026 que já começaram e ainda não têm registro manual no dia (incluindo eventos sem cliente vinculado). Resumo gerado por IA não conta como registro. Ordenado por data e depois por nome.',
     { tamanho: 10, cor: COR_SUAVE, espacoDepois: 10 },
   );
   pdf.faixa('Resumo');
   pdf.paragrafo(`Reuniões sem registro: ${lista.length}`);
-  pdf.paragrafo(`Clientes: ${grupos.length}`);
+  pdf.paragrafo(`Clientes: ${clientes.size}`);
   if (maisAntiga) pdf.paragrafo(`Mais antiga: ${quando(maisAntiga)}`);
   if (maisRecente) pdf.paragrafo(`Mais recente: ${quando(maisRecente)}`, { espacoDepois: 10 });
 
@@ -397,34 +396,24 @@ export function gerarPdfReunioesSemRegistro(itens: ReuniaoSemRegistro[]): Uint8A
   pdf.espaco(8);
 
   pdf.faixa('Detalhamento');
-  let numeroItem = 0;
-  for (const grupo of grupos) {
-    const cliente = grupo[0];
-    pdf.paragrafo(cliente.clienteNome, { tamanho: 13, negrito: true, espacoDepois: 2 });
-    pdf.paragrafo(`E-mail: ${cliente.clienteEmail || 'Não informado'}`, { tamanho: 9, cor: COR_SUAVE, espacoDepois: 1 });
-    pdf.paragrafo(`Telefone: ${cliente.clienteTelefone || 'Não informado'}`, { tamanho: 9, cor: COR_SUAVE, espacoDepois: 1 });
+  lista.forEach((item, indice) => {
+    pdf.linha();
+    pdf.paragrafo(`${indice + 1}. ${item.titulo}`, { tamanho: 11, negrito: true, espacoDepois: 3 });
+    pdf.paragrafo(`Cliente: ${item.clienteNome}`, { tamanho: 10, espacoDepois: 1 });
+    pdf.paragrafo(`E-mail: ${item.clienteEmail || 'Não informado'}`, { tamanho: 9, cor: COR_SUAVE, espacoDepois: 1 });
+    pdf.paragrafo(`Telefone: ${item.clienteTelefone || 'Não informado'}`, { tamanho: 9, cor: COR_SUAVE, espacoDepois: 1 });
+    pdf.paragrafo(`Quando: ${quando(item)} (${diasDesde(item.inicio)})`, { tamanho: 10, espacoDepois: 1 });
+    pdf.paragrafo(`Duração: ${duracao(item)}`, { tamanho: 10, espacoDepois: 1 });
+    pdf.paragrafo(`Vínculo com o cliente: ${rotuloVinculo(item.vinculo)}`, { tamanho: 10, espacoDepois: 1 });
     pdf.paragrafo(
-      grupo.length === 1 ? '1 reunião sem registro' : `${grupo.length} reuniões sem registro`,
-      { tamanho: 9, cor: COR_SUAVE, espacoDepois: 6 },
+      `Participantes: ${item.participantes.length ? item.participantes.join(', ') : 'Não informados na agenda'}`,
+      { tamanho: 10, espacoDepois: 1 },
     );
-    for (const item of grupo) {
-      numeroItem += 1;
-      pdf.linha();
-      pdf.paragrafo(`${numeroItem}. ${item.titulo}`, { tamanho: 11, negrito: true, espacoDepois: 3 });
-      pdf.paragrafo(`Quando: ${quando(item)} (${diasDesde(item.inicio)})`, { tamanho: 10, espacoDepois: 1 });
-      pdf.paragrafo(`Duração: ${duracao(item)}`, { tamanho: 10, espacoDepois: 1 });
-      pdf.paragrafo(`Vínculo com o cliente: ${rotuloVinculo(item.vinculo)}`, { tamanho: 10, espacoDepois: 1 });
-      pdf.paragrafo(
-        `Participantes: ${item.participantes.length ? item.participantes.join(', ') : 'Não informados na agenda'}`,
-        { tamanho: 10, espacoDepois: 1 },
-      );
-      if (item.linkAgenda) pdf.paragrafo(`Link da agenda: ${item.linkAgenda}`, { tamanho: 9, cor: COR_SUAVE, espacoDepois: 2 });
-      const descricao = textoDescricao(item.descricao);
-      pdf.paragrafo('Descrição da agenda', { tamanho: 10, negrito: true, espacoDepois: 2 });
-      pdf.paragrafo(descricao || 'Sem descrição na agenda.', { tamanho: 10, espacoDepois: 8 });
-    }
-    pdf.espaco(6);
-  }
+    if (item.linkAgenda) pdf.paragrafo(`Link da agenda: ${item.linkAgenda}`, { tamanho: 9, cor: COR_SUAVE, espacoDepois: 2 });
+    const descricao = textoDescricao(item.descricao);
+    pdf.paragrafo('Descrição da agenda', { tamanho: 10, negrito: true, espacoDepois: 2 });
+    pdf.paragrafo(descricao || 'Sem descrição na agenda.', { tamanho: 10, espacoDepois: 8 });
+  });
 
   return pdf.finalizar(geradoEm);
 }
