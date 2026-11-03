@@ -218,6 +218,14 @@ function marcarCard(id: string) {
   };
 }
 
+function semAcento(valor: string): string {
+  return valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 function passaFiltro(
   card: ConfecCard,
   busca: string,
@@ -233,8 +241,18 @@ function passaFiltro(
     if (/^\d+$/.test(q)) {
       if (card.ticket_number !== Number(q)) return false;
     } else {
-      const blob = `${card.title} ${card.description} ${card.cliente_nome ?? ''}`.toLowerCase();
-      if (!blob.includes(q.toLowerCase())) return false;
+      const blob = semAcento(
+        [
+          card.title,
+          card.description,
+          card.cliente_nome,
+          card.cliente_empresa,
+          card.cliente_empresa_razao,
+        ]
+          .filter(Boolean)
+          .join(' '),
+      );
+      if (!blob.includes(semAcento(q))) return false;
     }
   }
   if (etiquetas.length && !card.etiquetas.some((item) => etiquetas.includes(item.id))) return false;
@@ -305,7 +323,11 @@ function TicketCard({
             #{numeroTicket(card.ticket_number)} {card.title}
           </Text>
         </View>
-        {card.cliente_nome ? <Text style={{ color: theme.textMuted, fontSize: 12 }}>{card.cliente_nome}</Text> : null}
+        {card.cliente_nome || card.cliente_empresa ? (
+          <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+            {[card.cliente_empresa, card.cliente_nome].filter(Boolean).join(' · ')}
+          </Text>
+        ) : null}
         {card.secao || card.tela ? (
           <Text style={{ color: theme.textMuted, fontSize: 11 }}>
             {[card.secao, card.tela].filter(Boolean).join(' · ')}
@@ -740,7 +762,7 @@ export default function KanbanConfecScreen() {
         </View>
         <View style={styles.barraFiltros}>
           <View style={styles.busca}>
-            <FormInput value={busca} onChangeText={setBusca} placeholder="Buscar número, cliente ou título" />
+            <FormInput value={busca} onChangeText={setBusca} placeholder="Buscar número, cliente, empresa ou título" />
           </View>
           <View style={styles.filtro}>
             <FormSelect options={PERIODOS} value={periodo} onChange={setPeriodo} labels={ROTULO_PERIODO} />
@@ -890,7 +912,9 @@ export default function KanbanConfecScreen() {
                 </Text>
                 <Text style={{ color: theme.textMuted }}>
                   {colunas.find((coluna) => coluna.slug === detalhe.status)?.title ?? detalhe.status}
-                  {detalhe.cliente_nome ? ` · ${detalhe.cliente_nome}` : ''}
+                  {detalhe.cliente_empresa || detalhe.cliente_nome
+                    ? ` · ${[detalhe.cliente_empresa, detalhe.cliente_nome].filter(Boolean).join(' · ')}`
+                    : ''}
                 </Text>
                 <Text style={{ color: theme.text }}>{detalhe.description || 'Sem observações do ticket.'}</Text>
                 <Text style={{ color: theme.text }}>{detalhe.dev_notes || 'Sem observações DEV.'}</Text>

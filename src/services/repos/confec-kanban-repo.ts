@@ -71,6 +71,10 @@ export type ConfecCard = {
   dev_notes: string;
   cliente_id: string | null;
   cliente_nome: string | null;
+  /** Nome fantasia (ou razão) da empresa do cliente, para exibir e buscar. */
+  cliente_empresa: string | null;
+  /** Razão social — entra na busca mesmo quando o card mostra a fantasia. */
+  cliente_empresa_razao: string | null;
   analista_email: string | null;
   desenvolvedor_email: string | null;
   created_by_email: string | null;
@@ -232,7 +236,7 @@ export async function carregarQuadroConfec(): Promise<QuadroConfec> {
     checklistPorCard.set(row.card_id, lista);
   }
 
-  const cards = ((cardsRes.data ?? []) as Array<ConfecCard & { cliente?: { nome?: string | null } | { nome?: string | null }[] | null }>).map(
+  const cardsBase = ((cardsRes.data ?? []) as Array<ConfecCard & { cliente?: { nome?: string | null } | { nome?: string | null }[] | null }>).map(
     (row) => {
       const cliente = Array.isArray(row.cliente) ? row.cliente[0] : row.cliente;
       const secao = `${row.secao ?? ''}`.trim();
@@ -241,6 +245,8 @@ export async function carregarQuadroConfec(): Promise<QuadroConfec> {
         description: row.description ?? '',
         dev_notes: row.dev_notes ?? '',
         cliente_nome: `${cliente?.nome ?? ''}`.trim() || null,
+        cliente_empresa: null as string | null,
+        cliente_empresa_razao: null as string | null,
         secao: ehSecaoConfec(secao) ? secao : null,
         tela: `${row.tela ?? ''}`.trim() || null,
         tela_nova: Boolean(row.tela_nova),
@@ -255,6 +261,47 @@ export async function carregarQuadroConfec(): Promise<QuadroConfec> {
       };
     },
   );
+
+  const clienteIds = [...new Set(cardsBase.map((card) => `${card.cliente_id ?? ''}`.trim()).filter(Boolean))];
+  const empresaPorCliente = new Map<string, { nome: string; razao: string; matriz: boolean }>();
+  const CHUNK = 200;
+  for (let i = 0; i < clienteIds.length; i += CHUNK) {
+    const chunk = clienteIds.slice(i, i + CHUNK);
+    const { data: empresas, error: empresasErro } = await supabase
+      .from('empresas')
+      .select('cliente_id,razao_social,nome_fantasia,empresa_matriz')
+      .in('cliente_id', chunk);
+    if (empresasErro) {
+      if (!/empresas|schema cache|does not exist/i.test(empresasErro.message)) throw erroTabela(empresasErro.message);
+      break;
+    }
+    for (const row of (empresas ?? []) as {
+      cliente_id?: string;
+      razao_social?: string | null;
+      nome_fantasia?: string | null;
+      empresa_matriz?: boolean | null;
+    }[]) {
+      const clienteId = `${row.cliente_id ?? ''}`.trim();
+      const fantasia = `${row.nome_fantasia ?? ''}`.trim();
+      const razao = `${row.razao_social ?? ''}`.trim();
+      const nome = fantasia || razao;
+      if (!clienteId || !nome) continue;
+      const atual = empresaPorCliente.get(clienteId);
+      const matriz = Boolean(row.empresa_matriz);
+      if (!atual || (matriz && !atual.matriz)) {
+        empresaPorCliente.set(clienteId, { nome, razao, matriz });
+      }
+    }
+  }
+
+  const cards = cardsBase.map((card) => {
+    const empresa = card.cliente_id ? empresaPorCliente.get(card.cliente_id) : undefined;
+    return {
+      ...card,
+      cliente_empresa: empresa?.nome ?? null,
+      cliente_empresa_razao: empresa?.razao || null,
+    };
+  });
 
   return {
     colunas: (colunasRes.data ?? []) as ConfecColuna[],
