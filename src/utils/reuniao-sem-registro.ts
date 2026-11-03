@@ -1,5 +1,8 @@
 import { dataCalendarioBrasil } from '@/src/utils/format';
 
+/** Reuniões sem registro só entram a partir deste dia (mês 10/2026 em diante). */
+export const REUNIAO_SEM_REGISTRO_DESDE_YMD = '2026-10-01';
+
 export function chaveClienteDia(clienteId?: string | null, instante?: string | Date | null): string | null {
   const id = `${clienteId ?? ''}`.trim();
   const dia = dataCalendarioBrasil(instante);

@@ -2,7 +2,11 @@ import { statusConexaoGoogle, type GoogleAgendaEvento } from '@/src/services/goo
 import { supabase } from '@/src/lib/supabase';
 import { listarRegistrosManuaisNoPeriodo } from '@/src/services/repos/reunioes-repo';
 import { dataCalendarioBrasil, dataHojeBrasil, somarDiasYmd } from '@/src/utils/format';
-import { cobertasDeRegistrosManuais, eventoAgendaSemRegistro } from '@/src/utils/reuniao-sem-registro';
+import {
+  cobertasDeRegistrosManuais,
+  eventoAgendaSemRegistro,
+  REUNIAO_SEM_REGISTRO_DESDE_YMD,
+} from '@/src/utils/reuniao-sem-registro';
 
 export type { GoogleAgendaEvento };
 
@@ -178,7 +182,9 @@ export async function listarReunioesPassadasSemRegistro(): Promise<ReuniaoSemReg
   }
 
   const hoje = dataHojeBrasil();
-  const desde = `${somarDiasYmd(hoje, -90)}T00:00:00-03:00`;
+  const inicioJanela = somarDiasYmd(hoje, -90);
+  const desdeYmd = inicioJanela > REUNIAO_SEM_REGISTRO_DESDE_YMD ? inicioJanela : REUNIAO_SEM_REGISTRO_DESDE_YMD;
+  const desde = `${desdeYmd}T00:00:00-03:00`;
   const ate = `${somarDiasYmd(hoje, 1)}T00:00:00-03:00`;
   const [eventos, registros] = await Promise.all([
     listarEventosAgendaCache(desde, ate, calendarId),
@@ -188,6 +194,8 @@ export async function listarReunioesPassadasSemRegistro(): Promise<ReuniaoSemReg
   const agora = Date.now();
   const saida: ReuniaoSemRegistro[] = [];
   for (const ev of eventos) {
+    const diaEvento = dataCalendarioBrasil(ev.inicio);
+    if (!diaEvento || diaEvento < REUNIAO_SEM_REGISTRO_DESDE_YMD) continue;
     if (!eventoAgendaSemRegistro(ev, cobertas, agora)) continue;
     const clienteId = `${ev.cliente_id ?? ''}`.trim();
     const nome = `${ev.cliente?.nome ?? ''}`.trim() || (clienteId ? 'Cliente' : 'Sem cliente vinculado');

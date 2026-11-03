@@ -378,7 +378,7 @@ export function gerarPdfReunioesSemRegistro(itens: ReuniaoSemRegistro[]): Uint8A
 
   pdf.paragrafo('Reuniões sem registro', { tamanho: 18, negrito: true, espacoDepois: 6 });
   pdf.paragrafo(
-    'Mesma regra da agenda: reuniões dos últimos 90 dias que já começaram e ainda não têm registro manual no dia (incluindo eventos sem cliente vinculado). Resumo gerado por IA não conta como registro.',
+    'Mesma regra da agenda: reuniões a partir de outubro/2026 que já começaram e ainda não têm registro manual no dia (incluindo eventos sem cliente vinculado). Resumo gerado por IA não conta como registro.',
     { tamanho: 10, cor: COR_SUAVE, espacoDepois: 10 },
   );
   pdf.faixa('Resumo');
