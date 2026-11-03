@@ -1178,9 +1178,9 @@ serve(async (req) => {
         carregarEmLotes((chunk) =>
           supabaseAdmin
             .from('empresas')
-            .select('cliente_id,razao_social,nome_fantasia,cnpj')
+            .select('cliente_id,razao_social,nome_fantasia,cnpj,empresa_matriz')
             .in('cliente_id', chunk)
-            .eq('empresa_matriz', true),
+            .limit(5000),
         ),
         carregarContagemEmLotes((chunk, from, to) =>
           supabaseAdmin.from('produtos').select('cliente_id').in('cliente_id', chunk).range(from, to),
@@ -1233,8 +1233,14 @@ serve(async (req) => {
       }
 
       const empresaPorCliente = new Map<string, Record<string, unknown>>();
-      for (const e of empresasPack.data as Record<string, unknown>[]) {
-        empresaPorCliente.set(`${e.cliente_id}`, e);
+      const empresasOrdenadas = [...(empresasPack.data as Record<string, unknown>[])].sort((a, b) => {
+        const am = a.empresa_matriz ? 0 : 1;
+        const bm = b.empresa_matriz ? 0 : 1;
+        return am - bm;
+      });
+      for (const e of empresasOrdenadas) {
+        const cid = `${e.cliente_id}`;
+        if (!empresaPorCliente.has(cid)) empresaPorCliente.set(cid, e);
       }
 
       const produtosCount = contarPorCampo(produtosPack.data as Array<Record<string, unknown>>, 'cliente_id');
@@ -1270,6 +1276,7 @@ serve(async (req) => {
           empresa_nome: empresa
             ? `${empresa.nome_fantasia ?? ''}`.trim() || `${empresa.razao_social ?? ''}`.trim() || null
             : null,
+          empresa_razao_social: empresa ? `${empresa.razao_social ?? ''}`.trim() || null : null,
           empresa_cnpj: empresa?.cnpj ?? null,
           produtos: produtosCount.get(id) ?? 0,
           vendas: vendasCount.get(id) ?? 0,

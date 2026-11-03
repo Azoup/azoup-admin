@@ -230,6 +230,7 @@ export type AcompanhamentoClienteApiRow = {
   celular?: string | null;
   created_at?: string | null;
   empresa_nome?: string | null;
+  empresa_razao_social?: string | null;
   empresa_cnpj?: string | null;
   produtos: number;
   vendas: number;

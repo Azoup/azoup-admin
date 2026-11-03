@@ -119,14 +119,23 @@ function recomporBoard(clientes: AcompanhamentoCliente[]): Board {
   return { clientes, porColuna, porEtiqueta: porColuna };
 }
 
+function semAcento(valor: string): string {
+  return valor
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 function matchBusca(item: AcompanhamentoCliente, busca: string): boolean {
-  const q = busca.trim().toLowerCase();
+  const q = semAcento(busca);
   if (!q) return true;
-  const qDigits = digitsOnlyPhone(q);
-  const texto = [item.nome, item.email, item.telefone, item.celular, item.empresa_nome, item.empresa_cnpj]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+  const qDigits = digitsOnlyPhone(busca);
+  const texto = semAcento(
+    [item.nome, item.email, item.telefone, item.celular, item.empresa_nome, item.empresa_razao_social, item.empresa_cnpj]
+      .filter(Boolean)
+      .join(' '),
+  );
   if (texto.includes(q)) return true;
   if (qDigits.length >= 3) {
     const digits = digitsOnlyPhone(`${item.telefone ?? ''}${item.celular ?? ''}${item.empresa_cnpj ?? ''}`);
@@ -3152,7 +3161,7 @@ export default function AcompanhamentoScreen() {
               <FontAwesome name="search" size={13} color={theme.textMuted} style={styles.searchIcon} />
               <FormInput
                 style={styles.searchInput}
-                placeholder="Buscar por nome, e-mail, telefone ou empresa…"
+                placeholder="Buscar por nome, empresa, e-mail ou telefone…"
                 value={busca}
                 onChangeText={setBusca}
                 autoCapitalize="none"

@@ -83,6 +83,7 @@ export async function carregarAcompanhamentoClientes(): Promise<{
       celular: row.celular,
       created_at: row.created_at,
       empresa_nome: row.empresa_nome,
+      empresa_razao_social: row.empresa_razao_social,
       empresa_cnpj: row.empresa_cnpj,
       produtos: Number(row.produtos) || 0,
       vendas: Number(row.vendas) || 0,

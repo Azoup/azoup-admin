@@ -23,6 +23,8 @@ export type AcompanhamentoCliente = {
   celular?: string | null;
   created_at?: string | null;
   empresa_nome?: string | null;
+  /** Razão social da empresa (para busca, mesmo quando o card mostra fantasia). */
+  empresa_razao_social?: string | null;
   empresa_cnpj?: string | null;
   produtos: number;
   vendas: number;
