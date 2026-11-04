@@ -12,6 +12,7 @@ import {
     CLIENTES_FILTRO_INICIAL,
     type ClienteStatusFiltro,
     type ClientesFiltroState,
+    type ProvedorPagamentoFiltro,
     temFiltroAtivo,
 } from '@/src/utils/clientes-filtro';
 
@@ -42,6 +43,14 @@ const STATUS_LABELS: Record<ClienteStatusFiltro, string> = {
   cancelado: 'Cancelado',
   congelado: 'Congelado',
   chamar: 'Chamar',
+};
+
+const PROVEDOR_OPTIONS = ['todos', 'asaas', 'stripe'] as const;
+
+const PROVEDOR_LABELS: Record<ProvedorPagamentoFiltro, string> = {
+  todos: 'Todos',
+  asaas: 'ASAAS',
+  stripe: 'Stripe',
 };
 
 export function ClientsFiltersBar({ value, onChange, total, filtrados }: Props) {
@@ -77,6 +86,19 @@ export function ClientsFiltersBar({ value, onChange, total, filtrados }: Props) 
             value={value.status}
             labels={STATUS_LABELS}
             onChange={(status) => onChange({ ...value, status })}
+          />
+        </View>
+      </View>
+
+      <View style={styles.line}>
+        <Text style={styles.tag}>Provedor</Text>
+        <View style={styles.chips}>
+          <ChipSelect
+            compact
+            options={PROVEDOR_OPTIONS}
+            value={value.provedor}
+            labels={PROVEDOR_LABELS}
+            onChange={(provedor) => onChange({ ...value, provedor })}
           />
         </View>
       </View>

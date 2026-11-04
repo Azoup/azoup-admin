@@ -43,6 +43,16 @@ import { enriquecerAcompanhamentoCliente, type AcompanhamentoCliente } from '@/s
 import type { ClienteAzoupAdminView } from '@/src/types/azoup';
 import { dataCancelamentoAssinatura, dataVencimentoInadimplencia, rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
 import {
+  isClienteAsaas,
+  rotuloBillingType,
+  rotuloCicloCobranca,
+  rotuloCupomAssinatura,
+  rotuloPacoteAssinatura,
+  rotuloPromocaoResumo,
+  rotuloProvedor,
+  temPromocaoAssinatura,
+} from '@/src/utils/assinatura-asaas';
+import {
   dataHojeBrasil,
   formatBRLFromCentavos,
   formatBRLFromReais,
@@ -116,17 +126,19 @@ export default function ClientDetailScreen() {
     enabled: Boolean(id),
   });
 
+  const clienteAsaas = isClienteAsaas(data);
+
   const servicosQ = useQuery({
     queryKey: ['stripe_servicos_contratados'],
     queryFn: listarServicosStripeContratados,
     staleTime: 5 * 60_000,
-    enabled: Boolean(id),
+    enabled: Boolean(id) && !clienteAsaas,
   });
 
   const cobrancaQ = useQuery({
     queryKey: ['admin_cliente_cobranca', id],
     queryFn: () => obterCobrancaClienteViaFunction({ cliente_id: id }),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && !clienteAsaas,
   });
 
   const efetivos = useMemo(() => (data ? resolverLimitesEfetivos(data) : null), [data]);
@@ -558,46 +570,109 @@ export default function ClientDetailScreen() {
 
       <ScreenCard>
         <SectionTitle>Assinatura</SectionTitle>
+        <Meta label="Provedor" value={rotuloProvedor(data)} />
+        {clienteAsaas ? (
+          <Meta label="Customer ASAAS" value={`${data.asaas_customer_id ?? ''}`.trim() || '—'} />
+        ) : null}
         <Meta label="Plano" value={data.plano?.nome ?? '—'} />
+        <Meta label="Ciclo" value={rotuloCicloCobranca(data.assinatura?.ciclo_cobranca)} />
+        {!clienteAsaas ? (
+          <Meta
+            label="Serviços contratados"
+            value={
+              servicosQ.isLoading
+                ? 'Consultando Stripe…'
+                : servicosQ.isError
+                  ? 'Não foi possível consultar'
+                  : nomesServicosContratados(data, servicosQ.data).join(' · ') || 'Nenhum além do plano'
+            }
+          />
+        ) : null}
         <Meta
-          label="Serviços contratados"
+          label="Status"
           value={
-            servicosQ.isLoading
-              ? 'Consultando Stripe…'
-              : servicosQ.isError
-                ? 'Não foi possível consultar'
-                : nomesServicosContratados(data, servicosQ.data).join(' · ') || 'Nenhum além do plano'
+            clienteAsaas && `${data.assinatura?.asaas_status ?? ''}`.trim()
+              ? `${rotuloStatusAssinatura(data.assinatura)} · ASAAS ${data.assinatura?.asaas_status}`
+              : rotuloStatusAssinatura(data.assinatura)
           }
         />
-        <Meta label="Status" value={rotuloStatusAssinatura(data.assinatura)} />
+        {clienteAsaas ? <Meta label="Pagamento" value={rotuloBillingType(data.assinatura?.billing_type)} /> : null}
         {dataVencimento ? <Meta label="Venceu em" value={formatYmdBR(dataVencimento)} /> : null}
         <Meta label="Início" value={formatDateBR(data.assinatura?.data_inicio)} />
         {dataCancelamento ? <Meta label="Cancelado em" value={formatYmdBR(dataCancelamento)} /> : null}
+        <Meta
+          label="Próxima cobrança"
+          value={formatDateBR(data.assinatura?.data_proxima_cobranca ?? data.assinatura?.periodo_fim)}
+        />
         <Meta label="Dias como assinante" value={String(data.dias_como_assinante ?? 0)} />
         <Meta
-          label={cobranca?.tem_cupom ? 'Valor sem desconto' : 'Valor atual'}
+          label={
+            !clienteAsaas && cobranca?.tem_cupom
+              ? 'Valor sem desconto'
+              : `${data.assinatura?.ciclo_cobranca ?? ''}` === 'anual_parcelado'
+                ? 'Valor atual (equiv. mensal)'
+                : 'Valor atual'
+          }
           value={
-            cobranca?.tem_cupom && cobranca.valor_bruto_centavos != null
+            !clienteAsaas && cobranca?.tem_cupom && cobranca.valor_bruto_centavos != null
               ? formatBRLFromCentavos(cobranca.valor_bruto_centavos)
-              : cobranca?.valor_liquido_centavos != null
+              : !clienteAsaas && cobranca?.valor_liquido_centavos != null
                 ? formatBRLFromCentavos(cobranca.valor_liquido_centavos)
                 : data.assinatura?.valor_mensal_atual != null
-                  ? formatBRLFromReais(data.assinatura.valor_mensal_atual)
+                  ? `${formatBRLFromReais(data.assinatura.valor_mensal_atual)} / mês`
                   : data.assinatura?.valor_atual_centavos != null
                     ? formatBRLFromCentavos(data.assinatura.valor_atual_centavos)
                     : formatBRLFromCentavos(data.plano?.valor_mensal_centavos)
           }
         />
-        {cobrancaQ.isLoading ? (
+        <Meta label="Pacote" value={rotuloPacoteAssinatura(data.assinatura)} />
+        {clienteAsaas ? (
+          <>
+            <Meta label="Promoção" value={rotuloPromocaoResumo(data.assinatura)} />
+            {temPromocaoAssinatura(data.assinatura) ? (
+              <>
+                {`${data.assinatura?.promocao_descricao ?? ''}`.trim() ? (
+                  <Meta label="Descrição da promoção" value={`${data.assinatura?.promocao_descricao}`} />
+                ) : null}
+                {data.assinatura?.promocao_cobranca_em ? (
+                  <Meta label="Cobrança da promoção em" value={formatYmdBR(data.assinatura.promocao_cobranca_em)} />
+                ) : null}
+                {data.assinatura?.promocao_total_ano != null ? (
+                  <Meta label="Total do ano" value={formatBRLFromReais(Number(data.assinatura.promocao_total_ano))} />
+                ) : null}
+                {data.assinatura?.promocao_parcelas != null ? (
+                  <Meta label="Parcelas" value={String(data.assinatura.promocao_parcelas)} />
+                ) : null}
+                {`${data.assinatura?.promocao_cobranca_status ?? ''}`.trim() ? (
+                  <Meta label="Status da promoção" value={`${data.assinatura?.promocao_cobranca_status}`} />
+                ) : null}
+              </>
+            ) : null}
+            <Meta label="Cupom" value={rotuloCupomAssinatura(data.cupom)} />
+            {data.cupom ? (
+              <>
+                <Meta
+                  label="Duração do cupom"
+                  value={
+                    data.cupom.duration === 'repeating'
+                      ? `repeating · ${data.cupom.duration_in_months ?? '—'} meses`
+                      : `${data.cupom.duration ?? '—'}`
+                  }
+                />
+                <Meta label="Ciclos aplicados" value={String(data.cupom.ciclos_aplicados ?? 0)} />
+                <Meta label="Cupom ativo" value={data.cupom.ativo === false ? 'Não' : 'Sim'} />
+              </>
+            ) : null}
+            <Meta label="Assinatura ASAAS" value={`${data.assinatura?.asaas_subscription_id ?? ''}`.trim() || '—'} />
+            <Meta label="Parcelamento ASAAS" value={`${data.assinatura?.asaas_installment_id ?? ''}`.trim() || '—'} />
+          </>
+        ) : cobrancaQ.isLoading ? (
           <Meta label="Cupom de desconto" value="Consultando Stripe…" />
         ) : cobrancaQ.error ? (
           <Meta label="Cupom de desconto" value="Não foi possível consultar" />
         ) : cobranca?.tem_cupom ? (
           <>
-            <Meta
-              label="Cupom de desconto"
-              value={cobranca.cupom_codigo ?? cobranca.cupom_nome ?? 'Sim'}
-            />
+            <Meta label="Cupom de desconto" value={cobranca.cupom_codigo ?? cobranca.cupom_nome ?? 'Sim'} />
             {rotuloDescontoCupom ? <Meta label="Desconto do cupom" value={rotuloDescontoCupom} /> : null}
             {cobranca.desconto_centavos > 0 ? (
               <Meta label="Desconto mensal" value={formatBRLFromCentavos(cobranca.desconto_centavos)} />
@@ -614,81 +689,85 @@ export default function ClientDetailScreen() {
           label="Adicionais"
           value={`usuários ${data.assinatura?.usuarios_adicionais ?? data.assinatura?.usuarios_extras ?? 0} · empresas ${data.assinatura?.empresas_adicionais ?? data.assinatura?.empresas_extras ?? 0}`}
         />
-        <Meta label="Stripe subscription" value={data.assinatura?.stripe_subscription_id ?? '—'} />
-        {data.assinatura?.stripe_subscription_id ? (
-          <View style={{ gap: 8, marginTop: 8 }}>
-            <PrimaryButton
-              label={gerarCobrancaPdfMutation.isPending ? 'Gerando PDF…' : 'Gerar boleto / PDF'}
-              loading={gerarCobrancaPdfMutation.isPending}
-              disabled={gerarCobrancaPdfMutation.isPending}
-              onPress={() => gerarCobrancaPdfMutation.mutate()}
-            />
-            {cobrancaPdfErro ? (
-              <Text style={{ color: theme.error, fontSize: 13 }}>{cobrancaPdfErro}</Text>
-            ) : null}
-            {cobrancaPdf ? (
-              <View
-                style={{
-                  gap: 6,
-                  padding: 12,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  borderColor: theme.borderInput,
-                  backgroundColor: theme.surfaceMuted,
-                }}
-              >
-                <Text style={{ color: theme.text, fontWeight: '700' }}>Cobrança gerada</Text>
-                <Meta label="Fatura Stripe" value={cobrancaPdf.invoice_id} />
-                <Meta label="Status" value={cobrancaPdf.status} />
-                <Meta label="Valor" value={formatBRLFromCentavos(cobrancaPdf.valor_centavos)} />
-                <Meta
-                  label="Vencimento"
-                  value={cobrancaPdf.vencimento ? formatDateBR(cobrancaPdf.vencimento) : '—'}
+        {!clienteAsaas ? (
+          <>
+            <Meta label="Stripe subscription" value={data.assinatura?.stripe_subscription_id ?? '—'} />
+            {data.assinatura?.stripe_subscription_id ? (
+              <View style={{ gap: 8, marginTop: 8 }}>
+                <PrimaryButton
+                  label={gerarCobrancaPdfMutation.isPending ? 'Gerando PDF…' : 'Gerar boleto / PDF'}
+                  loading={gerarCobrancaPdfMutation.isPending}
+                  disabled={gerarCobrancaPdfMutation.isPending}
+                  onPress={() => gerarCobrancaPdfMutation.mutate()}
                 />
-                {cobrancaPdf.boleto_linha_digitavel ? (
-                  <Meta label="Linha digitável" value={cobrancaPdf.boleto_linha_digitavel} />
-                ) : null}
-                {cobrancaPdf.aviso ? (
-                  <Text style={{ color: theme.warning, fontSize: 12 }}>{cobrancaPdf.aviso}</Text>
-                ) : null}
-                <SecondaryButton label="Baixar PDF" onPress={() => void abrirPdf()} />
-                <SecondaryButton
-                  label="Copiar link do PDF"
-                  onPress={() => void copiarCampo('Link do PDF', cobrancaPdf.pdf_url)}
-                />
-                {cobrancaPdf.boleto_linha_digitavel ? (
-                  <SecondaryButton
-                    label="Copiar linha digitável"
-                    onPress={() =>
-                      void copiarCampo('Linha digitável', cobrancaPdf.boleto_linha_digitavel)
-                    }
-                  />
-                ) : null}
-                {cobrancaPdf.hosted_invoice_url ? (
-                  <SecondaryButton
-                    label="Abrir link de pagamento"
-                    onPress={() => void Linking.openURL(cobrancaPdf.hosted_invoice_url!)}
-                  />
-                ) : null}
-                {copiaHint ? (
-                  <Text selectable style={{ color: theme.textMuted, fontSize: 12 }}>
-                    {copiaHint}
-                  </Text>
+                {cobrancaPdfErro ? <Text style={{ color: theme.error, fontSize: 13 }}>{cobrancaPdfErro}</Text> : null}
+                {cobrancaPdf ? (
+                  <View
+                    style={{
+                      gap: 6,
+                      padding: 12,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: theme.borderInput,
+                      backgroundColor: theme.surfaceMuted,
+                    }}
+                  >
+                    <Text style={{ color: theme.text, fontWeight: '700' }}>Cobrança gerada</Text>
+                    <Meta label="Fatura Stripe" value={cobrancaPdf.invoice_id} />
+                    <Meta label="Status" value={cobrancaPdf.status} />
+                    <Meta label="Valor" value={formatBRLFromCentavos(cobrancaPdf.valor_centavos)} />
+                    <Meta
+                      label="Vencimento"
+                      value={cobrancaPdf.vencimento ? formatDateBR(cobrancaPdf.vencimento) : '—'}
+                    />
+                    {cobrancaPdf.boleto_linha_digitavel ? (
+                      <Meta label="Linha digitável" value={cobrancaPdf.boleto_linha_digitavel} />
+                    ) : null}
+                    {cobrancaPdf.aviso ? (
+                      <Text style={{ color: theme.warning, fontSize: 12 }}>{cobrancaPdf.aviso}</Text>
+                    ) : null}
+                    <SecondaryButton label="Baixar PDF" onPress={() => void abrirPdf()} />
+                    <SecondaryButton
+                      label="Copiar link do PDF"
+                      onPress={() => void copiarCampo('Link do PDF', cobrancaPdf.pdf_url)}
+                    />
+                    {cobrancaPdf.boleto_linha_digitavel ? (
+                      <SecondaryButton
+                        label="Copiar linha digitável"
+                        onPress={() => void copiarCampo('Linha digitável', cobrancaPdf.boleto_linha_digitavel)}
+                      />
+                    ) : null}
+                    {cobrancaPdf.hosted_invoice_url ? (
+                      <SecondaryButton
+                        label="Abrir link de pagamento"
+                        onPress={() => void Linking.openURL(cobrancaPdf.hosted_invoice_url!)}
+                      />
+                    ) : null}
+                    {copiaHint ? (
+                      <Text selectable style={{ color: theme.textMuted, fontSize: 12 }}>
+                        {copiaHint}
+                      </Text>
+                    ) : null}
+                  </View>
                 ) : null}
               </View>
+            ) : (
+              <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 8 }}>
+                Sem assinatura Stripe — não é possível gerar boleto/PDF.
+              </Text>
+            )}
+            <SecondaryButton label="Carregar status detalhado (Stripe)" onPress={loadStripe} style={{ marginTop: 8 }} />
+            {stripeJson ? (
+              <Text selectable style={styles.mono}>
+                {stripeJson}
+              </Text>
             ) : null}
-          </View>
+          </>
         ) : (
           <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 8 }}>
-            Sem assinatura Stripe — não é possível gerar boleto/PDF.
+            Cliente ASAAS — cobrança e boleto ficam no Confec/Asaas, não no Stripe.
           </Text>
         )}
-        <SecondaryButton label="Carregar status detalhado (Stripe)" onPress={loadStripe} style={{ marginTop: 8 }} />
-        {stripeJson ? (
-          <Text selectable style={styles.mono}>
-            {stripeJson}
-          </Text>
-        ) : null}
       </ScreenCard>
 
       <ScreenCard>
@@ -702,9 +781,20 @@ export default function ClientDetailScreen() {
           <Text style={{ color: theme.textMuted }}>Sem meses em aberto detectados no histórico local.</Text>
         )}
         {(data.historico_faturas ?? []).slice(0, 12).map((f) => (
-          <Text key={f.id} style={{ color: theme.textMuted, fontSize: 13 }}>
-            {formatDateBR(f.periodo_inicio ?? f.created_at)} · {f.status} · {formatBRLFromCentavos(f.valor_centavos)}
-          </Text>
+          <View key={f.id} style={{ gap: 2, marginTop: 6 }}>
+            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+              {formatDateBR(f.periodo_inicio ?? f.created_at)} · {f.status} · {formatBRLFromCentavos(f.valor_centavos)}
+              {f.provedor ? ` · ${f.provedor}` : ''}
+            </Text>
+            {f.asaas_payment_id ? (
+              <Text style={{ color: theme.textMuted, fontSize: 12 }}>ASAAS payment: {f.asaas_payment_id}</Text>
+            ) : null}
+            {f.pdf_url ? (
+              <Pressable onPress={() => void Linking.openURL(`${f.pdf_url}`)}>
+                <Text style={{ color: theme.cadastroAction, fontWeight: '700', fontSize: 12 }}>Abrir PDF</Text>
+              </Pressable>
+            ) : null}
+          </View>
         ))}
       </ScreenCard>
 

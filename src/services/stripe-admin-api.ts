@@ -318,6 +318,8 @@ export type UpdatePromocaoPlanosPayload = {
   promocao_nome: string;
   promocao_desconto_percent: number;
   promocao_meses_ate_cobranca: number;
+  promocao_cobranca_mes: number | null;
+  promocao_cobranca_ano: number | null;
   promocao_imagem_url: string | null;
   updated_by_admin?: string | null;
 };

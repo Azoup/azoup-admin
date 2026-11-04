@@ -13,6 +13,7 @@ import type {
   PlanoAssinaturaRow,
   PromocaoPlanosPayload,
 } from '@/src/types/azoup';
+import { dataHojeBrasil } from '@/src/utils/format';
 
 export function montarLinhaAdminCoupon(input: InserirCupomAdminInput): Omit<AdminCouponRow, 'id' | 'created_at' | 'updated_at'> {
   const amountReaisInformado = input.amount_off_reais != null ? Number(input.amount_off_reais) : null;
@@ -81,6 +82,8 @@ function normalizarBillingSettings(row: AdminBillingSettingsRow): AdminBillingSe
     promocao_nome: `${row.promocao_nome ?? ''}`.trim(),
     promocao_desconto_percent: numeroOuNulo(row.promocao_desconto_percent) ?? 0,
     promocao_meses_ate_cobranca: numeroOuNulo(row.promocao_meses_ate_cobranca) ?? 0,
+    promocao_cobranca_mes: numeroOuNulo(row.promocao_cobranca_mes),
+    promocao_cobranca_ano: numeroOuNulo(row.promocao_cobranca_ano),
     promocao_imagem_url: `${row.promocao_imagem_url ?? ''}`.trim() || null,
     updated_by_admin: `${row.updated_by_admin ?? ''}`.trim() || null,
   };
@@ -133,6 +136,33 @@ export function parseMesesAteCobranca(raw: string): number {
   return n;
 }
 
+/** Mês/ano juntos ou ambos vazios. Não pode ser anterior ao mês atual (America/Sao_Paulo). */
+export function parsePromocaoCobrancaMesAno(
+  mesRaw: string,
+  anoRaw: string,
+  hojeYmd = dataHojeBrasil(),
+): { mes: number | null; ano: number | null } {
+  const mesTxt = mesRaw.trim();
+  const anoTxt = anoRaw.trim();
+  if (!mesTxt && !anoTxt) return { mes: null, ano: null };
+  if (!mesTxt || !anoTxt) {
+    throw new Error('Preencha mês e ano juntos, ou deixe os dois vazios para cobrar na hora.');
+  }
+  if (!/^\d+$/.test(mesTxt) || !/^\d+$/.test(anoTxt)) {
+    throw new Error('Mês e ano precisam ser números.');
+  }
+  const mes = Number(mesTxt);
+  const ano = Number(anoTxt);
+  if (!Number.isInteger(mes) || mes < 1 || mes > 12) throw new Error('O mês deve ser de 1 a 12.');
+  if (!Number.isInteger(ano) || ano < 2000 || ano > 2100) throw new Error('O ano deve ser entre 2000 e 2100.');
+  const hojeMes = Number(hojeYmd.slice(5, 7));
+  const hojeAno = Number(hojeYmd.slice(0, 4));
+  if (ano < hojeAno || (ano === hojeAno && mes < hojeMes)) {
+    throw new Error('O mês/ano de cobrança não pode ser anterior ao mês atual.');
+  }
+  return { mes, ano };
+}
+
 export function parsePromocaoImagemUrl(raw: string): string | null {
   const texto = raw.trim();
   if (!texto) return null;
@@ -146,7 +176,8 @@ export function montarPromocaoPlanos(input: {
   fim: string;
   nome: string;
   desconto: string;
-  meses: string;
+  cobrancaMes: string;
+  cobrancaAno: string;
   imagemUrl: string;
 }): PromocaoPlanosPayload {
   const promocao_inicio = parseDataPromocao(input.inicio, 'Data de início');
@@ -156,13 +187,16 @@ export function montarPromocaoPlanos(input: {
   }
   const promocao_nome = input.nome.trim();
   if (input.ativa && !promocao_nome) throw new Error('Informe o nome da promoção.');
+  const { mes, ano } = parsePromocaoCobrancaMesAno(input.cobrancaMes, input.cobrancaAno);
   return {
     promocao_ativa: input.ativa,
     promocao_inicio,
     promocao_fim,
     promocao_nome,
     promocao_desconto_percent: parseDescontoPlanoAnualPercent(input.desconto),
-    promocao_meses_ate_cobranca: parseMesesAteCobranca(input.meses),
+    promocao_meses_ate_cobranca: 0,
+    promocao_cobranca_mes: mes,
+    promocao_cobranca_ano: ano,
     promocao_imagem_url: parsePromocaoImagemUrl(input.imagemUrl),
   };
 }

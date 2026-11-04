@@ -14,6 +14,7 @@ import type {
   AdminClienteCongelamentoHistoricoRow,
   AdminClienteCongelamentoRow,
   AssinaturaClienteRow,
+  AssinaturaCupomRow,
   AssinaturaLimitesOverrideRow,
   ClienteAzoupAdminView,
   ClienteAzoupRow,
@@ -69,6 +70,52 @@ function sortHistorico(rows: HistoricoFaturaRow[]): HistoricoFaturaRow[] {
   });
 }
 
+/** Cupom ativo mais recente por cliente (Asaas). */
+function pickLatestCupom(rows: AssinaturaCupomRow[]): AssinaturaCupomRow | null {
+  if (!rows.length) return null;
+  return (
+    [...rows].sort((a, b) => {
+      const aa = a.ativo === false ? 0 : 1;
+      const ba = b.ativo === false ? 0 : 1;
+      if (ba !== aa) return ba - aa;
+      return `${b.criado_em ?? ''}`.localeCompare(`${a.criado_em ?? ''}`);
+    })[0] ?? null
+  );
+}
+
+async function carregarCuponsPorClientes(ids: string[]): Promise<Map<string, AssinaturaCupomRow>> {
+  const out = new Map<string, AssinaturaCupomRow>();
+  if (!ids.length) return out;
+  const porCliente = new Map<string, AssinaturaCupomRow[]>();
+  const CHUNK = 200;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from('assinatura_cupons')
+      .select(
+        'id,cliente_id,admin_coupon_id,code,discount_type,discount_value,duration,duration_in_months,ciclos_aplicados,ativo,criado_em',
+      )
+      .in('cliente_id', chunk)
+      .limit(5000);
+    if (error) {
+      if (/assinatura_cupons|schema cache|does not exist/i.test(error.message)) return out;
+      throw new Error(error.message);
+    }
+    for (const row of (data ?? []) as AssinaturaCupomRow[]) {
+      const cid = `${row.cliente_id ?? ''}`.trim();
+      if (!cid) continue;
+      const arr = porCliente.get(cid) ?? [];
+      arr.push(row);
+      porCliente.set(cid, arr);
+    }
+  }
+  for (const [cid, rows] of porCliente) {
+    const cupom = pickLatestCupom(rows);
+    if (cupom) out.set(cid, cupom);
+  }
+  return out;
+}
+
 export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
   const { data: clientes, error } = await supabase
     .from('clientes_azoup')
@@ -86,6 +133,7 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
     { data: todosOverrides, error: eOv },
     { data: todasFaturas, error: eFat },
     { data: empresasMatriz, error: eEmp },
+    cuponsPorCliente,
   ] = await Promise.all([
     supabase.from('assinaturas_clientes').select('*').in('cliente_id', ids).limit(10000),
     supabase.from('assinatura_limites_override').select('*').in('cliente_id', ids).limit(10000),
@@ -95,6 +143,13 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
       .select('id,cliente_id,razao_social,nome_fantasia,cnpj,empresa_matriz,ativo,created_at')
       .in('cliente_id', ids)
       .eq('empresa_matriz', true),
+    carregarCuponsPorClientes(ids).catch((e) => {
+      console.warn(
+        '[assinatura_cupons] Leitura ignorada na listagem:',
+        e instanceof Error ? e.message : e,
+      );
+      return new Map<string, AssinaturaCupomRow>();
+    }),
   ]);
 
   if (eAss) throw new Error(eAss.message);
@@ -198,6 +253,7 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
       plano,
       limites_override,
       historico_faturas,
+      cupom: cuponsPorCliente.get(c.id) ?? null,
       dias_como_assinante,
       meses_em_aberto: [...mesesAbertos].sort(),
       cobrancas_falhas,
@@ -345,7 +401,7 @@ export async function montarVisaoCliente(clienteId: string, base?: ClienteAzoupR
     cliente = data as ClienteAzoupRow;
   }
 
-  const [assinatura, limites_override, historico_faturas, metricas_uso, congelamento, congelamento_historico] =
+  const [assinatura, limites_override, historico_faturas, metricas_uso, congelamento, congelamento_historico, cuponsMap] =
     await Promise.all([
       buscarAssinaturaRecente(clienteId),
       buscarOverride(clienteId),
@@ -364,6 +420,10 @@ export async function montarVisaoCliente(clienteId: string, base?: ClienteAzoupR
           e instanceof Error ? e.message : e,
         );
         return [] as AdminClienteCongelamentoHistoricoRow[];
+      }),
+      carregarCuponsPorClientes([clienteId]).catch((e) => {
+        console.warn('[assinatura_cupons] Leitura ignorada no detalhe:', e instanceof Error ? e.message : e);
+        return new Map<string, AssinaturaCupomRow>();
       }),
     ]);
   const plano = await buscarPlano(assinatura?.plano_id);
@@ -387,6 +447,7 @@ export async function montarVisaoCliente(clienteId: string, base?: ClienteAzoupR
     plano,
     limites_override,
     historico_faturas,
+    cupom: cuponsMap.get(clienteId) ?? null,
     dias_como_assinante,
     meses_em_aberto: [...mesesAbertos].sort(),
     cobrancas_falhas,

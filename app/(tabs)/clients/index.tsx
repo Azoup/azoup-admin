@@ -31,6 +31,12 @@ import {
   isAssinaturaTrialExpirado,
   rotuloStatusAssinatura,
 } from '@/src/utils/assinatura-status';
+import {
+  rotuloCicloCobranca,
+  rotuloCupomAssinatura,
+  rotuloPromocaoResumo,
+  rotuloProvedor,
+} from '@/src/utils/assinatura-asaas';
 import { resolveClienteWhatsAppUrl } from '@/src/utils/whatsapp';
 import { clientePrecisaChamar } from '@/src/services/repos/congelamento-repo';
 
@@ -150,6 +156,9 @@ export default function ClientsListScreen() {
           const dataCancelamento = dataCancelamentoAssinatura(item.assinatura);
           const dataVencimento = dataVencimentoInadimplencia(item.assinatura);
           const servicos = nomesServicosContratados(item, servicosQ.data);
+          const provedor = rotuloProvedor(item);
+          const ciclo = rotuloCicloCobranca(item.assinatura?.ciclo_cobranca);
+          const asaasStatus = `${item.assinatura?.asaas_status ?? ''}`.trim();
 
           return (
             <View style={{ marginHorizontal: 12, marginVertical: 6 }}>
@@ -158,7 +167,26 @@ export default function ClientsListScreen() {
                 <Link href={`/clients/${item.id}`} asChild>
                   <Pressable style={styles.rowMain}>
                     <View style={{ flex: 1, gap: 4 }}>
-                      <Text style={[styles.rowTitle, { color: theme.headerText }]}>{nome}</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                        <Text style={[styles.rowTitle, { color: theme.headerText }]}>{nome}</Text>
+                        {provedor !== '—' ? (
+                          <Text
+                            style={{
+                              color: provedor === 'ASAAS' ? theme.cadastroAction : theme.textMuted,
+                              fontWeight: '800',
+                              fontSize: 11,
+                              borderWidth: 1,
+                              borderColor: provedor === 'ASAAS' ? theme.cadastroAction : theme.border,
+                              borderRadius: 6,
+                              paddingHorizontal: 6,
+                              paddingVertical: 2,
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {provedor}
+                          </Text>
+                        ) : null}
+                      </View>
                       <Text style={{ color: theme.textMuted, fontSize: 13 }}>
                         Matriz: {item.empresa_matriz_nome ?? '—'}
                         {item.empresa_matriz_cnpj ? ` · ${item.empresa_matriz_cnpj}` : ''}
@@ -170,12 +198,17 @@ export default function ClientsListScreen() {
                         Cliente desde: {formatDateBR(inicioSistema)}
                       </Text>
                       <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-                        Plano: {item.plano?.nome ?? '—'} · Valor atual:{' '}
+                        Plano: {item.plano?.nome ?? '—'}
+                        {ciclo !== '—' ? ` · Ciclo: ${ciclo}` : ''} · Valor atual:{' '}
                         {item.assinatura?.valor_mensal_atual != null
                           ? formatBRLFromReais(item.assinatura.valor_mensal_atual)
                           : item.assinatura?.valor_atual_centavos != null
                             ? formatBRLFromCentavos(item.assinatura.valor_atual_centavos)
                             : formatBRLFromCentavos(item.plano?.valor_mensal_centavos)}
+                        {`${item.assinatura?.ciclo_cobranca ?? ''}` === 'anual_parcelado' ? ' / mês equiv.' : ' / mês'}
+                      </Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+                        Cupom: {rotuloCupomAssinatura(item.cupom)} · Promoção: {rotuloPromocaoResumo(item.assinatura)}
                       </Text>
                       {servicos.length ? (
                         <Text style={{ color: theme.text, fontSize: 13, fontWeight: '700' }}>
@@ -189,7 +222,8 @@ export default function ClientsListScreen() {
                           fontWeight: trialExpirado ? '800' : '400',
                         }}
                       >
-                        Assinatura: {statusAssinatura} · Falhas: {item.cobrancas_falhas ?? 0}
+                        Assinatura: {statusAssinatura}
+                        {asaasStatus ? ` · ASAAS ${asaasStatus}` : ''} · Falhas: {item.cobrancas_falhas ?? 0}
                       </Text>
                       {dataVencimento ? (
                         <Text style={{ color: theme.warning, fontWeight: '700', fontSize: 13 }}>

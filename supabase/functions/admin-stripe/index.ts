@@ -1473,8 +1473,33 @@ serve(async (req) => {
       if (!Number.isFinite(bruto) || bruto < 0 || bruto > 100) {
         throw new Error('O desconto deve ser de 0 a 100.');
       }
-      const meses = Number(p.promocao_meses_ate_cobranca);
-      if (!Number.isInteger(meses) || meses < 0 || meses > 12) {
+      const mesRaw = p.promocao_cobranca_mes;
+      const anoRaw = p.promocao_cobranca_ano;
+      const mesVazio = mesRaw == null || `${mesRaw}`.trim() === '';
+      const anoVazio = anoRaw == null || `${anoRaw}`.trim() === '';
+      let cobrancaMes: number | null = null;
+      let cobrancaAno: number | null = null;
+      if (!mesVazio || !anoVazio) {
+        if (mesVazio || anoVazio) {
+          throw new Error('Preencha mês e ano juntos, ou deixe os dois vazios para cobrar na hora.');
+        }
+        cobrancaMes = Number(mesRaw);
+        cobrancaAno = Number(anoRaw);
+        if (!Number.isInteger(cobrancaMes) || cobrancaMes < 1 || cobrancaMes > 12) {
+          throw new Error('O mês deve ser de 1 a 12.');
+        }
+        if (!Number.isInteger(cobrancaAno) || cobrancaAno < 2000 || cobrancaAno > 2100) {
+          throw new Error('O ano deve ser entre 2000 e 2100.');
+        }
+        const hojeSp = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+        const hojeMes = Number(hojeSp.slice(5, 7));
+        const hojeAno = Number(hojeSp.slice(0, 4));
+        if (cobrancaAno < hojeAno || (cobrancaAno === hojeAno && cobrancaMes < hojeMes)) {
+          throw new Error('O mês/ano de cobrança não pode ser anterior ao mês atual.');
+        }
+      }
+      const mesesLegado = cobrancaMes != null ? 0 : Number(p.promocao_meses_ate_cobranca ?? 0);
+      if (!Number.isInteger(mesesLegado) || mesesLegado < 0 || mesesLegado > 12) {
         throw new Error('Os meses grátis devem ser um número inteiro de 0 a 12.');
       }
       const ymd = (value: unknown, campo: string): string | null => {
@@ -1499,7 +1524,9 @@ serve(async (req) => {
           promocao_fim: fim,
           promocao_nome: nome,
           promocao_desconto_percent: Math.round(bruto * 100) / 100,
-          promocao_meses_ate_cobranca: meses,
+          promocao_meses_ate_cobranca: mesesLegado,
+          promocao_cobranca_mes: cobrancaMes,
+          promocao_cobranca_ano: cobrancaAno,
           promocao_imagem_url: imagem || null,
           updated_by_admin: adminEmail,
         } as never)
@@ -1508,7 +1535,9 @@ serve(async (req) => {
         .maybeSingle();
       if (updErr) {
         if (/promocao_/i.test(updErr.message)) {
-          throw new Error('Colunas da promoção ausentes. Rode migration_asaas_promocao_planos.sql no Supabase.');
+          throw new Error(
+            'Colunas da promoção ausentes. Rode migration_asaas_promocao_planos.sql e migration_asaas_promocao_inicio_cobranca.sql no Supabase.',
+          );
         }
         throw updErr;
       }

@@ -1,5 +1,6 @@
 import type { ClienteAzoupAdminView } from '@/src/types/azoup';
 import { clientePrecisaChamar } from '@/src/services/repos/congelamento-repo';
+import { normalizarProvedor, type ProvedorPagamentoFiltro } from '@/src/utils/assinatura-asaas';
 import { classificarStatusAssinatura } from '@/src/utils/assinatura-status';
 import { dataCalendarioBrasil, dataHojeBrasil, somarDiasYmd } from '@/src/utils/format';
 import { digitsOnlyPhone } from '@/src/utils/whatsapp';
@@ -23,9 +24,12 @@ export type PeriodoFiltroPreset =
   | 'mes_passado'
   | 'personalizado';
 
+export type { ProvedorPagamentoFiltro };
+
 export type ClientesFiltroState = {
   busca: string;
   status: ClienteStatusFiltro;
+  provedor: ProvedorPagamentoFiltro;
   periodoPreset: PeriodoFiltroPreset;
   dataInicio: string | null;
   dataFim: string | null;
@@ -34,6 +38,7 @@ export type ClientesFiltroState = {
 export const CLIENTES_FILTRO_INICIAL: ClientesFiltroState = {
   busca: '',
   status: 'todos',
+  provedor: 'todos',
   periodoPreset: 'todos',
   dataInicio: null,
   dataFim: null,
@@ -154,6 +159,11 @@ function matchPeriodo(item: ClienteAzoupAdminView, intervalo: IntervaloYmd | nul
   return cadastro >= intervalo.inicio && cadastro <= intervalo.fim;
 }
 
+function matchProvedor(item: ClienteAzoupAdminView, provedor: ProvedorPagamentoFiltro): boolean {
+  if (provedor === 'todos') return true;
+  return normalizarProvedor(item.provedor_pagamento) === provedor;
+}
+
 export function filtrarClientes(
   items: ClienteAzoupAdminView[],
   filtro: ClientesFiltroState,
@@ -161,7 +171,11 @@ export function filtrarClientes(
   const intervalo = resolverIntervaloPeriodo(filtro);
 
   return items.filter(
-    (item) => matchBusca(item, filtro.busca) && matchStatus(item, filtro.status) && matchPeriodo(item, intervalo),
+    (item) =>
+      matchBusca(item, filtro.busca) &&
+      matchStatus(item, filtro.status) &&
+      matchProvedor(item, filtro.provedor ?? 'todos') &&
+      matchPeriodo(item, intervalo),
   );
 }
 
@@ -169,6 +183,7 @@ export function temFiltroAtivo(filtro: ClientesFiltroState): boolean {
   return (
     filtro.busca.trim().length > 0 ||
     filtro.status !== 'todos' ||
+    (filtro.provedor ?? 'todos') !== 'todos' ||
     filtro.periodoPreset !== 'todos' ||
     Boolean(filtro.dataInicio) ||
     Boolean(filtro.dataFim)

@@ -40,6 +40,9 @@ export interface ClienteAzoupRow {
   credito_extra?: number | null;
   credito_ia_mes_ref?: string | null;
   stripe_customer_id?: string | null;
+  /** `asaas` | `stripe` — definido no link de cadastro. */
+  provedor_pagamento?: string | null;
+  asaas_customer_id?: string | null;
   aceitou_termos?: boolean | null;
   aceitou_termos_em?: string | null;
   empresas_extra?: number | null;
@@ -152,6 +155,22 @@ export interface AssinaturaClienteRow {
   stripe_item_id_base?: string | null;
   stripe_item_id_usuario_adicional?: string | null;
   stripe_item_id_empresa_adicional?: string | null;
+  /** `mensal` | `anual_parcelado` */
+  ciclo_cobranca?: string | null;
+  billing_type?: string | null;
+  asaas_status?: string | null;
+  asaas_subscription_id?: string | null;
+  asaas_installment_id?: string | null;
+  asaas_subscription_id_extras?: string | null;
+  pdv_assentos_contratados?: number | null;
+  ecommerce_lojas_contratadas?: number | null;
+  conciliacao_contas_contratadas?: number | null;
+  promocao_descricao?: string | null;
+  promocao_meses_gratis?: number | null;
+  promocao_cobranca_em?: string | null;
+  promocao_total_ano?: number | null;
+  promocao_parcelas?: number | null;
+  promocao_cobranca_status?: string | null;
   /** Compat legado / nomes antigos */
   usuarios_extras?: number | null;
   empresas_extras?: number | null;
@@ -167,6 +186,9 @@ export interface HistoricoFaturaRow {
   cliente_id?: string | null;
   assinatura_id?: string | null;
   stripe_invoice_id?: string | null;
+  asaas_payment_id?: string | null;
+  provedor?: string | null;
+  pdf_url?: string | null;
   valor_centavos?: number | null;
   moeda?: string | null;
   status?: HistoricoFaturaStatus | null;
@@ -176,6 +198,21 @@ export interface HistoricoFaturaRow {
   data_pagamento?: string | null;
   tentativa_falha?: number | null;
   created_at?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AssinaturaCupomRow {
+  id: string;
+  cliente_id: string;
+  admin_coupon_id?: string | null;
+  code?: string | null;
+  discount_type?: 'percent' | 'amount' | string | null;
+  discount_value?: number | null;
+  duration?: 'once' | 'repeating' | 'forever' | string | null;
+  duration_in_months?: number | null;
+  ciclos_aplicados?: number | null;
+  ativo?: boolean | null;
+  criado_em?: string | null;
   [key: string]: unknown;
 }
 
@@ -211,6 +248,8 @@ export interface AdminBillingSettingsRow {
   promocao_nome?: string | null;
   promocao_desconto_percent?: number | null;
   promocao_meses_ate_cobranca?: number | null;
+  promocao_cobranca_mes?: number | null;
+  promocao_cobranca_ano?: number | null;
   promocao_imagem_url?: string | null;
   stripe_webhook_secret_rotacao?: string | null;
   metadata?: Record<string, unknown> | null;
@@ -226,6 +265,8 @@ export type PromocaoPlanosPayload = {
   promocao_nome: string;
   promocao_desconto_percent: number;
   promocao_meses_ate_cobranca: number;
+  promocao_cobranca_mes: number | null;
+  promocao_cobranca_ano: number | null;
   promocao_imagem_url: string | null;
 };
 
@@ -464,6 +505,8 @@ export interface ClienteAzoupAdminView extends ClienteAzoupRow {
   assinatura?: AssinaturaClienteRow | null;
   limites_override?: AssinaturaLimitesOverrideRow | null;
   historico_faturas?: HistoricoFaturaRow[];
+  /** Cupom Asaas ativo mais recente (`assinatura_cupons`). */
+  cupom?: AssinaturaCupomRow | null;
   dias_como_assinante?: number;
   meses_em_aberto?: string[];
   cobrancas_falhas?: number;
