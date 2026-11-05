@@ -334,6 +334,12 @@ async function substituirEtiquetas(cardId: string, labelIds: string[]): Promise<
   if (error) throw erroTabela(error.message);
 }
 
+/** Atualiza só as etiquetas do card (sem abrir edição completa). */
+export async function definirEtiquetasCardConfec(cardId: string, labelIds: string[]): Promise<void> {
+  const ids = [...new Set(labelIds.map((id) => `${id}`.trim()).filter(Boolean))];
+  await substituirEtiquetas(cardId, ids);
+}
+
 async function nomeClienteConfec(clienteId: string): Promise<string | null> {
   const { data, error } = await supabase.from('clientes_azoup').select('nome').eq('id', clienteId).maybeSingle();
   if (error) return null;

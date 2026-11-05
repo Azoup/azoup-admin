@@ -27,6 +27,7 @@ import {
   colunaDeConclusao,
   criarCardConfec,
   criarColunaConfec,
+  definirEtiquetasCardConfec,
   editarComentarioConfec,
   ehColunaConclusao,
   ehImagemAnexo,
@@ -953,11 +954,34 @@ export default function KanbanConfecScreen() {
                     </Pressable>
                   </View>
                 ) : null}
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {detalhe.etiquetas.map((etiqueta) => (
-                    <Text key={etiqueta.id} style={{ color: etiqueta.color, fontWeight: '800' }}>{etiqueta.name}</Text>
-                  ))}
-                </View>
+                <Text style={{ color: theme.headerText, fontWeight: '800' }}>Etiquetas</Text>
+                {(quadro?.etiquetas.length ?? 0) === 0 ? (
+                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>Nenhuma etiqueta cadastrada. Crie em “Etiquetas”.</Text>
+                ) : (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {(quadro?.etiquetas ?? []).map((etiqueta) => {
+                      const ativa = detalhe.etiquetas.some((item) => item.id === etiqueta.id);
+                      return (
+                        <Pressable
+                          key={etiqueta.id}
+                          onPress={() => {
+                            const proximas = ativa
+                              ? detalhe.etiquetas.filter((item) => item.id !== etiqueta.id).map((item) => item.id)
+                              : [...detalhe.etiquetas.map((item) => item.id), etiqueta.id];
+                            void definirEtiquetasCardConfec(detalhe.id, proximas)
+                              .then(() => qc.invalidateQueries({ queryKey: ['confec_kanban'] }))
+                              .catch((e) => setErro(e instanceof Error ? e.message : 'Erro ao salvar etiquetas'));
+                          }}
+                          style={[styles.chip, { borderColor: etiqueta.color, backgroundColor: ativa ? etiqueta.color : theme.surface }]}
+                        >
+                          <Text style={{ color: ativa ? '#1A1408' : etiqueta.color, fontWeight: '800', fontSize: 12 }}>
+                            {etiqueta.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
                 <Text style={{ color: theme.headerText, fontWeight: '800' }}>Anexos</Text>
                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>Cole uma imagem com Ctrl+V.</Text>
                 {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
