@@ -246,7 +246,9 @@ export interface AdminBillingSettingsRow {
   promocao_inicio?: string | null;
   promocao_fim?: string | null;
   promocao_nome?: string | null;
+  promocao_desconto_tipo?: 'percent' | 'amount' | string | null;
   promocao_desconto_percent?: number | null;
+  promocao_desconto_reais?: number | null;
   promocao_meses_ate_cobranca?: number | null;
   promocao_cobranca_mes?: number | null;
   promocao_cobranca_ano?: number | null;
@@ -263,7 +265,9 @@ export type PromocaoPlanosPayload = {
   promocao_inicio: string | null;
   promocao_fim: string | null;
   promocao_nome: string;
+  promocao_desconto_tipo: 'percent' | 'amount';
   promocao_desconto_percent: number;
+  promocao_desconto_reais: number;
   promocao_meses_ate_cobranca: number;
   promocao_cobranca_mes: number | null;
   promocao_cobranca_ano: number | null;

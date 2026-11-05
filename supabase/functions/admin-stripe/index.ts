@@ -1469,9 +1469,22 @@ serve(async (req) => {
       const ativa = p.promocao_ativa === true;
       const nome = `${p.promocao_nome ?? ''}`.trim();
       if (ativa && !nome) throw new Error('Informe o nome da promoção.');
-      const bruto = Number(p.promocao_desconto_percent);
-      if (!Number.isFinite(bruto) || bruto < 0 || bruto > 100) {
-        throw new Error('O desconto deve ser de 0 a 100.');
+      const tipoRaw = `${p.promocao_desconto_tipo ?? 'percent'}`.trim().toLowerCase();
+      const descontoTipo = tipoRaw === 'amount' ? 'amount' : 'percent';
+      let descontoPercent = 0;
+      let descontoReais = 0;
+      if (descontoTipo === 'percent') {
+        const bruto = Number(p.promocao_desconto_percent);
+        if (!Number.isFinite(bruto) || bruto < 0 || bruto > 100) {
+          throw new Error('O desconto percentual deve ser de 0 a 100.');
+        }
+        descontoPercent = Math.round(bruto * 100) / 100;
+      } else {
+        const bruto = Number(p.promocao_desconto_reais);
+        if (!Number.isFinite(bruto) || bruto < 0) {
+          throw new Error('Informe um valor de desconto em reais válido (≥ 0).');
+        }
+        descontoReais = Math.round(bruto * 100) / 100;
       }
       const mesRaw = p.promocao_cobranca_mes;
       const anoRaw = p.promocao_cobranca_ano;
@@ -1523,7 +1536,9 @@ serve(async (req) => {
           promocao_inicio: inicio,
           promocao_fim: fim,
           promocao_nome: nome,
-          promocao_desconto_percent: Math.round(bruto * 100) / 100,
+          promocao_desconto_tipo: descontoTipo,
+          promocao_desconto_percent: descontoPercent,
+          promocao_desconto_reais: descontoReais,
           promocao_meses_ate_cobranca: mesesLegado,
           promocao_cobranca_mes: cobrancaMes,
           promocao_cobranca_ano: cobrancaAno,
@@ -1536,7 +1551,7 @@ serve(async (req) => {
       if (updErr) {
         if (/promocao_/i.test(updErr.message)) {
           throw new Error(
-            'Colunas da promoção ausentes. Rode migration_asaas_promocao_planos.sql e migration_asaas_promocao_inicio_cobranca.sql no Supabase.',
+            'Colunas da promoção ausentes. Rode migration_asaas_promocao_planos.sql, migration_asaas_promocao_inicio_cobranca.sql e migration_asaas_promocao_desconto_reais.sql no Supabase.',
           );
         }
         throw updErr;

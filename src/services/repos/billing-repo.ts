@@ -13,7 +13,7 @@ import type {
   PlanoAssinaturaRow,
   PromocaoPlanosPayload,
 } from '@/src/types/azoup';
-import { dataHojeBrasil } from '@/src/utils/format';
+import { dataHojeBrasil, parseReaisBR } from '@/src/utils/format';
 
 export function montarLinhaAdminCoupon(input: InserirCupomAdminInput): Omit<AdminCouponRow, 'id' | 'created_at' | 'updated_at'> {
   const amountReaisInformado = input.amount_off_reais != null ? Number(input.amount_off_reais) : null;
@@ -80,7 +80,9 @@ function normalizarBillingSettings(row: AdminBillingSettingsRow): AdminBillingSe
     promocao_inicio: dataYmd(row.promocao_inicio),
     promocao_fim: dataYmd(row.promocao_fim),
     promocao_nome: `${row.promocao_nome ?? ''}`.trim(),
+    promocao_desconto_tipo: `${row.promocao_desconto_tipo ?? 'percent'}`.trim().toLowerCase() === 'amount' ? 'amount' : 'percent',
     promocao_desconto_percent: numeroOuNulo(row.promocao_desconto_percent) ?? 0,
+    promocao_desconto_reais: numeroOuNulo(row.promocao_desconto_reais) ?? 0,
     promocao_meses_ate_cobranca: numeroOuNulo(row.promocao_meses_ate_cobranca) ?? 0,
     promocao_cobranca_mes: numeroOuNulo(row.promocao_cobranca_mes),
     promocao_cobranca_ano: numeroOuNulo(row.promocao_cobranca_ano),
@@ -170,12 +172,28 @@ export function parsePromocaoImagemUrl(raw: string): string | null {
   return texto;
 }
 
+/** Valor fixo em reais (≥ 0). Aceita máscara BR. Vazio = 0. */
+export function parsePromocaoDescontoReais(raw: string): number {
+  const texto = raw.trim();
+  if (!texto) return 0;
+  const n = parseReaisBR(texto);
+  if (n == null) {
+    const limpo = texto.replace(/\s/g, '').replace(/\./g, '').replace(',', '.');
+    const zero = Number(limpo);
+    if (Number.isFinite(zero) && zero === 0) return 0;
+    throw new Error('Informe um valor de desconto em reais válido.');
+  }
+  return Math.round(n * 100) / 100;
+}
+
 export function montarPromocaoPlanos(input: {
   ativa: boolean;
   inicio: string;
   fim: string;
   nome: string;
-  desconto: string;
+  descontoTipo: 'percent' | 'amount';
+  descontoPercent: string;
+  descontoReais: string;
   cobrancaMes: string;
   cobrancaAno: string;
   imagemUrl: string;
@@ -188,12 +206,18 @@ export function montarPromocaoPlanos(input: {
   const promocao_nome = input.nome.trim();
   if (input.ativa && !promocao_nome) throw new Error('Informe o nome da promoção.');
   const { mes, ano } = parsePromocaoCobrancaMesAno(input.cobrancaMes, input.cobrancaAno);
+  const tipo = input.descontoTipo === 'amount' ? 'amount' : 'percent';
+  const percent =
+    tipo === 'percent' ? parseDescontoPlanoAnualPercent(input.descontoPercent.trim() ? input.descontoPercent : '0') : 0;
+  const reais = tipo === 'amount' ? parsePromocaoDescontoReais(input.descontoReais) : 0;
   return {
     promocao_ativa: input.ativa,
     promocao_inicio,
     promocao_fim,
     promocao_nome,
-    promocao_desconto_percent: parseDescontoPlanoAnualPercent(input.desconto),
+    promocao_desconto_tipo: tipo,
+    promocao_desconto_percent: percent,
+    promocao_desconto_reais: reais,
     promocao_meses_ate_cobranca: 0,
     promocao_cobranca_mes: mes,
     promocao_cobranca_ano: ano,

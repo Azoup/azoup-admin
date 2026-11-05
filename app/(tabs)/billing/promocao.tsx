@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 
+import { ChipSelect } from '@/components/ui/ChipSelect';
 import { FormCheckbox } from '@/components/ui/FormCheckbox';
 import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
@@ -21,13 +22,19 @@ import {
   montarPromocaoPlanos,
   obterBillingSettings,
   parseDescontoPlanoAnualPercent,
+  parsePromocaoDescontoReais,
 } from '@/src/services/repos/billing-repo';
 import { MESES_COBRANCA_LABELS } from '@/src/utils/assinatura-asaas';
-import { dataHojeBrasil, formatBRLFromReais, formatDateTimeBR } from '@/src/utils/format';
+import { dataHojeBrasil, formatBRLFromReais, formatDateTimeBR, mascaraReaisBR } from '@/src/utils/format';
 
 function formatarPercentual(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '0';
   return `${value}`.replace('.', ',');
+}
+
+function formatarReaisCampo(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value) || value <= 0) return '';
+  return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function parseMensalidadeExemplo(raw: string): number {
@@ -53,7 +60,9 @@ export default function PromocaoPlanosAnuaisScreen() {
   const [inicio, setInicio] = useState('');
   const [fim, setFim] = useState('');
   const [nome, setNome] = useState('');
+  const [descontoTipo, setDescontoTipo] = useState<'percent' | 'amount'>('percent');
   const [percent, setPercent] = useState('0');
+  const [descontoReais, setDescontoReais] = useState('');
   const [cobrancaMes, setCobrancaMes] = useState('');
   const [cobrancaAno, setCobrancaAno] = useState('');
   const [imagemUrl, setImagemUrl] = useState('');
@@ -79,7 +88,10 @@ export default function PromocaoPlanosAnuaisScreen() {
     setInicio(data.promocao_inicio ?? '');
     setFim(data.promocao_fim ?? '');
     setNome(data.promocao_nome ?? '');
+    const tipo = `${data.promocao_desconto_tipo ?? 'percent'}`.toLowerCase() === 'amount' ? 'amount' : 'percent';
+    setDescontoTipo(tipo);
     setPercent(formatarPercentual(data.promocao_desconto_percent));
+    setDescontoReais(formatarReaisCampo(data.promocao_desconto_reais));
     setCobrancaMes(data.promocao_cobranca_mes != null ? String(data.promocao_cobranca_mes) : '');
     setCobrancaAno(data.promocao_cobranca_ano != null ? String(data.promocao_cobranca_ano) : '');
     setImagemUrl(data.promocao_imagem_url ?? '');
@@ -87,15 +99,22 @@ export default function PromocaoPlanosAnuaisScreen() {
 
   const exemplo = useMemo(() => {
     try {
-      const pct = percent.trim() ? parseDescontoPlanoAnualPercent(percent) : 0;
       const mes = parseMensalidadeExemplo(mensalidade);
       const anoCheio = mes * 12;
-      const desconto = anoCheio * (pct / 100);
+      let pct = 0;
+      let desconto = 0;
+      if (descontoTipo === 'amount') {
+        desconto = Math.min(anoCheio, parsePromocaoDescontoReais(descontoReais));
+      } else {
+        pct = percent.trim() ? parseDescontoPlanoAnualPercent(percent) : 0;
+        desconto = anoCheio * (pct / 100);
+      }
       const total = Math.max(0, anoCheio - desconto);
       const mesNum = cobrancaMes ? Number(cobrancaMes) : null;
       const anoNum = cobrancaAno ? Number(cobrancaAno) : null;
       const rotuloMes = mesNum != null ? MESES_COBRANCA_LABELS[String(mesNum)] : null;
       return {
+        tipo: descontoTipo,
         pct,
         mes,
         anoCheio,
@@ -108,6 +127,7 @@ export default function PromocaoPlanosAnuaisScreen() {
       };
     } catch (e) {
       return {
+        tipo: descontoTipo,
         pct: 0,
         mes: 0,
         anoCheio: 0,
@@ -119,7 +139,7 @@ export default function PromocaoPlanosAnuaisScreen() {
         erro: e instanceof Error ? e.message : 'Valor inválido',
       };
     }
-  }, [percent, cobrancaMes, cobrancaAno, mensalidade]);
+  }, [descontoTipo, percent, descontoReais, cobrancaMes, cobrancaAno, mensalidade]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -128,7 +148,9 @@ export default function PromocaoPlanosAnuaisScreen() {
         inicio,
         fim,
         nome,
-        desconto: percent,
+        descontoTipo,
+        descontoPercent: percent,
+        descontoReais,
         cobrancaMes,
         cobrancaAno,
         imagemUrl,
@@ -145,7 +167,9 @@ export default function PromocaoPlanosAnuaisScreen() {
             promocao_inicio: data?.promocao_inicio ?? null,
             promocao_fim: data?.promocao_fim ?? null,
             promocao_nome: data?.promocao_nome ?? null,
+            promocao_desconto_tipo: data?.promocao_desconto_tipo ?? null,
             promocao_desconto_percent: data?.promocao_desconto_percent ?? null,
+            promocao_desconto_reais: data?.promocao_desconto_reais ?? null,
             promocao_meses_ate_cobranca: data?.promocao_meses_ate_cobranca ?? null,
             promocao_cobranca_mes: data?.promocao_cobranca_mes ?? null,
             promocao_cobranca_ano: data?.promocao_cobranca_ano ?? null,
@@ -197,13 +221,37 @@ export default function PromocaoPlanosAnuaisScreen() {
         <FormInput placeholder="Black Friday" value={nome} onChangeText={setNome} />
       </FormField>
 
-      <FormField
-        label="Desconto (%)"
-        required
-        helper="Vale só nos 12 meses pagos do pacote (plano e adicionais). Os meses grátis intermediários não entram nesse desconto. 100% é cortesia, sem cobrança no Asaas."
-      >
-        <FormInput keyboardType="decimal-pad" placeholder="20" value={percent} onChangeText={setPercent} />
+      <FormField label="Tipo de desconto" required helper="Vale só nos 12 meses pagos. Meses grátis intermediários não entram.">
+        <ChipSelect
+          options={['percent', 'amount'] as const}
+          value={descontoTipo}
+          onChange={setDescontoTipo}
+          labels={{ percent: 'Percentual', amount: 'Valor em reais' }}
+        />
       </FormField>
+
+      {descontoTipo === 'percent' ? (
+        <FormField
+          label="Desconto (%)"
+          required
+          helper="100% é cortesia, sem cobrança no Asaas."
+        >
+          <FormInput keyboardType="decimal-pad" placeholder="20" value={percent} onChangeText={setPercent} />
+        </FormField>
+      ) : (
+        <FormField
+          label="Desconto (R$)"
+          required
+          helper="Abate do ano cheio (mensalidade × 12). Máscara com duas casas. Ex.: 50000 → 500,00. Se o desconto for ≥ ano cheio, é cortesia."
+        >
+          <FormInput
+            keyboardType="number-pad"
+            placeholder="0,00"
+            value={descontoReais}
+            onChangeText={(v) => setDescontoReais(mascaraReaisBR(v))}
+          />
+        </FormField>
+      )}
 
       <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
         <View style={{ flex: 1, minWidth: 180 }}>
@@ -271,11 +319,13 @@ export default function PromocaoPlanosAnuaisScreen() {
               Pacote {formatBRLFromReais(exemplo.mes)}/mês × 12 = {formatBRLFromReais(exemplo.anoCheio)}.
             </Text>
             <Text style={{ color: theme.text, lineHeight: 22 }}>
-              {exemplo.pct === 0
+              {exemplo.desconto <= 0
                 ? 'Sem desconto nos 12 meses pagos.'
-                : exemplo.pct === 100
+                : exemplo.total === 0
                   ? 'Cortesia dos 12 meses pagos: o Confec não cobra no Asaas.'
-                  : `Desconto de ${formatarPercentual(exemplo.pct)}%: ${formatBRLFromReais(exemplo.desconto)}. Cartão: ${formatBRLFromReais(exemplo.total)}. Em 12 vezes: ${formatBRLFromReais(exemplo.parcela)} (se a conta Asaas estiver sem juros).`}
+                  : exemplo.tipo === 'amount'
+                    ? `Desconto de ${formatBRLFromReais(exemplo.desconto)}. Cartão: ${formatBRLFromReais(exemplo.total)}. Em 12 vezes: ${formatBRLFromReais(exemplo.parcela)} (se a conta Asaas estiver sem juros).`
+                    : `Desconto de ${formatarPercentual(exemplo.pct)}%: ${formatBRLFromReais(exemplo.desconto)}. Cartão: ${formatBRLFromReais(exemplo.total)}. Em 12 vezes: ${formatBRLFromReais(exemplo.parcela)} (se a conta Asaas estiver sem juros).`}
             </Text>
             <Text style={{ color: theme.text, lineHeight: 22 }}>
               {exemplo.rotuloMes && exemplo.anoNum
