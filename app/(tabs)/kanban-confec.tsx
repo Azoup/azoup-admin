@@ -233,6 +233,7 @@ function passaFiltro(
   etiquetas: string[],
   analista: string,
   desenvolvedor: string,
+  secao: string,
   periodo: Periodo,
   de: string,
   ate: string,
@@ -259,6 +260,7 @@ function passaFiltro(
   if (etiquetas.length && !card.etiquetas.some((item) => etiquetas.includes(item.id))) return false;
   if (analista && card.analista_email !== analista) return false;
   if (desenvolvedor && card.desenvolvedor_email !== desenvolvedor) return false;
+  if (secao && `${card.secao ?? ''}`.trim() !== secao) return false;
   const dia = dataCalendarioBrasil(card.created_at) ?? '';
   const hoje = dataHojeBrasil();
   if (periodo === 'mes' && !dia.startsWith(hoje.slice(0, 7))) return false;
@@ -368,6 +370,7 @@ export default function KanbanConfecScreen() {
   const [etiquetaFiltro, setEtiquetaFiltro] = useState<string[]>([]);
   const [analista, setAnalista] = useState('');
   const [desenvolvedor, setDesenvolvedor] = useState('');
+  const [secaoFiltro, setSecaoFiltro] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [detalheId, setDetalheId] = useState<string | null>(null);
   const [rascunho, setRascunho] = useState<Rascunho | null>(null);
@@ -436,14 +439,14 @@ export default function KanbanConfecScreen() {
     const map = new Map<string, ConfecCard[]>();
     for (const coluna of colunas) map.set(coluna.slug, []);
     for (const card of quadro?.cards ?? []) {
-      if (!passaFiltro(card, busca, etiquetaFiltro, analista, desenvolvedor, periodo, de, ate)) continue;
+      if (!passaFiltro(card, busca, etiquetaFiltro, analista, desenvolvedor, secaoFiltro, periodo, de, ate)) continue;
       const lista = map.get(card.status) ?? [];
       lista.push(card);
       map.set(card.status, lista);
     }
     for (const [slug, lista] of map) map.set(slug, ordenar(lista, periodo));
     return map;
-  }, [quadro?.cards, colunas, busca, etiquetaFiltro, analista, desenvolvedor, periodo, de, ate]);
+  }, [quadro?.cards, colunas, busca, etiquetaFiltro, analista, desenvolvedor, secaoFiltro, periodo, de, ate]);
 
   const detalhe = quadro?.cards.find((card) => card.id === detalheId) ?? null;
   const clienteRascunho = (clientesQ.data ?? []).find((cliente) => cliente.id === rascunho?.clienteId) ?? null;
@@ -782,6 +785,14 @@ export default function KanbanConfecScreen() {
               value={desenvolvedor || VAZIO}
               onChange={(valor) => setDesenvolvedor(valor === VAZIO ? '' : valor)}
               labels={{ [VAZIO]: 'Desenvolvedor' }}
+            />
+          </View>
+          <View style={styles.filtro}>
+            <FormSelect
+              options={[VAZIO, ...CONFEC_SECOES]}
+              value={secaoFiltro || VAZIO}
+              onChange={(valor) => setSecaoFiltro(valor === VAZIO ? '' : valor)}
+              labels={{ [VAZIO]: 'Seção do sistema' }}
             />
           </View>
         </View>
