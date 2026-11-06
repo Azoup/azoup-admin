@@ -1596,6 +1596,30 @@ serve(async (req) => {
       });
     }
 
+    if (body.op === 'delete_cfop_padrao') {
+      const codigo = `${body.payload?.codigo ?? ''}`.replace(/\D/g, '');
+      if (codigo.length < 4 || codigo.length > 10) throw new Error('O CFOP precisa ter de 4 a 10 dígitos.');
+      const { data: existente, error: loadErr } = await supabaseAdmin
+        .from('cfop_codigos_padrao')
+        .select('codigo,descricao,ativo,updated_by_admin,created_at,updated_at')
+        .eq('codigo', codigo)
+        .maybeSingle();
+      if (loadErr) {
+        if (/cfop_codigos_padrao|schema cache/i.test(loadErr.message)) {
+          throw new Error('Tabela de CFOP padrão ausente. Rode supabase/sql/cfop_codigos_padrao.sql no Supabase.');
+        }
+        throw loadErr;
+      }
+      if (!existente) throw new Error('CFOP não encontrado.');
+      const { error: delClientesErr } = await supabaseAdmin.from('cfop_codigos').delete().eq('codigo', codigo);
+      if (delClientesErr) throw delClientesErr;
+      const { error: delPadraoErr } = await supabaseAdmin.from('cfop_codigos_padrao').delete().eq('codigo', codigo);
+      if (delPadraoErr) throw delPadraoErr;
+      return new Response(JSON.stringify({ ok: true, cfop: existente }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const stripe = new Stripe(stripeSecret, { apiVersion: '2023-10-16' });
 
     if (body.op === 'list_servicos_contratados') {

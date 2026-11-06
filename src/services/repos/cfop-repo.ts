@@ -1,5 +1,5 @@
 import { supabase } from '@/src/lib/supabase';
-import { upsertCfopPadraoViaFunction } from '@/src/services/stripe-admin-api';
+import { deleteCfopPadraoViaFunction, upsertCfopPadraoViaFunction } from '@/src/services/stripe-admin-api';
 import type { CfopPadraoRow } from '@/src/types/azoup';
 
 export function parseCfopCodigo(raw: string): string {
@@ -43,5 +43,10 @@ export async function salvarCfopPadrao(input: {
     ativo: input.ativo,
     updated_by_admin: input.updatedByAdmin?.trim() || null,
   });
+  return res.cfop as CfopPadraoRow;
+}
+
+export async function excluirCfopPadrao(codigo: string): Promise<CfopPadraoRow> {
+  const res = await deleteCfopPadraoViaFunction({ codigo: parseCfopCodigo(codigo) });
   return res.cfop as CfopPadraoRow;
 }

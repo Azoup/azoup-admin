@@ -340,3 +340,11 @@ export type UpsertCfopPadraoPayload = {
 export async function upsertCfopPadraoViaFunction(payload: UpsertCfopPadraoPayload) {
   return invoke<{ cfop: Record<string, unknown> }>('upsert_cfop_padrao', payload);
 }
+
+export type DeleteCfopPadraoPayload = {
+  codigo: string;
+};
+
+export async function deleteCfopPadraoViaFunction(payload: DeleteCfopPadraoPayload) {
+  return invoke<{ ok: boolean; cfop: Record<string, unknown> }>('delete_cfop_padrao', payload);
+}

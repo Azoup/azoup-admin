@@ -10,6 +10,7 @@ const ACAO_LABELS: Record<string, string> = {
   BILLING_DESCONTO_ANUAL_UPDATE: 'Desconto do plano anual alterado',
   BILLING_PROMOCAO_UPDATE: 'Promoção de planos anuais alterada',
   CFOP_UPSERT: 'CFOP do sistema gravado',
+  CFOP_DELETE: 'CFOP do sistema excluído',
   CONVERSA_UPDATE: 'Conversa editada',
   CONVERSA_DELETE: 'Conversa excluída',
   REUNIAO_UPDATE: 'Reunião editada',

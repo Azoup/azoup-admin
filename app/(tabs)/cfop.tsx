@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { FlatList, Pressable, View } from 'react-native';
+import { FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
 
 import { FormCheckbox } from '@/components/ui/FormCheckbox';
 import { FormField } from '@/components/ui/FormField';
@@ -13,7 +13,7 @@ import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { registrarAuditoria } from '@/src/services/audit';
-import { listarCfopPadrao, salvarCfopPadrao } from '@/src/services/repos/cfop-repo';
+import { excluirCfopPadrao, listarCfopPadrao, salvarCfopPadrao } from '@/src/services/repos/cfop-repo';
 import type { CfopPadraoRow } from '@/src/types/azoup';
 import { formatDateTimeBR } from '@/src/utils/format';
 
@@ -29,6 +29,7 @@ export default function CfopScreen() {
   const [editando, setEditando] = useState<string | null>(null);
   const [busca, setBusca] = useState('');
   const [mostrarInativos, setMostrarInativos] = useState(false);
+  const [excluirItem, setExcluirItem] = useState<CfopPadraoRow | null>(null);
 
   const q = useQuery({
     queryKey: ['cfop_codigos_padrao'],
@@ -89,6 +90,32 @@ export default function CfopScreen() {
     },
   });
 
+  const excluir = useMutation({
+    mutationFn: async (item: CfopPadraoRow) => {
+      const removido = await excluirCfopPadrao(item.codigo);
+      await registrarAuditoria(
+        { id: adminProfile?.id, email: adminProfile?.email },
+        {
+          acao: 'CFOP_DELETE',
+          entidade: 'cfop_codigos_padrao',
+          entidade_id: removido.codigo,
+          valores_anteriores: {
+            codigo: item.codigo,
+            descricao: item.descricao,
+            ativo: item.ativo,
+          },
+          valores_novos: {},
+        },
+      );
+      return removido;
+    },
+    onSuccess: async (removido) => {
+      if (editando === removido.codigo) limpar();
+      setExcluirItem(null);
+      await qc.invalidateQueries({ queryKey: ['cfop_codigos_padrao'] });
+    },
+  });
+
   if (!canAccessScreen('cfop')) {
     return (
       <View style={{ flex: 1, padding: 16, backgroundColor: theme.background }}>
@@ -98,98 +125,167 @@ export default function CfopScreen() {
   }
 
   return (
-    <FlatList
-      style={{ flex: 1, backgroundColor: theme.background }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 12 }}
-      data={itens}
-      keyExtractor={(item) => item.codigo}
-      refreshing={q.isRefetching}
-      onRefresh={() => void q.refetch()}
-      ListHeaderComponent={
-        <View style={{ gap: 12, marginBottom: 4 }}>
-          <PageHeader
-            title="CFOP"
-            subtitle="Cadastro padrão do Confec. Ao salvar, o código entra no dropdown fiscal de todos os clientes — inclusive os novos."
-          />
+    <>
+      <FlatList
+        style={{ flex: 1, backgroundColor: theme.background }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 40, gap: 12 }}
+        data={itens}
+        keyExtractor={(item) => item.codigo}
+        refreshing={q.isRefetching}
+        onRefresh={() => void q.refetch()}
+        ListHeaderComponent={
+          <View style={{ gap: 12, marginBottom: 4 }}>
+            <PageHeader
+              title="CFOP"
+              subtitle="Cadastro padrão do Confec. Ao salvar, o código entra no dropdown fiscal de todos os clientes — inclusive os novos."
+            />
 
-          {podeGerenciar ? (
-            <ScreenCard style={{ gap: 12 }}>
-              <SectionTitle>{editando ? `Editar CFOP ${editando}` : 'Novo CFOP'}</SectionTitle>
-              <FormField label="Código" required helper="4 a 10 dígitos. Ex.: 5102">
-                <FormInput
-                  value={codigo}
-                  onChangeText={setCodigo}
-                  placeholder="5102"
-                  keyboardType="number-pad"
-                  editable={!editando}
-                  maxLength={10}
-                />
-              </FormField>
-              <FormField label="Descrição" required>
-                <FormInput
-                  value={descricao}
-                  onChangeText={setDescricao}
-                  placeholder="Venda de mercadoria adquirida ou recebida de terceiros"
-                />
-              </FormField>
-              <FormCheckbox label="Ativo no dropdown dos clientes" checked={ativo} onCheckedChange={setAtivo} />
-              {salvar.error ? <Text style={{ color: theme.error }}>{(salvar.error as Error).message}</Text> : null}
-              {salvar.isSuccess ? (
-                <Text style={{ color: theme.cadastroAction, fontWeight: '700' }}>
-                  CFOP gravado em todos os clientes.
-                </Text>
-              ) : null}
-              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                <PrimaryButton
-                  label={salvar.isPending ? 'Salvando…' : editando ? 'Salvar alteração' : 'Adicionar CFOP'}
-                  loading={salvar.isPending}
-                  onPress={() => salvar.mutate()}
-                />
-                {editando ? (
-                  <Pressable onPress={limpar} style={{ justifyContent: 'center', paddingHorizontal: 12 }}>
-                    <Text style={{ color: theme.textMuted, fontWeight: '700' }}>Cancelar</Text>
-                  </Pressable>
+            {podeGerenciar ? (
+              <ScreenCard style={{ gap: 12 }}>
+                <SectionTitle>{editando ? `Editar CFOP ${editando}` : 'Novo CFOP'}</SectionTitle>
+                <FormField label="Código" required helper="4 a 10 dígitos. Ex.: 5102">
+                  <FormInput
+                    value={codigo}
+                    onChangeText={setCodigo}
+                    placeholder="5102"
+                    keyboardType="number-pad"
+                    editable={!editando}
+                    maxLength={10}
+                  />
+                </FormField>
+                <FormField label="Descrição" required>
+                  <FormInput
+                    value={descricao}
+                    onChangeText={setDescricao}
+                    placeholder="Venda de mercadoria adquirida ou recebida de terceiros"
+                  />
+                </FormField>
+                <FormCheckbox label="Ativo no dropdown dos clientes" checked={ativo} onCheckedChange={setAtivo} />
+                {salvar.error ? <Text style={{ color: theme.error }}>{(salvar.error as Error).message}</Text> : null}
+                {salvar.isSuccess ? (
+                  <Text style={{ color: theme.cadastroAction, fontWeight: '700' }}>
+                    CFOP gravado em todos os clientes.
+                  </Text>
                 ) : null}
-              </View>
-            </ScreenCard>
-          ) : (
-            <Text style={{ color: theme.textMuted }}>Seu papel só pode consultar os CFOPs.</Text>
-          )}
+                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                  <PrimaryButton
+                    label={salvar.isPending ? 'Salvando…' : editando ? 'Salvar alteração' : 'Adicionar CFOP'}
+                    loading={salvar.isPending}
+                    onPress={() => salvar.mutate()}
+                  />
+                  {editando ? (
+                    <Pressable onPress={limpar} style={{ justifyContent: 'center', paddingHorizontal: 12 }}>
+                      <Text style={{ color: theme.textMuted, fontWeight: '700' }}>Cancelar</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </ScreenCard>
+            ) : (
+              <Text style={{ color: theme.textMuted }}>Seu papel só pode consultar os CFOPs.</Text>
+            )}
 
-          <FormField label="Buscar">
-            <FormInput value={busca} onChangeText={setBusca} placeholder="Código ou descrição" />
-          </FormField>
-          <Pressable onPress={() => setMostrarInativos((atual) => !atual)}>
-            <Text style={{ color: theme.cadastroAction, fontWeight: '700' }}>
-              {mostrarInativos ? 'Ocultar inativos' : 'Mostrar inativos'}
-            </Text>
-          </Pressable>
-          {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando…</Text> : null}
-          {q.error ? <Text style={{ color: theme.error }}>{(q.error as Error).message}</Text> : null}
-        </View>
-      }
-      ListEmptyComponent={
-        q.isLoading ? null : (
-          <Text style={{ color: theme.textMuted }}>Nenhum CFOP neste filtro.</Text>
-        )
-      }
-      renderItem={({ item }) => (
-        <ScreenCard style={{ gap: 6 }}>
-          <Text style={{ color: theme.headerText, fontWeight: '800' }}>
-            {item.codigo} {item.ativo ? '' : '· inativo'}
-          </Text>
-          <Text style={{ color: theme.text, lineHeight: 20 }}>{item.descricao}</Text>
-          <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-            {item.updated_at ? formatDateTimeBR(item.updated_at) : '—'}
-            {item.updated_by_admin ? ` · ${item.updated_by_admin}` : ''}
-          </Text>
-          {podeGerenciar ? (
-            <Pressable onPress={() => carregar(item)}>
-              <Text style={{ color: theme.cadastroAction, fontWeight: '700' }}>Editar</Text>
+            <FormField label="Buscar">
+              <FormInput value={busca} onChangeText={setBusca} placeholder="Código ou descrição" />
+            </FormField>
+            <Pressable onPress={() => setMostrarInativos((atual) => !atual)}>
+              <Text style={{ color: theme.cadastroAction, fontWeight: '700' }}>
+                {mostrarInativos ? 'Ocultar inativos' : 'Mostrar inativos'}
+              </Text>
             </Pressable>
-          ) : null}
-        </ScreenCard>
-      )}
-    />
+            {q.isLoading ? <Text style={{ color: theme.textMuted }}>Carregando…</Text> : null}
+            {q.error ? <Text style={{ color: theme.error }}>{(q.error as Error).message}</Text> : null}
+          </View>
+        }
+        ListEmptyComponent={
+          q.isLoading ? null : (
+            <Text style={{ color: theme.textMuted }}>Nenhum CFOP neste filtro.</Text>
+          )
+        }
+        renderItem={({ item }) => (
+          <ScreenCard style={{ gap: 6 }}>
+            <Text style={{ color: theme.headerText, fontWeight: '800' }}>
+              {item.codigo} {item.ativo ? '' : '· inativo'}
+            </Text>
+            <Text style={{ color: theme.text, lineHeight: 20 }}>{item.descricao}</Text>
+            <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+              {item.updated_at ? formatDateTimeBR(item.updated_at) : '—'}
+              {item.updated_by_admin ? ` · ${item.updated_by_admin}` : ''}
+            </Text>
+            {podeGerenciar ? (
+              <View style={{ flexDirection: 'row', gap: 16, marginTop: 2 }}>
+                <Pressable onPress={() => carregar(item)}>
+                  <Text style={{ color: theme.cadastroAction, fontWeight: '700' }}>Editar</Text>
+                </Pressable>
+                <Pressable onPress={() => setExcluirItem(item)}>
+                  <Text style={{ color: theme.error, fontWeight: '700' }}>Excluir</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </ScreenCard>
+        )}
+      />
+
+      <Modal
+        visible={excluirItem != null}
+        animationType="fade"
+        transparent
+        onRequestClose={() => {
+          if (!excluir.isPending) setExcluirItem(null);
+        }}
+      >
+        <View style={styles.overlay}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => {
+              if (!excluir.isPending) setExcluirItem(null);
+            }}
+          />
+          <View style={[styles.popup, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 16 }}>Excluir CFOP</Text>
+            <Text style={{ color: theme.text, lineHeight: 22 }}>
+              Excluir o CFOP {excluirItem?.codigo}? Ele sai do catálogo padrão e do dropdown fiscal de todos os
+              clientes.
+            </Text>
+            {excluir.error ? <Text style={{ color: theme.error }}>{(excluir.error as Error).message}</Text> : null}
+            <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <Pressable
+                disabled={excluir.isPending}
+                onPress={() => setExcluirItem(null)}
+                style={{ justifyContent: 'center', paddingHorizontal: 12, minHeight: 40 }}
+              >
+                <Text style={{ color: theme.textMuted, fontWeight: '700' }}>Cancelar</Text>
+              </Pressable>
+              <PrimaryButton
+                label={excluir.isPending ? 'Excluindo…' : 'Confirmar exclusão'}
+                loading={excluir.isPending}
+                onPress={() => {
+                  if (!excluirItem) return;
+                  excluir.mutate(excluirItem);
+                }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
+
+const styles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  popup: {
+    width: '100%',
+    maxWidth: 420,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
+    zIndex: 1,
+  },
+});
