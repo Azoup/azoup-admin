@@ -609,20 +609,18 @@ function AcoesRegistro({
 function EditarReuniaoBloco({
   reuniao,
   saving,
-  podeAlterarData,
   onCancelar,
   onSalvar,
 }: {
   reuniao: ReuniaoClienteRow;
   saving: boolean;
-  podeAlterarData: boolean;
   onCancelar: () => void;
   onSalvar: (valor: {
     pendencia: string;
     dataRetorno: string;
     assuntos: string;
     proximaAcao: string;
-    dataRegistro?: string;
+    dataRegistro: string;
   }) => void;
 }) {
   const { theme } = useTheme();
@@ -634,11 +632,9 @@ function EditarReuniaoBloco({
 
   return (
     <View style={{ gap: 8, marginTop: 8 }}>
-      {podeAlterarData ? (
-        <FormField label="Data do registro">
-          <FormDateInput value={dataRegistro} onChange={setDataRegistro} />
-        </FormField>
-      ) : null}
+      <FormField label="Data do registro">
+        <FormDateInput value={dataRegistro} onChange={setDataRegistro} />
+      </FormField>
       <FormField label="Pendência">
         <FormInput value={pendencia} onChangeText={setPendencia} multiline style={styles.areaHistorico} />
       </FormField>
@@ -661,7 +657,7 @@ function EditarReuniaoBloco({
               dataRetorno,
               assuntos,
               proximaAcao,
-              dataRegistro: podeAlterarData ? dataRegistro : undefined,
+              dataRegistro,
             })
           }
           style={{ flex: 1 }}
@@ -1002,8 +998,7 @@ export function HistoricoClienteTela({
   embutido?: boolean;
 }) {
   const { theme } = useTheme();
-  const { adminProfile, session, canDeleteRecords, papel } = useAdminAuth();
-  const podeAlterarDataRegistro = papel === 'owner';
+  const { adminProfile, session, canDeleteRecords } = useAdminAuth();
   const qc = useQueryClient();
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [confirmarId, setConfirmarId] = useState<string | null>(null);
@@ -1228,12 +1223,12 @@ export function HistoricoClienteTela({
       dataRegistro?: string;
     }) => {
       const anterior = (reunioesQ.data ?? []).find((r) => r.id === params.id);
-      if (podeAlterarDataRegistro && !/^\d{4}-\d{2}-\d{2}$/.test(`${params.dataRegistro ?? ''}`.trim())) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(`${params.dataRegistro ?? ''}`.trim())) {
         throw new Error('Informe a data do registro.');
       }
       await atualizarReuniaoCliente({
         ...params,
-        dataRegistro: podeAlterarDataRegistro ? params.dataRegistro : null,
+        dataRegistro: params.dataRegistro,
         createdAtAtual: anterior?.created_at,
       });
       await registrarAuditoria(
@@ -1252,7 +1247,7 @@ export function HistoricoClienteTela({
           },
           valores_novos: {
             cliente: cliente?.nome ?? null,
-            data_registro: podeAlterarDataRegistro ? params.dataRegistro?.trim() || null : dataCalendarioBrasil(anterior?.created_at),
+            data_registro: params.dataRegistro?.trim() || null,
             pendencia: params.pendencia.trim(),
             data_retorno: params.dataRetorno.trim(),
             assuntos: params.assuntos.trim() || null,
@@ -1953,7 +1948,6 @@ export function HistoricoClienteTela({
                       <EditarReuniaoBloco
                         reuniao={reuniao}
                         saving={salvarReuniao.isPending}
-                        podeAlterarData={podeAlterarDataRegistro}
                         onCancelar={() => setEditandoId(null)}
                         onSalvar={(valor) =>
                           salvarReuniao.mutate({

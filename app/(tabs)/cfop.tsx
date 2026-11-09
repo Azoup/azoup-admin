@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { FlatList, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { FormCheckbox } from '@/components/ui/FormCheckbox';
 import { FormField } from '@/components/ui/FormField';
@@ -8,7 +8,6 @@ import { FormInput } from '@/components/ui/FormInput';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ScreenCard } from '@/components/ui/ScreenCard';
-import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
@@ -27,6 +26,7 @@ export default function CfopScreen() {
   const [descricao, setDescricao] = useState('');
   const [ativo, setAtivo] = useState(true);
   const [editando, setEditando] = useState<string | null>(null);
+  const [formAberto, setFormAberto] = useState(false);
   const [busca, setBusca] = useState('');
   const [mostrarInativos, setMostrarInativos] = useState(false);
   const [excluirItem, setExcluirItem] = useState<CfopPadraoRow | null>(null);
@@ -46,20 +46,6 @@ export default function CfopScreen() {
       return texto.includes(busca.trim().toLowerCase()) || (termo && item.codigo.includes(termo));
     });
   }, [q.data, busca, mostrarInativos]);
-
-  const limpar = () => {
-    setCodigo('');
-    setDescricao('');
-    setAtivo(true);
-    setEditando(null);
-  };
-
-  const carregar = (item: CfopPadraoRow) => {
-    setEditando(item.codigo);
-    setCodigo(item.codigo);
-    setDescricao(item.descricao);
-    setAtivo(item.ativo);
-  };
 
   const salvar = useMutation({
     mutationFn: async () => {
@@ -85,10 +71,42 @@ export default function CfopScreen() {
       return salvo;
     },
     onSuccess: async () => {
-      limpar();
+      setCodigo('');
+      setDescricao('');
+      setAtivo(true);
+      setEditando(null);
+      setFormAberto(false);
       await qc.invalidateQueries({ queryKey: ['cfop_codigos_padrao'] });
     },
   });
+
+  const fecharForm = () => {
+    if (salvar.isPending) return;
+    setCodigo('');
+    setDescricao('');
+    setAtivo(true);
+    setEditando(null);
+    setFormAberto(false);
+    salvar.reset();
+  };
+
+  const abrirNovo = () => {
+    setCodigo('');
+    setDescricao('');
+    setAtivo(true);
+    setEditando(null);
+    salvar.reset();
+    setFormAberto(true);
+  };
+
+  const abrirEdicao = (item: CfopPadraoRow) => {
+    setEditando(item.codigo);
+    setCodigo(item.codigo);
+    setDescricao(item.descricao);
+    setAtivo(item.ativo);
+    salvar.reset();
+    setFormAberto(true);
+  };
 
   const excluir = useMutation({
     mutationFn: async (item: CfopPadraoRow) => {
@@ -110,7 +128,13 @@ export default function CfopScreen() {
       return removido;
     },
     onSuccess: async (removido) => {
-      if (editando === removido.codigo) limpar();
+      if (editando === removido.codigo) {
+        setCodigo('');
+        setDescricao('');
+        setAtivo(true);
+        setEditando(null);
+        setFormAberto(false);
+      }
       setExcluirItem(null);
       await qc.invalidateQueries({ queryKey: ['cfop_codigos_padrao'] });
     },
@@ -141,45 +165,7 @@ export default function CfopScreen() {
             />
 
             {podeGerenciar ? (
-              <ScreenCard style={{ gap: 12 }}>
-                <SectionTitle>{editando ? `Editar CFOP ${editando}` : 'Novo CFOP'}</SectionTitle>
-                <FormField label="Código" required helper="4 a 10 dígitos. Ex.: 5102">
-                  <FormInput
-                    value={codigo}
-                    onChangeText={setCodigo}
-                    placeholder="5102"
-                    keyboardType="number-pad"
-                    editable={!editando}
-                    maxLength={10}
-                  />
-                </FormField>
-                <FormField label="Descrição" required>
-                  <FormInput
-                    value={descricao}
-                    onChangeText={setDescricao}
-                    placeholder="Venda de mercadoria adquirida ou recebida de terceiros"
-                  />
-                </FormField>
-                <FormCheckbox label="Ativo no dropdown dos clientes" checked={ativo} onCheckedChange={setAtivo} />
-                {salvar.error ? <Text style={{ color: theme.error }}>{(salvar.error as Error).message}</Text> : null}
-                {salvar.isSuccess ? (
-                  <Text style={{ color: theme.cadastroAction, fontWeight: '700' }}>
-                    CFOP gravado em todos os clientes.
-                  </Text>
-                ) : null}
-                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                  <PrimaryButton
-                    label={salvar.isPending ? 'Salvando…' : editando ? 'Salvar alteração' : 'Adicionar CFOP'}
-                    loading={salvar.isPending}
-                    onPress={() => salvar.mutate()}
-                  />
-                  {editando ? (
-                    <Pressable onPress={limpar} style={{ justifyContent: 'center', paddingHorizontal: 12 }}>
-                      <Text style={{ color: theme.textMuted, fontWeight: '700' }}>Cancelar</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              </ScreenCard>
+              <PrimaryButton label="Adicionar CFOP" onPress={abrirNovo} />
             ) : (
               <Text style={{ color: theme.textMuted }}>Seu papel só pode consultar os CFOPs.</Text>
             )}
@@ -213,7 +199,7 @@ export default function CfopScreen() {
             </Text>
             {podeGerenciar ? (
               <View style={{ flexDirection: 'row', gap: 16, marginTop: 2 }}>
-                <Pressable onPress={() => carregar(item)}>
+                <Pressable onPress={() => abrirEdicao(item)}>
                   <Text style={{ color: theme.cadastroAction, fontWeight: '700' }}>Editar</Text>
                 </Pressable>
                 <Pressable onPress={() => setExcluirItem(item)}>
@@ -224,6 +210,64 @@ export default function CfopScreen() {
           </ScreenCard>
         )}
       />
+
+      <Modal
+        visible={formAberto}
+        animationType="fade"
+        transparent
+        onRequestClose={() => {
+          if (!salvar.isPending) fecharForm();
+        }}
+      >
+        <View style={styles.overlay}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => {
+              if (!salvar.isPending) fecharForm();
+            }}
+          />
+          <View style={[styles.popup, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12 }}>
+              <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 16 }}>
+                {editando ? `Editar CFOP ${editando}` : 'Adicionar CFOP'}
+              </Text>
+              <FormField label="Código" required helper="4 a 10 dígitos. Ex.: 5102">
+                <FormInput
+                  value={codigo}
+                  onChangeText={setCodigo}
+                  placeholder="5102"
+                  keyboardType="number-pad"
+                  editable={!editando}
+                  maxLength={10}
+                />
+              </FormField>
+              <FormField label="Descrição" required>
+                <FormInput
+                  value={descricao}
+                  onChangeText={setDescricao}
+                  placeholder="Venda de mercadoria adquirida ou recebida de terceiros"
+                />
+              </FormField>
+              <FormCheckbox label="Ativo no dropdown dos clientes" checked={ativo} onCheckedChange={setAtivo} />
+              {salvar.error ? <Text style={{ color: theme.error }}>{(salvar.error as Error).message}</Text> : null}
+              <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <Pressable
+                  disabled={salvar.isPending}
+                  onPress={fecharForm}
+                  style={{ justifyContent: 'center', paddingHorizontal: 12, minHeight: 40 }}
+                >
+                  <Text style={{ color: theme.textMuted, fontWeight: '700' }}>Cancelar</Text>
+                </Pressable>
+                <PrimaryButton
+                  label={salvar.isPending ? 'Salvando…' : editando ? 'Salvar alteração' : 'Adicionar'}
+                  loading={salvar.isPending}
+                  onPress={() => salvar.mutate()}
+                />
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={excluirItem != null}
@@ -281,7 +325,8 @@ const styles = StyleSheet.create({
   },
   popup: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: 440,
+    maxHeight: '90%',
     borderWidth: 1,
     borderRadius: 12,
     padding: 16,

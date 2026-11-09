@@ -33,8 +33,7 @@ type Props = {
 
 export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Props) {
   const { theme } = useTheme();
-  const { adminProfile, session, papel } = useAdminAuth();
-  const podeAlterarData = papel === 'owner';
+  const { adminProfile, session } = useAdminAuth();
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [assuntos, setAssuntos] = useState('');
   const [proximaAcao, setProximaAcao] = useState('');
@@ -68,7 +67,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
     mutationFn: async (reuniaoCancelada: boolean) => {
       if (!cliente) throw new Error('Cliente inválido.');
       if (!reuniaoCancelada && !selecionados.length) throw new Error('Selecione ao menos um participante.');
-      if (podeAlterarData && !/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro.trim())) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro.trim())) {
         throw new Error('Informe a data do registro.');
       }
       const criadas = await criarPendenciasReuniao({
@@ -78,7 +77,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
         proximaAcao,
         participanteIds: selecionados,
         adminEmail: adminProfile?.email ?? session?.user?.email ?? null,
-        dataRegistro: podeAlterarData ? dataRegistro : null,
+        dataRegistro,
         geradoIa,
         reuniaoCancelada,
         pendencias: linhas.map((linha) => ({ texto: linha.texto, dataRetorno: linha.dataRetorno })),
@@ -111,8 +110,7 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
   const usuarios = usuariosQ.data ?? [];
 
   const gerarResumo = useMutation({
-    mutationFn: () =>
-      resumirAnotacaoReuniao(cliente!.id, podeAlterarData ? dataRegistro : null),
+    mutationFn: () => resumirAnotacaoReuniao(cliente!.id, dataRegistro),
     onSuccess: (resumo) => {
       setAssuntos(resumo.assuntos);
       setGeradoIa(true);
@@ -219,11 +217,9 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
                 </Text>
               ) : null}
 
-              {podeAlterarData ? (
-                <FormField label="Data do registro">
-                  <FormDateInput value={dataRegistro} onChange={setDataRegistro} />
-                </FormField>
-              ) : null}
+              <FormField label="Data do registro">
+                <FormDateInput value={dataRegistro} onChange={setDataRegistro} />
+              </FormField>
 
               <FormField label="Assuntos tratados">
                 <FormInput
