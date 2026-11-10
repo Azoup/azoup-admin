@@ -834,13 +834,22 @@ function chamadoCombina(chamado: DigisacChamado, assunto: string, de: string, at
   return true;
 }
 
-function comentariosPorDiaChamado(chamados: DigisacChamado[]): Map<string, string> {
-  const map = new Map<string, string>();
+function dadosPorDiaChamado(chamados: DigisacChamado[]): Map<string, { comentario: string | null; assunto: string | null }> {
+  const map = new Map<string, { comentario: string | null; assunto: string | null }>();
   for (const chamado of chamados) {
-    const texto = chamado.comentario?.trim();
+    const comentario = chamado.comentario?.trim() || null;
+    const assunto = chamado.assunto?.trim() || null;
     const dia = dataCalendarioBrasil(chamado.inicio);
-    if (!texto || !dia || map.has(dia)) continue;
-    map.set(dia, texto);
+    if ((!comentario && !assunto) || !dia) continue;
+    const atual = map.get(dia);
+    if (!atual) {
+      map.set(dia, { comentario, assunto });
+      continue;
+    }
+    map.set(dia, {
+      comentario: atual.comentario || comentario,
+      assunto: atual.assunto || assunto,
+    });
   }
   return map;
 }
@@ -850,18 +859,25 @@ function mesclarConversasComComentariosDigisac(
   chamados: DigisacChamado[],
   clienteId: string,
 ): ClienteConversaComCliente[] {
-  const comentariosPorDia = comentariosPorDiaChamado(chamados);
+  const dadosPorDia = dadosPorDiaChamado(chamados);
   const diasNaLista = new Set<string>();
   const lista = conversas.map((conversa) => {
     const dia = `${conversa.data_conversa ?? ''}`.slice(0, 10);
     const digisac = ehContatoDigisacAutomatico(conversa.descricao);
     if (digisac) diasNaLista.add(dia);
     if (!digisac) return conversa;
-    const texto = conversa.comentarioDigisac?.trim() || comentariosPorDia.get(dia) || '';
-    if (!texto || texto === conversa.comentarioDigisac) return conversa;
-    return { ...conversa, comentarioDigisac: texto };
+    const doDia = dadosPorDia.get(dia);
+    const comentario = conversa.comentarioDigisac?.trim() || doDia?.comentario || null;
+    const assunto = conversa.assuntoDigisac?.trim() || doDia?.assunto || null;
+    if (
+      comentario === (conversa.comentarioDigisac ?? null) &&
+      assunto === (conversa.assuntoDigisac ?? null)
+    ) {
+      return conversa;
+    }
+    return { ...conversa, comentarioDigisac: comentario, assuntoDigisac: assunto };
   });
-  for (const [dia, texto] of comentariosPorDia) {
+  for (const [dia, dados] of dadosPorDia) {
     if (diasNaLista.has(dia)) continue;
     lista.push({
       id: `digisac-comentario-${clienteId}-${dia}`,
@@ -871,7 +887,8 @@ function mesclarConversasComComentariosDigisac(
       descricao: MARCADOR_CONTATO_DIGISAC,
       admin_email: null,
       created_at: null,
-      comentarioDigisac: texto,
+      comentarioDigisac: dados.comentario,
+      assuntoDigisac: dados.assunto,
     });
   }
   lista.sort((a, b) => {
@@ -1983,7 +2000,7 @@ export function HistoricoClienteTela({
             <View style={{ gap: 8 }}>
               <Text style={[styles.secaoLabel, { color: theme.textMuted }]}>CONVERSAS</Text>
               <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                Inclui registros manuais, o último contato Digisac e o comentário ao finalizar o chamado.
+                Inclui registros manuais, o último contato Digisac, o assunto e o comentário ao finalizar o chamado.
               </Text>
               {conversasQ.isLoading ? (
                 <ActivityIndicator color={theme.cadastroAction} />
@@ -1994,6 +2011,8 @@ export function HistoricoClienteTela({
               ) : (
                 conversasExibidas.map((conversa) => {
                   const digisac = ehContatoDigisacAutomatico(conversa.descricao);
+                  const assuntoDigisac = conversa.assuntoDigisac?.trim() || '';
+                  const comentarioDigisac = conversa.comentarioDigisac?.trim() || '';
                   return (
                     <View key={conversa.id} style={[styles.historicoItem, { borderColor: theme.border }]}>
                       <View style={styles.rowBetween}>
@@ -2002,13 +2021,11 @@ export function HistoricoClienteTela({
                             {formatConversaQuando(conversa.data_conversa, conversa.hora_conversa)}
                             {digisac ? ' · Digisac' : ''}
                           </Text>
-                          <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                            {digisac
-                              ? conversa.comentarioDigisac?.trim()
-                                ? 'Comentário ao finalizar o chamado na Digisac'
-                                : 'Contato automático pelo último chamado'
-                              : `Registrado por ${conversa.admin_email?.trim() || '—'}`}
-                          </Text>
+                          {!digisac ? (
+                            <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                              {`Registrado por ${conversa.admin_email?.trim() || '—'}`}
+                            </Text>
+                          ) : null}
                         </View>
                         {digisac || editandoId === conversa.id ? null : (
                           <AcoesRegistro
@@ -2046,13 +2063,30 @@ export function HistoricoClienteTela({
                             })
                           }
                         />
+                      ) : digisac ? (
+                        <View style={{ gap: 6, marginTop: 4 }}>
+                          {assuntoDigisac ? (
+                            <View style={{ gap: 2 }}>
+                              <Text style={{ color: theme.textMuted, fontSize: 12 }}>Assunto do chamado</Text>
+                              <Text style={{ color: theme.text, fontSize: 14 }}>{assuntoDigisac}</Text>
+                            </View>
+                          ) : null}
+                          {comentarioDigisac ? (
+                            <View style={{ gap: 2 }}>
+                              <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                                Comentário ao finalizar o chamado na Digisac
+                              </Text>
+                              <Text style={{ color: theme.text, fontSize: 14 }}>{comentarioDigisac}</Text>
+                            </View>
+                          ) : null}
+                          {!assuntoDigisac && !comentarioDigisac ? (
+                            <Text style={{ color: theme.text, fontSize: 14 }}>
+                              Último chamado sincronizado da Digisac (mesma data do card de acompanhamento).
+                            </Text>
+                          ) : null}
+                        </View>
                       ) : (
-                        <Text style={{ color: theme.text, fontSize: 14, marginTop: 4 }}>
-                          {digisac
-                            ? conversa.comentarioDigisac?.trim() ||
-                              'Último chamado sincronizado da Digisac (mesma data do card de acompanhamento).'
-                            : conversa.descricao}
-                        </Text>
+                        <Text style={{ color: theme.text, fontSize: 14, marginTop: 4 }}>{conversa.descricao}</Text>
                       )}
                     </View>
                   );

@@ -6,13 +6,20 @@ import { dataCalendarioBrasil } from '@/src/utils/format';
 
 export type ClienteConversaComCliente = AdminClienteConversaRow & {
   cliente?: Pick<ClienteAzoupRow, 'id' | 'nome' | 'email' | 'telefone'> | null;
-  /** Comentário informado ao finalizar o último chamado Digisac deste cliente. */
+  /** Comentário informado ao finalizar o chamado Digisac deste cliente. */
   comentarioDigisac?: string | null;
+  /** Assunto/tópicos do chamado Digisac. */
+  assuntoDigisac?: string | null;
 };
 
-type ComentariosChamadoDigisac = {
-  porCliente: Map<string, string>;
-  porDia: Map<string, string>;
+type DadosChamadoDigisac = {
+  comentario: string | null;
+  assunto: string | null;
+};
+
+type ChamadosDigisacIndex = {
+  porCliente: Map<string, DadosChamadoDigisac>;
+  porDia: Map<string, DadosChamadoDigisac>;
 };
 
 function chaveComentarioDia(clienteId: string, inicio: string | null): string | null {
@@ -20,20 +27,31 @@ function chaveComentarioDia(clienteId: string, inicio: string | null): string | 
   return dia ? `${clienteId}|${dia}` : null;
 }
 
-async function comentariosChamadosDigisac(clienteIds: string[]): Promise<ComentariosChamadoDigisac> {
-  const porCliente = new Map<string, string>();
-  const porDia = new Map<string, string>();
+function mesclarDadosChamado(
+  atual: DadosChamadoDigisac | undefined,
+  comentario: string | null,
+  assunto: string | null,
+): DadosChamadoDigisac {
+  return {
+    comentario: atual?.comentario || comentario,
+    assunto: atual?.assunto || assunto,
+  };
+}
+
+async function dadosChamadosDigisac(clienteIds: string[]): Promise<ChamadosDigisacIndex> {
+  const porCliente = new Map<string, DadosChamadoDigisac>();
+  const porDia = new Map<string, DadosChamadoDigisac>();
   if (!clienteIds.length) return { porCliente, porDia };
   const CHUNK = 200;
   for (let i = 0; i < clienteIds.length; i += CHUNK) {
     const chunk = clienteIds.slice(i, i + CHUNK);
     const { data, error } = await supabase
       .from('admin_digisac_chamados')
-      .select('cliente_id,comentario_finalizacao,inicio')
+      .select('cliente_id,comentario_finalizacao,assunto,inicio')
       .in('cliente_id', chunk)
       .order('inicio', { ascending: false });
     if (error) {
-      if (/comentario_finalizacao|admin_digisac_chamados|schema cache/i.test(error.message)) {
+      if (/comentario_finalizacao|assunto|admin_digisac_chamados|schema cache/i.test(error.message)) {
         return { porCliente, porDia };
       }
       throw new Error(error.message);
@@ -41,26 +59,31 @@ async function comentariosChamadosDigisac(clienteIds: string[]): Promise<Comenta
     for (const row of (data ?? []) as {
       cliente_id?: string | null;
       comentario_finalizacao?: string | null;
+      assunto?: string | null;
       inicio?: string | null;
     }[]) {
       const id = `${row.cliente_id ?? ''}`.trim();
-      const texto = `${row.comentario_finalizacao ?? ''}`.trim();
-      if (!id || !texto) continue;
-      if (!porCliente.has(id)) porCliente.set(id, texto);
+      const comentario = `${row.comentario_finalizacao ?? ''}`.trim() || null;
+      const assunto = `${row.assunto ?? ''}`.trim() || null;
+      if (!id || (!comentario && !assunto)) continue;
+      if (!porCliente.has(id)) porCliente.set(id, { comentario, assunto });
+      else porCliente.set(id, mesclarDadosChamado(porCliente.get(id), comentario, assunto));
       const chave = chaveComentarioDia(id, row.inicio ?? null);
-      if (chave && !porDia.has(chave)) porDia.set(chave, texto);
+      if (!chave) continue;
+      if (!porDia.has(chave)) porDia.set(chave, { comentario, assunto });
+      else porDia.set(chave, mesclarDadosChamado(porDia.get(chave), comentario, assunto));
     }
   }
   return { porCliente, porDia };
 }
 
-function comentarioDigisacDaConversa(
+function dadosDigisacDaConversa(
   row: Pick<AdminClienteConversaRow, 'cliente_id' | 'data_conversa' | 'descricao'>,
-  comentarios: ComentariosChamadoDigisac,
-): string | null {
+  chamados: ChamadosDigisacIndex,
+): DadosChamadoDigisac | null {
   if (!ehContatoDigisacAutomatico(row.descricao)) return null;
   const dia = `${row.data_conversa ?? ''}`.slice(0, 10);
-  return comentarios.porDia.get(`${row.cliente_id}|${dia}`) || comentarios.porCliente.get(row.cliente_id) || null;
+  return chamados.porDia.get(`${row.cliente_id}|${dia}`) || chamados.porCliente.get(row.cliente_id) || null;
 }
 
 /** Colunas reais de `clientes_azoup` no schema Azoup (sem nome_fantasia/razao_social/celular). */
@@ -185,18 +208,25 @@ export async function listarConversasClientes(params?: {
     (row) => params?.incluirDigisac || !ehContatoDigisacAutomatico(row.descricao),
   );
   const clienteIds = [...new Set(rows.map((r) => r.cliente_id))];
-  const [clientesMap, comentariosDigisac] = await Promise.all([
+  const [clientesMap, chamadosDigisac] = await Promise.all([
     buscarClientesPorIds(clienteIds),
     params?.incluirDigisac
-      ? comentariosChamadosDigisac(clienteIds)
-      : Promise.resolve({ porCliente: new Map<string, string>(), porDia: new Map<string, string>() }),
+      ? dadosChamadosDigisac(clienteIds)
+      : Promise.resolve({
+          porCliente: new Map<string, DadosChamadoDigisac>(),
+          porDia: new Map<string, DadosChamadoDigisac>(),
+        }),
   ]);
 
-  return rows.map((row) => ({
-    ...row,
-    cliente: clientesMap.get(row.cliente_id) ?? null,
-    comentarioDigisac: comentarioDigisacDaConversa(row, comentariosDigisac),
-  }));
+  return rows.map((row) => {
+    const digisac = dadosDigisacDaConversa(row, chamadosDigisac);
+    return {
+      ...row,
+      cliente: clientesMap.get(row.cliente_id) ?? null,
+      comentarioDigisac: digisac?.comentario ?? null,
+      assuntoDigisac: digisac?.assunto ?? null,
+    };
+  });
 }
 
 export async function criarConversaCliente(params: {
