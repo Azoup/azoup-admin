@@ -935,23 +935,43 @@ async function numeroCadastroCliente(
   return telefoneDigisac(row.celular, row.telefone);
 }
 
-async function contactIdParaMensagem(
+async function contactIdsJaVinculados(
   supabaseAdmin: ReturnType<typeof createClient>,
   clienteId: string,
-  extraId: string,
-): Promise<string> {
-  let numero: string | null = null;
-  if (extraId) {
-    const extras = await listarExtrasDoCliente(supabaseAdmin, clienteId);
-    const extra = extras.find((item) => item.id === extraId);
-    if (!extra) falha('Contato extra não encontrado', 404);
-    numero = telefoneDigisac(null, extra.telefone);
-  } else {
-    numero = await numeroCadastroCliente(supabaseAdmin, clienteId);
+): Promise<string[]> {
+  const ids: string[] = [];
+  const push = (valor: unknown) => {
+    const id = `${valor ?? ''}`.trim();
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+  const envio = await supabaseAdmin
+    .from('admin_digisac_envio')
+    .select('contact_id')
+    .eq('cliente_id', clienteId)
+    .maybeSingle();
+  if (!envio.error) push((envio.data as { contact_id?: string | null } | null)?.contact_id);
+  const chamados = await supabaseAdmin
+    .from('admin_digisac_chamados')
+    .select('contact_id')
+    .eq('cliente_id', clienteId)
+    .not('contact_id', 'is', null)
+    .order('inicio', { ascending: false })
+    .limit(40);
+  if (!chamados.error) {
+    for (const row of chamados.data ?? []) {
+      push((row as { contact_id?: string | null }).contact_id);
+    }
   }
-  if (!numero) falha('Telefone inválido para envio', 400);
+  return ids;
+}
 
-  const serviceId = await serviceAzoupConfec();
+async function contactIdNaConexao(contactId: string, serviceId: string): Promise<string | null> {
+  const row = await hidratarContato(contactId);
+  if (!row || !contatoNaConexao(row, serviceId)) return null;
+  return pickId(row);
+}
+
+async function contactIdPorTelefoneNaConexao(serviceId: string, numero: string): Promise<string | null> {
   let rows = await buscarContatosPorTelefone(serviceId, numero, true);
   if (!rows.length) {
     const departmentId = await departamentoAzoupConfec();
@@ -976,6 +996,45 @@ async function contactIdParaMensagem(
   const mesmoNumero = escolher((row) => telefonesIguaisAssinante(numeroDoContatoDigisac(row), numero));
   if (mesmoNumero.length === 1) return mesmoNumero[0];
   if (mesmoNumero.length > 1) falha('Há mais de um contato com este telefone na Azoup Confec', 409);
+  return null;
+}
+
+async function contactIdParaMensagem(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+  extraId: string,
+): Promise<string> {
+  const serviceId = await serviceAzoupConfec();
+
+  if (extraId) {
+    const extras = await listarExtrasDoCliente(supabaseAdmin, clienteId);
+    const extra = extras.find((item) => item.id === extraId);
+    if (!extra) falha('Contato extra não encontrado', 404);
+    for (const salvo of extra.contactIds) {
+      const id = await contactIdNaConexao(salvo, serviceId);
+      if (id) return id;
+    }
+    const numero = telefoneDigisac(null, extra.telefone);
+    if (!numero) falha('Telefone inválido para envio', 400);
+    const porTelefone = await contactIdPorTelefoneNaConexao(serviceId, numero);
+    if (porTelefone) {
+      await gravarContactIdExtra(supabaseAdmin, extra.id, porTelefone);
+      return porTelefone;
+    }
+    falha('Nenhum contato deste telefone na conexão Azoup Confec', 404);
+  }
+
+  // Cadastro: prioriza contact_id já vinculado (chamados/envio). O número no Digisac
+  // pode ter mudado e diferir do telefone do clientes_azoup.
+  for (const salvo of await contactIdsJaVinculados(supabaseAdmin, clienteId)) {
+    const id = await contactIdNaConexao(salvo, serviceId);
+    if (id) return id;
+  }
+
+  const numero = await numeroCadastroCliente(supabaseAdmin, clienteId);
+  if (!numero) falha('Telefone inválido para envio', 400);
+  const porTelefone = await contactIdPorTelefoneNaConexao(serviceId, numero);
+  if (porTelefone) return porTelefone;
   falha('Nenhum contato deste telefone na conexão Azoup Confec', 404);
 }
 
