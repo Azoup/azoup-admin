@@ -12,6 +12,7 @@ import { FormInput } from '@/components/ui/FormInput';
 import { FormTimeInput } from '@/components/ui/FormTimeInput';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { PrimaryButton } from '@/components/ui/PrimaryButton';
+import { RegistrarReuniaoModal } from '@/components/ui/RegistrarReuniaoModal';
 import { ScreenCard } from '@/components/ui/ScreenCard';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
@@ -35,9 +36,33 @@ import { listarClientesParaSelecao } from '@/src/services/repos/conversas-repo';
 import { listarEventosAgendaCache, listarEventosSemCliente } from '@/src/services/repos/google-agendamentos-repo';
 import { listarRegistrosManuaisNoPeriodo } from '@/src/services/repos/reunioes-repo';
 import type { ClienteAzoupRow } from '@/src/types/azoup';
+import type { AcompanhamentoCliente } from '@/src/utils/acompanhamento';
 import { descricaoTemHtml } from '@/src/utils/agenda-html';
 import { dataCalendarioBrasil, dataHojeBrasil, formatDateTimeBR, formatYmdBR, somarDiasYmd } from '@/src/utils/format';
 import { chaveClienteDia, cobertasDeRegistrosManuais, eventoAgendaSemRegistro } from '@/src/utils/reuniao-sem-registro';
+
+function clienteDoAgendamento(ev: GoogleAgendaEvento): AcompanhamentoCliente | null {
+  const id = `${ev.cliente_id ?? ev.cliente?.id ?? ''}`.trim();
+  if (!id) return null;
+  const nome = `${ev.cliente?.nome ?? ''}`.trim() || 'Cliente';
+  return {
+    id,
+    nome,
+    email: ev.cliente?.email ?? null,
+    telefone: ev.cliente?.telefone ?? null,
+    empresa_nome: nome,
+    produtos: 0,
+    vendas: 0,
+    ordens_producao: 0,
+    clientes_cadastrados: 0,
+    fornecedores_cadastrados: 0,
+    etiqueta: 'sistema_em_uso',
+    coluna: 'sistema_em_uso',
+    dias_trial_restantes: null,
+    dias_usando: 0,
+    pendencias_abertas: 0,
+  };
+}
 
 const SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
@@ -262,6 +287,8 @@ export default function AgendamentosScreen() {
   const [formAberto, setFormAberto] = useState(false);
   const [editando, setEditando] = useState<GoogleAgendaEvento | null>(null);
   const [vincularEvento, setVincularEvento] = useState<GoogleAgendaEvento | null>(null);
+  const [clienteReuniao, setClienteReuniao] = useState<AcompanhamentoCliente | null>(null);
+  const [dataRegistroReuniao, setDataRegistroReuniao] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   const [janela, setJanela] = useState(() => janelaEmTorno(mesRef.y, mesRef.m0));
@@ -727,7 +754,21 @@ export default function AgendamentosScreen() {
                     </Pressable>
                   ) : null}
                   {semRegistro ? (
-                    <Text style={{ color: theme.warning, fontWeight: '800', fontSize: 12 }}>Sem registro</Text>
+                    <Pressable
+                      hitSlop={6}
+                      onPress={() => {
+                        const cliente = clienteDoAgendamento(ev);
+                        if (!cliente) {
+                          setMsg('Vincule o cliente ao agendamento antes de registrar a reunião.');
+                          setVincularEvento(ev);
+                          return;
+                        }
+                        setDataRegistroReuniao(dataCalendarioBrasil(ev.inicio));
+                        setClienteReuniao(cliente);
+                      }}
+                    >
+                      <Text style={{ color: theme.warning, fontWeight: '800', fontSize: 12 }}>Sem registro</Text>
+                    </Pressable>
                   ) : null}
                   {registros.some((registro) => !registro.cancelada) ? (
                     <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Com registro</Text>
@@ -856,6 +897,23 @@ export default function AgendamentosScreen() {
           </View>
         </View>
       </Modal>
+
+      <RegistrarReuniaoModal
+        cliente={clienteReuniao}
+        visible={Boolean(clienteReuniao)}
+        dataRegistroInicial={dataRegistroReuniao}
+        onClose={() => {
+          setClienteReuniao(null);
+          setDataRegistroReuniao(null);
+        }}
+        onSaved={() => {
+          void qc.invalidateQueries({ queryKey: ['registros_reuniao_periodo'] });
+          void qc.invalidateQueries({ queryKey: ['reunioes_sem_registro'] });
+          void qc.invalidateQueries({ queryKey: ['admin_cliente_reunioes'] });
+          void qc.invalidateQueries({ queryKey: ['pendencias_abertas'] });
+          void qc.invalidateQueries({ queryKey: ['acompanhamento_clientes'] });
+        }}
+      />
     </View>
   );
 }

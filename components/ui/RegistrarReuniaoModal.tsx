@@ -29,9 +29,17 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   onSaved: () => void;
+  /** Prefill da data (ex.: dia do agendamento Google). */
+  dataRegistroInicial?: string | null;
 };
 
-export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Props) {
+export function RegistrarReuniaoModal({
+  cliente,
+  visible,
+  onClose,
+  onSaved,
+  dataRegistroInicial = null,
+}: Props) {
   const { theme } = useTheme();
   const { adminProfile, session } = useAdminAuth();
   const [selecionados, setSelecionados] = useState<string[]>([]);
@@ -53,11 +61,12 @@ export function RegistrarReuniaoModal({ cliente, visible, onClose, onSaved }: Pr
     setSelecionados([]);
     setAssuntos('');
     setProximaAcao('');
-    setDataRegistro(dataHojeBrasil());
+    const dataInicial = `${dataRegistroInicial ?? ''}`.trim();
+    setDataRegistro(/^\d{4}-\d{2}-\d{2}$/.test(dataInicial) ? dataInicial : dataHojeBrasil());
     setLinhas([linhaVazia()]);
     setGeradoIa(false);
     setErro(null);
-  }, [visible, cliente?.id]);
+  }, [visible, cliente?.id, dataRegistroInicial]);
 
   function alternar(id: string) {
     setSelecionados((atual) => (atual.includes(id) ? atual.filter((x) => x !== id) : [...atual, id]));
