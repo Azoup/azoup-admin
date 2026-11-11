@@ -1,5 +1,5 @@
 import { supabase } from '@/src/lib/supabase';
-import { dataCalendarioBrasil, dataHojeBrasil, horaBrasil, instanteNaDataBrasil } from '@/src/utils/format';
+import { dataCalendarioBrasil, dataHojeBrasil, instanteNaDataBrasil } from '@/src/utils/format';
 
 export type ReuniaoClienteRow = {
   id: string;
@@ -130,25 +130,36 @@ export async function listarReunioesDoCliente(clienteId: string): Promise<Reunia
   return ((data ?? []) as unknown as ReuniaoClienteRow[]).filter((row) => !row.avulsa);
 }
 
-/** Registros manuais no período. Pendência avulsa e resumo de IA ficam de fora. */
+/** True = só o rascunho automático da IA (sem participantes). Registro lançado à mão conta mesmo com assistente de IA. */
+function soResumoAutomaticoIa(row: ReuniaoClienteRow): boolean {
+  if (!row.gerado_ia) return false;
+  if (row.reuniao_cancelada) return false;
+  return !(Array.isArray(row.participante_ids) && row.participante_ids.length > 0);
+}
+
+/** Registros lançados no período. Pendência avulsa e resumo automático da IA ficam de fora. */
 export async function listarRegistrosManuaisNoPeriodo(inicio: string, fim: string): Promise<ReuniaoClienteRow[]> {
   const pagina = 500;
   const saida: ReuniaoClienteRow[] = [];
   for (let from = 0; from < 8000; from += pagina) {
-    const { data, error } = await consultarReunioes('id,cliente_id,empresa_nome,assuntos,admin_email,created_at', (colunas) =>
-      supabase
-        .from('admin_cliente_reunioes')
-        .select(colunas)
-        .gte('created_at', inicio)
-        .lt('created_at', fim)
-        .order('created_at', { ascending: true })
-        .range(from, from + pagina - 1),
+    const { data, error } = await consultarReunioes(
+      'id,cliente_id,empresa_nome,assuntos,admin_email,created_at,participante_ids',
+      (colunas) =>
+        supabase
+          .from('admin_cliente_reunioes')
+          .select(colunas)
+          .gte('created_at', inicio)
+          .lt('created_at', fim)
+          .order('created_at', { ascending: true })
+          .range(from, from + pagina - 1),
     );
     if (error) {
       if (/admin_cliente_reunioes|schema cache/i.test(error.message)) return [];
       throw new Error(error.message);
     }
-    const rows = ((data ?? []) as unknown as ReuniaoClienteRow[]).filter((row) => !row.avulsa && !row.gerado_ia);
+    const rows = ((data ?? []) as unknown as ReuniaoClienteRow[]).filter(
+      (row) => !row.avulsa && !soResumoAutomaticoIa(row),
+    );
     saida.push(...rows);
     if ((data ?? []).length < pagina) break;
   }
@@ -240,7 +251,8 @@ export async function criarPendenciasReuniao(params: {
   const proximaAcao = params.proximaAcao?.trim() || null;
   const empresa = params.empresaNome?.trim() || null;
   const dataRegistro = params.dataRegistro?.trim() ?? '';
-  const createdAt = /^\d{4}-\d{2}-\d{2}$/.test(dataRegistro) ? instanteNaDataBrasil(dataRegistro, horaBrasil()) : null;
+  // Meio-dia em SP: a data informada permanece o dia do registro (retroativo ou hoje).
+  const createdAt = /^\d{4}-\d{2}-\d{2}$/.test(dataRegistro) ? instanteNaDataBrasil(dataRegistro, '12:00:00') : null;
   const diaRegistro = /^\d{4}-\d{2}-\d{2}$/.test(dataRegistro) ? dataRegistro : dataHojeBrasil();
   const linhas = itens.length
     ? itens
@@ -277,7 +289,27 @@ export async function criarPendenciasReuniao(params: {
     throw new Error(error.message);
   }
   if (!data?.length) throw new Error('Não foi possível registrar a reunião.');
-  return data as unknown as ReuniaoClienteRow[];
+
+  let rows = data as unknown as ReuniaoClienteRow[];
+  // Garante a data retroativa: se o insert ignorou created_at (default now()), corrige com update.
+  if (createdAt && diaRegistro) {
+    const idsDesalinhados = rows
+      .filter((row) => dataCalendarioBrasil(row.created_at) !== diaRegistro)
+      .map((row) => row.id)
+      .filter(Boolean);
+    if (idsDesalinhados.length) {
+      const { error: updError } = await supabase
+        .from('admin_cliente_reunioes')
+        .update({ created_at: createdAt } as never)
+        .in('id', idsDesalinhados);
+      if (updError) throw new Error(updError.message);
+      rows = rows.map((row) =>
+        idsDesalinhados.includes(row.id) ? { ...row, created_at: createdAt } : row,
+      );
+    }
+  }
+
+  return rows;
 }
 
 /** Pendência criada na tela de pendências, sem registro de reunião. */
@@ -411,7 +443,7 @@ export async function atualizarReuniaoCliente(params: {
   if (/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro)) {
     const diaAtual = dataCalendarioBrasil(params.createdAtAtual);
     if (diaAtual !== dataRegistro) {
-      patch.created_at = instanteNaDataBrasil(dataRegistro, horaBrasil(params.createdAtAtual));
+      patch.created_at = instanteNaDataBrasil(dataRegistro, '12:00:00');
     }
   }
 
