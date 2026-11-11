@@ -6,7 +6,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const NOME_CONEXAO = 'azoup confec';
+/** Nomes aceitos da conexão/departamento Digisac (exato, sem acento). */
+const NOMES_CONEXAO = ['azoup confec', 'acomp confec'] as const;
+const NOME_CONEXAO = NOMES_CONEXAO[0];
 const MAX_PAGINAS = 4;
 const POR_PAGINA = 50;
 
@@ -154,6 +156,22 @@ function acharPorNome(rows: Record<string, unknown>[], nome: string): Record<str
   const alvo = semAcento(nome);
   const iguais = rows.filter((row) => semAcento(`${row.name ?? ''}`) === alvo);
   return iguais.find((row) => !row.archivedAt) ?? iguais[0] ?? null;
+}
+
+function nomeConexaoCompativel(nome: string): boolean {
+  const atual = semAcento(nome);
+  if (!atual) return false;
+  if (NOMES_CONEXAO.some((alvo) => atual === alvo)) return true;
+  return atual.includes('confec') && (atual.includes('azoup') || atual.includes('acomp'));
+}
+
+function acharConexaoConfec(rows: Record<string, unknown>[]): Record<string, unknown> | null {
+  for (const nome of NOMES_CONEXAO) {
+    const exato = acharPorNome(rows, nome);
+    if (exato) return exato;
+  }
+  const fuzzy = rows.filter((row) => nomeConexaoCompativel(`${row.name ?? ''}`));
+  return fuzzy.find((row) => !row.archivedAt) ?? fuzzy[0] ?? null;
 }
 
 async function requireAdmin(req: Request) {
@@ -408,7 +426,7 @@ function chamadoNoDepartamento(row: Record<string, unknown>, departmentId: strin
   const id = idCampo(row.departmentId) || idCampo(row.department);
   if (id && id === departmentId) return true;
   if (!row.department || typeof row.department !== 'object') return false;
-  return semAcento(`${(row.department as { name?: unknown }).name ?? ''}`) === semAcento(NOME_CONEXAO);
+  return nomeConexaoCompativel(`${(row.department as { name?: unknown }).name ?? ''}`);
 }
 
 function idCampo(value: unknown): string {
@@ -600,17 +618,17 @@ function contatoUnico(data: unknown): Record<string, unknown> | null {
 
 async function serviceAzoupConfec(): Promise<string> {
   const services = await listarPaginas('/api/v1/services');
-  const service = acharPorNome(services, NOME_CONEXAO);
+  const service = acharConexaoConfec(services);
   const serviceId = service ? `${service.id ?? ''}`.trim() : '';
-  if (!serviceId) throw new Error('Conexão Azoup Confec não encontrada na Digisac.');
+  if (!serviceId) throw new Error('Conexão Azoup/Acomp Confec não encontrada na Digisac.');
   return serviceId;
 }
 
 async function departamentoAzoupConfec(): Promise<string> {
   const departments = await listarPaginas('/api/v1/departments');
-  const department = acharPorNome(departments, NOME_CONEXAO);
+  const department = acharConexaoConfec(departments);
   const departmentId = department ? `${department.id ?? ''}`.trim() : '';
-  if (!departmentId) throw new Error('Departamento Azoup Confec não encontrado na Digisac.');
+  if (!departmentId) throw new Error('Departamento Azoup/Acomp Confec não encontrado na Digisac.');
   return departmentId;
 }
 
@@ -671,7 +689,7 @@ function contatoNaConexao(row: Record<string, unknown>, serviceId: string): bool
   const servico = row.service && typeof row.service === 'object' && !Array.isArray(row.service)
     ? (row.service as { name?: unknown; id?: unknown })
     : null;
-  if (servico && semAcento(`${servico.name ?? ''}`) === semAcento(NOME_CONEXAO)) return true;
+  if (servico && nomeConexaoCompativel(`${servico.name ?? ''}`)) return true;
   return !atual;
 }
 
@@ -965,37 +983,55 @@ async function contactIdsJaVinculados(
   return ids;
 }
 
-async function contactIdNaConexao(contactId: string, serviceId: string): Promise<string | null> {
+/** Contato já usado em chamado/envio do cliente: existe na Digisac e pode receber mensagem. */
+async function contactIdVinculadoUtilizavel(contactId: string, serviceId: string): Promise<string | null> {
   const row = await hidratarContato(contactId);
-  if (!row || !contatoNaConexao(row, serviceId)) return null;
-  return pickId(row);
+  const id = pickId(row);
+  if (!id || !row) return null;
+  if (contatoNaConexao(row, serviceId)) return id;
+  // Já há histórico com este contact_id; não bloqueia se o serviceId veio vazio/renomeado.
+  return id;
 }
 
 async function contactIdPorTelefoneNaConexao(serviceId: string, numero: string): Promise<string | null> {
   let rows = await buscarContatosPorTelefone(serviceId, numero, true);
   if (!rows.length) {
+    // Sem filtro rígido de serviço: a API às vezes não devolve o contact no serviceId esperado.
+    rows = await buscarContatosPorTelefone(serviceId, numero, false);
+  }
+  if (!rows.length) {
     const departmentId = await departamentoAzoupConfec();
     rows = await buscarContatosNosChamados(departmentId, [numero]);
   }
-  const escolher = (pred: (row: Record<string, unknown>) => boolean): string[] => {
+  const escolher = (
+    pred: (row: Record<string, unknown>) => boolean,
+    exigirConexao: boolean,
+  ): string[] => {
     const ids: string[] = [];
     for (const row of rows) {
-      if (!contatoNaConexao(row, serviceId) || !pred(row)) continue;
+      if (exigirConexao && !contatoNaConexao(row, serviceId)) continue;
+      if (!pred(row)) continue;
       const id = pickId(row);
       if (id && !ids.includes(id)) ids.push(id);
     }
     return ids;
   };
-  const forte = escolher((row) => {
+  const predForte = (row: Record<string, unknown>) => {
     const atual = numeroDoContatoDigisac(row);
     if (atual) return telefonesIguaisForte(atual, numero);
     return row[MARCA_NUMERO_OK] === true;
-  });
-  if (forte.length === 1) return forte[0];
-  if (forte.length > 1) falha('Há mais de um contato com este telefone na Azoup Confec', 409);
-  const mesmoNumero = escolher((row) => telefonesIguaisAssinante(numeroDoContatoDigisac(row), numero));
-  if (mesmoNumero.length === 1) return mesmoNumero[0];
-  if (mesmoNumero.length > 1) falha('Há mais de um contato com este telefone na Azoup Confec', 409);
+  };
+  const predAssinante = (row: Record<string, unknown>) =>
+    telefonesIguaisAssinante(numeroDoContatoDigisac(row), numero);
+
+  for (const exigir of [true, false]) {
+    const forte = escolher(predForte, exigir);
+    if (forte.length === 1) return forte[0];
+    if (forte.length > 1) falha('Há mais de um contato com este telefone na Azoup Confec', 409);
+    const mesmoNumero = escolher(predAssinante, exigir);
+    if (mesmoNumero.length === 1) return mesmoNumero[0];
+    if (mesmoNumero.length > 1) falha('Há mais de um contato com este telefone na Azoup Confec', 409);
+  }
   return null;
 }
 
@@ -1011,7 +1047,7 @@ async function contactIdParaMensagem(
     const extra = extras.find((item) => item.id === extraId);
     if (!extra) falha('Contato extra não encontrado', 404);
     for (const salvo of extra.contactIds) {
-      const id = await contactIdNaConexao(salvo, serviceId);
+      const id = await contactIdVinculadoUtilizavel(salvo, serviceId);
       if (id) return id;
     }
     const numero = telefoneDigisac(null, extra.telefone);
@@ -1024,10 +1060,9 @@ async function contactIdParaMensagem(
     falha('Nenhum contato deste telefone na conexão Azoup Confec', 404);
   }
 
-  // Cadastro: prioriza contact_id já vinculado (chamados/envio). O número no Digisac
-  // pode ter mudado e diferir do telefone do clientes_azoup.
+  // Prioriza contact_id já ligado aos chamados Digisac deste cliente.
   for (const salvo of await contactIdsJaVinculados(supabaseAdmin, clienteId)) {
-    const id = await contactIdNaConexao(salvo, serviceId);
+    const id = await contactIdVinculadoUtilizavel(salvo, serviceId);
     if (id) return id;
   }
 

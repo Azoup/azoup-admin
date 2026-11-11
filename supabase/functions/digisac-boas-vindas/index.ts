@@ -6,7 +6,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-secret',
 };
 
-const NOME_CONEXAO = 'azoup confec';
+const NOMES_CONEXAO = ['azoup confec', 'acomp confec'] as const;
+const NOME_CONEXAO = NOMES_CONEXAO[0];
 const ESPERA_EMPRESA_MS = 2_000;
 const TENTATIVAS_EMPRESA = 6;
 
@@ -151,6 +152,21 @@ async function listarPaginas(path: string): Promise<Record<string, unknown>[]> {
 function acharPorNome(rows: Record<string, unknown>[], nome: string): Record<string, unknown> | null {
   const alvo = semAcento(nome);
   return rows.find((row) => semAcento(`${row.name ?? ''}`) === alvo) ?? null;
+}
+
+function nomeConexaoCompativel(nome: string): boolean {
+  const atual = semAcento(nome);
+  if (!atual) return false;
+  if (NOMES_CONEXAO.some((alvo) => atual === alvo)) return true;
+  return atual.includes('confec') && (atual.includes('azoup') || atual.includes('acomp'));
+}
+
+function acharConexaoConfec(rows: Record<string, unknown>[]): Record<string, unknown> | null {
+  for (const nome of NOMES_CONEXAO) {
+    const exato = acharPorNome(rows, nome);
+    if (exato) return exato;
+  }
+  return rows.find((row) => nomeConexaoCompativel(`${row.name ?? ''}`)) ?? null;
 }
 
 async function buscarEmpresas(supabase: SupabaseClient, clienteId: string): Promise<EmpresaRow[]> {
@@ -328,10 +344,10 @@ async function enviar(supabase: SupabaseClient, clienteId: string, empresa: stri
       listarPaginas('/api/v1/departments'),
       digisac('/api/v1/me'),
     ]);
-    const service = acharPorNome(services, NOME_CONEXAO);
-    const department = acharPorNome(departments, NOME_CONEXAO);
-    if (!service?.id) throw new Error('Conexão Azoup Confec não encontrada na Digisac');
-    if (!department?.id) throw new Error('Departamento Azoup Confec não encontrado na Digisac');
+    const service = acharConexaoConfec(services);
+    const department = acharConexaoConfec(departments);
+    if (!service?.id) throw new Error('Conexão Azoup/Acomp Confec não encontrada na Digisac');
+    if (!department?.id) throw new Error('Departamento Azoup/Acomp Confec não encontrado na Digisac');
     const userId = pickId(me);
     if (!userId) throw new Error('Token Digisac sem usuário');
 
