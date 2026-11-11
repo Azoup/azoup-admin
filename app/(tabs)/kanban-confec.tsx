@@ -351,14 +351,6 @@ function TicketCard({
           Criado em {formatDateTimeBR(card.created_at)}
           {card.completed_at ? ` · Concluído em ${formatDateTimeBR(card.completed_at)}` : ''}
         </Text>
-        {card.dev_notes?.trim() ? (
-          <View style={[styles.blocoDevCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
-            <Text style={{ color: theme.headerText, fontSize: 10, fontWeight: '800' }}>DEV</Text>
-            <Text style={{ color: theme.text, fontSize: 11 }} numberOfLines={3}>
-              {card.dev_notes.trim()}
-            </Text>
-          </View>
-        ) : null}
       </Pressable>
     </View>
   );
@@ -1100,7 +1092,14 @@ export default function KanbanConfecScreen() {
                 <Text style={{ color: theme.headerText, fontWeight: '800' }}>Comentários</Text>
                 {detalhe.comentarios.map((item) => (
                   <View key={item.id} style={{ gap: 2 }}>
-                    <Text style={{ color: theme.text }}>{item.texto}</Text>
+                    <Text
+                      style={[
+                        { color: theme.text },
+                        Platform.OS === 'web' ? ({ whiteSpace: 'pre-wrap' } as object) : null,
+                      ]}
+                    >
+                      {item.texto}
+                    </Text>
                     <Text style={{ color: theme.textMuted, fontSize: 11 }}>{item.author_email} · {formatDateTimeBR(item.created_at)}</Text>
                     {item.author_email.toLowerCase() === email.toLowerCase() ? (
                       <Pressable onPress={() => setComentarioEdit({ id: item.id, texto: item.texto })}>
@@ -1114,7 +1113,14 @@ export default function KanbanConfecScreen() {
                     ) : null}
                   </View>
                 ))}
-                <FormInput value={comentario} onChangeText={setComentario} placeholder="Comentário" />
+                <FormInput
+                  value={comentario}
+                  onChangeText={setComentario}
+                  placeholder="Comentário (Enter para nova linha)"
+                  multiline
+                  blurOnSubmit={false}
+                  style={styles.area}
+                />
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <PrimaryButton
                     compact
@@ -1448,7 +1454,14 @@ export default function KanbanConfecScreen() {
       <Modal visible={comentarioEdit != null} animationType="fade" transparent onRequestClose={() => setComentarioEdit(null)}>
         <View style={styles.overlay}>
           <View style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border, width: '100%', maxWidth: 420 }]}>
-            <FormInput value={comentarioEdit?.texto ?? ''} onChangeText={(texto) => setComentarioEdit((atual) => (atual ? { ...atual, texto } : atual))} />
+            <FormInput
+              value={comentarioEdit?.texto ?? ''}
+              onChangeText={(texto) => setComentarioEdit((atual) => (atual ? { ...atual, texto } : atual))}
+              multiline
+              blurOnSubmit={false}
+              style={styles.area}
+              placeholder="Comentário (Enter para nova linha)"
+            />
             <PrimaryButton
               label="Salvar comentário"
               onPress={() => {
@@ -1513,14 +1526,6 @@ const styles = StyleSheet.create({
   lightbox: { width: '92%', height: '82%' },
   colunaTopo: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
   card: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 2 },
-  blocoDevCard: {
-    marginTop: 8,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    gap: 2,
-  },
   blocoDev: {
     marginTop: 4,
     borderWidth: 1,
