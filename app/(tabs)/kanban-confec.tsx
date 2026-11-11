@@ -351,6 +351,14 @@ function TicketCard({
           Criado em {formatDateTimeBR(card.created_at)}
           {card.completed_at ? ` · Concluído em ${formatDateTimeBR(card.completed_at)}` : ''}
         </Text>
+        {card.dev_notes?.trim() ? (
+          <View style={[styles.blocoDevCard, { borderColor: theme.border, backgroundColor: theme.background }]}>
+            <Text style={{ color: theme.headerText, fontSize: 10, fontWeight: '800' }}>DEV</Text>
+            <Text style={{ color: theme.text, fontSize: 11 }} numberOfLines={3}>
+              {card.dev_notes.trim()}
+            </Text>
+          </View>
+        ) : null}
       </Pressable>
     </View>
   );
@@ -928,19 +936,35 @@ export default function KanbanConfecScreen() {
                     ? ` · ${[detalhe.cliente_empresa, detalhe.cliente_nome].filter(Boolean).join(' · ')}`
                     : ''}
                 </Text>
-                <Text style={{ color: theme.text }}>{detalhe.description || 'Sem observações do ticket.'}</Text>
-                <Text style={{ color: theme.text }}>{detalhe.dev_notes || 'Sem observações DEV.'}</Text>
-                <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                  Seção: {detalhe.secao || '—'} · Tela: {detalhe.tela || '—'}
-                  {detalhe.tela_nova ? ' (nova)' : ''}
-                </Text>
-                <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                  Analista: {detalhe.analista_email || '—'} · Desenvolvedor: {detalhe.desenvolvedor_email || '—'}
-                </Text>
-                <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                  Criado por {detalhe.created_by_email || '—'} em {formatDateTimeBR(detalhe.created_at)}
-                  {detalhe.completed_at ? ` · Concluído em ${formatDateTimeBR(detalhe.completed_at)}` : ''}
-                </Text>
+                <View style={{ gap: 4 }}>
+                  <Text style={{ color: theme.headerText, fontWeight: '800' }}>Observações do ticket</Text>
+                  <Text style={{ color: theme.text }}>{detalhe.description || 'Sem observações do ticket.'}</Text>
+                </View>
+                <View
+                  style={[
+                    styles.blocoDev,
+                    {
+                      borderColor: theme.border,
+                      backgroundColor: theme.background,
+                    },
+                  ]}
+                >
+                  <Text style={{ color: theme.headerText, fontWeight: '800' }}>Observações / correções (DEV)</Text>
+                  <Text style={{ color: theme.text }}>{detalhe.dev_notes || 'Sem observações DEV.'}</Text>
+                </View>
+                <View style={[styles.separadorInfo, { borderTopColor: theme.border }]}>
+                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                    Seção: {detalhe.secao || '—'} · Tela: {detalhe.tela || '—'}
+                    {detalhe.tela_nova ? ' (nova)' : ''}
+                  </Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                    Analista: {detalhe.analista_email || '—'} · Desenvolvedor: {detalhe.desenvolvedor_email || '—'}
+                  </Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                    Criado por {detalhe.created_by_email || '—'} em {formatDateTimeBR(detalhe.created_at)}
+                    {detalhe.completed_at ? ` · Concluído em ${formatDateTimeBR(detalhe.completed_at)}` : ''}
+                  </Text>
+                </View>
                 {detalhe.nota_linha ? (
                   <View style={{ gap: 4, marginTop: 4 }}>
                     <Text style={{ color: theme.headerText, fontWeight: '800' }}>Nota publicada</Text>
@@ -1489,6 +1513,28 @@ const styles = StyleSheet.create({
   lightbox: { width: '92%', height: '82%' },
   colunaTopo: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
   card: { borderWidth: 1, borderRadius: 12, padding: 10, gap: 2 },
+  blocoDevCard: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 2,
+  },
+  blocoDev: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  separadorInfo: {
+    marginTop: 4,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    gap: 4,
+  },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 16 },
   modal: { width: '100%', maxWidth: 560, maxHeight: '90%' },
   modalCard: { borderWidth: 1, borderRadius: 16, padding: 16, gap: 10 },
