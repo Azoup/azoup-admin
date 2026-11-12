@@ -16,6 +16,7 @@ import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { ConcluirPendenciaModal } from '@/components/ui/ConcluirPendenciaModal';
 import { EditarPendenciaModal } from '@/components/ui/EditarPendenciaModal';
 import { EnviarMensagemProntaModal } from '@/components/ui/EnviarMensagemProntaModal';
+import { AcompanhamentoResumoPanel } from '@/components/ui/AcompanhamentoResumoPanel';
 import { RegistrarReuniaoModal } from '@/components/ui/RegistrarReuniaoModal';
 import { SectionTitle } from '@/components/ui/SectionTitle';
 import { Text } from '@/components/Themed';
@@ -1039,6 +1040,10 @@ export function HistoricoClienteTela({
   const [editandoDescricaoId, setEditandoDescricaoId] = useState<string | null>(null);
   const [descricaoEdit, setDescricaoEdit] = useState('');
   const [erroTelefone, setErroTelefone] = useState<string | null>(null);
+  const [abaCliente, setAbaCliente] = useState<'dados' | 'resumo'>('dados');
+  useEffect(() => {
+    setAbaCliente('dados');
+  }, [cliente.id]);
   const telefone = cliente?.telefone?.trim() || '';
   const celular = cliente?.celular?.trim() || '';
   const contato = [telefone, celular && celular !== telefone ? celular : ''].filter(Boolean).join(' · ') || '—';
@@ -1487,6 +1492,38 @@ export function HistoricoClienteTela({
     <>
       {embutido ? null : <BackLink href="/(tabs)/acompanhamento" label="Acompanhamento" />}
       {embutido ? null : <PageHeader title={cliente.nome} subtitle={cliente.empresa_nome?.trim() || 'Cliente'} />}
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {(['dados', 'resumo'] as const).map((chave) => {
+          const ativa = abaCliente === chave;
+          const rotulo = chave === 'dados' ? 'Dados' : 'Resumo';
+          return (
+            <Pressable
+              key={chave}
+              onPress={() => setAbaCliente(chave)}
+              style={({ pressed }) => ({
+                minHeight: 36,
+                paddingHorizontal: 14,
+                borderRadius: 8,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 1,
+                borderColor: theme.cadastroAction,
+                backgroundColor: ativa ? theme.cadastroAction : theme.surface,
+                opacity: pressed ? 0.88 : 1,
+              })}
+            >
+              <Text style={{ color: ativa ? theme.cadastroActionText : theme.cadastroAction, fontWeight: '800', fontSize: 13 }}>
+                {rotulo}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {abaCliente === 'resumo' ? (
+        <AcompanhamentoResumoPanel clienteId={cliente.id} clienteNome={cliente.empresa_nome?.trim() || cliente.nome} />
+      ) : null}
+      {abaCliente === 'dados' ? (
+      <>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <BotaoAcao label="Registrar reunião" onPress={() => setReuniaoAberta(true)} />
         <BotaoAcao label="Registrar conversa" onPress={() => setConversaAberta(true)} />
@@ -2099,6 +2136,8 @@ export function HistoricoClienteTela({
             <ActivityIndicator color={theme.cadastroAction} />
           ) : null}
       </View>
+      </>
+      ) : null}
       <CongelarModal
         cliente={cliente}
         visible={congelarAberto}

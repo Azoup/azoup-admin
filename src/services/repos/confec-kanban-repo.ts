@@ -597,6 +597,51 @@ export async function listarNotasPublicadasConfec(): Promise<ConfecCard[]> {
     .sort((a, b) => `${b.completed_at ?? ''}`.localeCompare(`${a.completed_at ?? ''}`));
 }
 
+export type TicketConfecAberto = {
+  id: string;
+  ticket_number: number;
+  titulo: string;
+  secao: string | null;
+  status: string;
+};
+
+/** Tickets Confec em aberto do cliente (fora da coluna de conclusão / sem completed_at). */
+export async function listarTicketsAbertosPorCliente(clienteId: string): Promise<TicketConfecAberto[]> {
+  if (!clienteId) return [];
+  const { data: colunasData, error: colunasErr } = await supabase
+    .from('confec_kanban_columns')
+    .select('id,title,slug,color,position')
+    .order('position');
+  if (colunasErr) throw erroTabela(colunasErr.message);
+  const colunas = (colunasData ?? []) as ConfecColuna[];
+  const conclusao = colunaDeConclusao(colunas);
+  const conclusaoSlug = conclusao?.slug ?? 'finalizados';
+
+  const { data, error } = await supabase
+    .from('confec_kanban_cards')
+    .select('id,ticket_number,title,secao,status,completed_at')
+    .eq('cliente_id', clienteId)
+    .is('completed_at', null)
+    .neq('status', conclusaoSlug)
+    .order('created_at', { ascending: false })
+    .limit(500);
+  if (error) throw erroTabela(error.message);
+
+  return ((data ?? []) as Array<Record<string, unknown>>)
+    .filter((row) => {
+      const status = `${row.status ?? ''}`;
+      const coluna = colunas.find((c) => c.slug === status);
+      return !(coluna && ehColunaConclusao(coluna, colunas));
+    })
+    .map((row) => ({
+      id: `${row.id}`,
+      ticket_number: Number(row.ticket_number) || 0,
+      titulo: `${row.title ?? ''}`.trim(),
+      secao: `${row.secao ?? ''}`.trim() || null,
+      status: `${row.status ?? ''}`,
+    }));
+}
+
 export async function reordenarCardsConfec(ids: string[]): Promise<void> {
   await Promise.all(
     ids.map((id, position) => supabase.from('confec_kanban_cards').update({ position } as never).eq('id', id)),

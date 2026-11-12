@@ -920,6 +920,83 @@ serve(async (req) => {
       });
     }
 
+    if (body.op === 'get_cliente_resumo_uso') {
+      const clienteId = `${body.payload?.cliente_id ?? ''}`.trim();
+      if (!clienteId) throw new Error('cliente_id obrigatório');
+
+      const diaSp = (raw: unknown): string | null => {
+        const t = `${raw ?? ''}`.trim();
+        if (!t) return null;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+        const d = new Date(t.includes(' ') && !t.includes('T') ? t.replace(' ', 'T') : t);
+        if (Number.isNaN(d.getTime())) return null;
+        return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
+      };
+
+      const metrica = async (
+        tabela: string,
+        campoCliente: string,
+        campoData = 'created_at',
+      ): Promise<{ quantidade: number | null; ultima_data: string | null }> => {
+        const [countRes, lastRes] = await Promise.all([
+          supabaseAdmin.from(tabela).select('id', { count: 'exact', head: true }).eq(campoCliente, clienteId),
+          supabaseAdmin
+            .from(tabela)
+            .select(campoData)
+            .eq(campoCliente, clienteId)
+            .order(campoData, { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
+        if (countRes.error) {
+          console.warn(`[get_cliente_resumo_uso] ${tabela}:`, countRes.error);
+          return { quantidade: null, ultima_data: null };
+        }
+        const raw = lastRes.data ? (lastRes.data as Record<string, unknown>)[campoData] : null;
+        return { quantidade: countRes.count ?? 0, ultima_data: diaSp(raw) };
+      };
+
+      const [
+        clientes,
+        fornecedores,
+        produtos,
+        tecidos,
+        aviamentos,
+        vendas,
+        notas,
+        ops,
+        cr,
+        cp,
+        mov,
+      ] = await Promise.all([
+        metrica('clientes_cadastros', 'cliente_id'),
+        metrica('fornecedores_cadastros', 'cliente_id'),
+        metrica('produtos', 'cliente_id'),
+        metrica('tecidos', 'cliente_id'),
+        metrica('aviamentos', 'cliente_id'),
+        metrica('venda', 'cliente_id_tenant'),
+        metrica('nota_fiscal', 'cliente_id_tenant'),
+        metrica('producao_op', 'cliente_id_tenant'),
+        metrica('contas_receber', 'cliente_id_tenant'),
+        metrica('contas_pagar', 'cliente_id_tenant'),
+        metrica('estoque_movimentacao', 'cliente_id_tenant', 'data_movimentacao'),
+      ]);
+
+      return new Response(
+        JSON.stringify({
+          uso: {
+            cadastros: { clientes, fornecedores, produtos, tecidos, aviamentos },
+            vendas: { vendas, notas_fiscais: notas },
+            producao: { ops },
+            financeiro: { contas_receber: cr, contas_pagar: cp },
+            estoque: { movimentacoes: mov },
+            pdv: {},
+          },
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+
     if (body.op === 'get_cliente_metricas') {
       const clienteId = `${body.payload?.cliente_id ?? ''}`.trim();
       if (!clienteId) throw new Error('cliente_id obrigatório');

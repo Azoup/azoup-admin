@@ -173,6 +173,29 @@ export async function obterMetricasClienteViaFunction(payload: ClienteMetricasPa
   return invoke<ClienteMetricasResponse>('get_cliente_metricas', payload);
 }
 
+export type ResumoUsoMetrica = { quantidade: number | null; ultima_data: string | null };
+
+export type ClienteResumoUsoResponse = {
+  uso: {
+    cadastros?: {
+      clientes?: ResumoUsoMetrica;
+      fornecedores?: ResumoUsoMetrica;
+      produtos?: ResumoUsoMetrica;
+      tecidos?: ResumoUsoMetrica;
+      aviamentos?: ResumoUsoMetrica;
+    };
+    vendas?: { vendas?: ResumoUsoMetrica; notas_fiscais?: ResumoUsoMetrica };
+    producao?: { ops?: ResumoUsoMetrica };
+    financeiro?: { contas_receber?: ResumoUsoMetrica; contas_pagar?: ResumoUsoMetrica };
+    estoque?: { movimentacoes?: ResumoUsoMetrica };
+    pdv?: Record<string, never>;
+  };
+};
+
+export async function obterResumoUsoClienteViaFunction(payload: ClienteMetricasPayload) {
+  return invoke<ClienteResumoUsoResponse>('get_cliente_resumo_uso', payload);
+}
+
 export type ClienteCobrancaPayload = {
   cliente_id?: string;
   stripe_subscription_id?: string;

@@ -4,6 +4,7 @@ export const CONFEC_SECOES = [
   'Financeiro',
   'Cadastros',
   'Estoque',
+  'PDV',
   'Agenda',
   'Outros',
 ] as const;
