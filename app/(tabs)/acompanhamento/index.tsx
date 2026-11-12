@@ -1040,9 +1040,9 @@ export function HistoricoClienteTela({
   const [editandoDescricaoId, setEditandoDescricaoId] = useState<string | null>(null);
   const [descricaoEdit, setDescricaoEdit] = useState('');
   const [erroTelefone, setErroTelefone] = useState<string | null>(null);
-  const [abaCliente, setAbaCliente] = useState<'dados' | 'resumo'>('dados');
+  const [abaCliente, setAbaCliente] = useState<'dados' | 'resumo'>('resumo');
   useEffect(() => {
-    setAbaCliente('dados');
+    setAbaCliente('resumo');
   }, [cliente.id]);
   const telefone = cliente?.telefone?.trim() || '';
   const celular = cliente?.celular?.trim() || '';
