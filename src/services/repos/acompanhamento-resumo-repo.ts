@@ -3,6 +3,8 @@ import { obterResumoUsoClienteViaFunction } from '@/src/services/stripe-admin-ap
 import { dataCalendarioBrasil } from '@/src/utils/format';
 import {
   CAMPOS_USO_POR_SECAO,
+  RESUMO_SECOES,
+  ehTreinouStatus,
   metricaVazia,
   normalizarPayload,
   payloadVazio,
@@ -10,6 +12,7 @@ import {
   type ResumoPayload,
   type ResumoSecaoId,
   type ResumoUsoCampos,
+  type TreinouStatus,
 } from '@/src/utils/acompanhamento-resumo';
 
 export type ResumoSnapshotRow = {
@@ -21,10 +24,60 @@ export type ResumoSnapshotRow = {
 };
 
 function erroTabela(message: string): Error {
-  if (/admin_cliente_resumo_snapshots|schema cache|does not exist/i.test(message)) {
+  if (/admin_cliente_resumo_snapshots|admin_cliente_resumo_treinou|schema cache|does not exist/i.test(message)) {
     return new Error('Execute supabase/sql/admin_cliente_resumo.sql no Supabase.');
   }
   return new Error(message);
+}
+
+export async function listarTreinouResumo(clienteId: string): Promise<Record<ResumoSecaoId, TreinouStatus>> {
+  const base = Object.fromEntries(RESUMO_SECOES.map((s) => [s, 'nao_treinou' as TreinouStatus])) as Record<
+    ResumoSecaoId,
+    TreinouStatus
+  >;
+  if (!clienteId) return base;
+  const { data, error } = await supabase
+    .from('admin_cliente_resumo_treinou')
+    .select('secao,status')
+    .eq('cliente_id', clienteId);
+  if (error) throw erroTabela(error.message);
+  for (const row of data ?? []) {
+    const secao = `${(row as { secao?: string }).secao ?? ''}`.trim() as ResumoSecaoId;
+    const status = `${(row as { status?: string }).status ?? ''}`.trim();
+    if (RESUMO_SECOES.includes(secao) && ehTreinouStatus(status)) {
+      base[secao] = status;
+    }
+  }
+  return base;
+}
+
+export async function salvarTreinouResumo(params: {
+  clienteId: string;
+  secao: ResumoSecaoId;
+  status: TreinouStatus;
+  adminEmail?: string | null;
+}): Promise<void> {
+  if (!params.clienteId) throw new Error('Cliente inválido.');
+  if (!RESUMO_SECOES.includes(params.secao)) throw new Error('Seção inválida.');
+  if (!ehTreinouStatus(params.status)) throw new Error('Status inválido.');
+  const { error } = await supabase.from('admin_cliente_resumo_treinou').upsert(
+    {
+      cliente_id: params.clienteId,
+      secao: params.secao,
+      status: params.status,
+      admin_email: params.adminEmail?.trim() || null,
+      updated_at: new Date().toISOString(),
+    } as never,
+    { onConflict: 'cliente_id,secao' },
+  );
+  if (error) throw erroTabela(error.message);
+}
+
+/** Uso ao vivo do banco (edge function com fallback local). */
+export async function carregarUsoResumo(
+  clienteId: string,
+): Promise<Partial<Record<ResumoSecaoId, ResumoUsoCampos>>> {
+  return sugerirMetricasResumoUso(clienteId);
 }
 
 export async function listarSnapshotsResumo(clienteId: string): Promise<ResumoSnapshotRow[]> {

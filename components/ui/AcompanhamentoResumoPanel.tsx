@@ -1,21 +1,14 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import { FormDateInput } from '@/components/ui/FormDateInput';
-import { FormField } from '@/components/ui/FormField';
-import { FormInput } from '@/components/ui/FormInput';
-import { PrimaryButton } from '@/components/ui/PrimaryButton';
 import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import {
-  listarSnapshotsResumo,
-  montarPayloadFormularioResumo,
-  obterUltimoSnapshotResumo,
-  salvarSnapshotResumo,
-  type ResumoSnapshotRow,
+  carregarUsoResumo,
+  listarTreinouResumo,
+  salvarTreinouResumo,
 } from '@/src/services/repos/acompanhamento-resumo-repo';
 import {
   listarTicketsAbertosPorCliente,
@@ -23,21 +16,15 @@ import {
   type TicketConfecAberto,
 } from '@/src/services/repos/confec-kanban-repo';
 import {
-  CAMPOS_USO_POR_SECAO,
   RESUMO_SECAO_CONFEC,
   RESUMO_SECAO_LABEL,
   RESUMO_SECOES,
   TREINOU_LABEL,
   TREINOU_STATUS,
-  formatarMetricaUso,
-  metricaVazia,
-  normalizarPayload,
   textoUsoSecao,
-  type ResumoPayload,
   type ResumoSecaoId,
   type TreinouStatus,
 } from '@/src/utils/acompanhamento-resumo';
-import { formatDateTimeBR } from '@/src/utils/format';
 
 type Props = {
   clienteId: string;
@@ -47,6 +34,11 @@ type Props = {
 function ticketsDaSecao(tickets: TicketConfecAberto[], secao: ResumoSecaoId): TicketConfecAberto[] {
   const alvo = RESUMO_SECAO_CONFEC[secao];
   return tickets.filter((t) => `${t.secao ?? ''}`.trim() === alvo);
+}
+
+function proximoTreinou(atual: TreinouStatus): TreinouStatus {
+  const idx = TREINOU_STATUS.indexOf(atual);
+  return TREINOU_STATUS[(idx + 1) % TREINOU_STATUS.length] ?? 'nao_treinou';
 }
 
 function TextoTickets({ tickets }: { tickets: TicketConfecAberto[] }) {
@@ -70,11 +62,19 @@ export function AcompanhamentoResumoPanel({ clienteId, clienteNome }: Props) {
   const { theme } = useTheme();
   const { adminProfile, session } = useAdminAuth();
   const qc = useQueryClient();
-  const [formAberto, setFormAberto] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [secaoSalvando, setSecaoSalvando] = useState<ResumoSecaoId | null>(null);
 
-  const ultimoQ = useQuery({
-    queryKey: ['admin_cliente_resumo_ultimo', clienteId],
-    queryFn: () => obterUltimoSnapshotResumo(clienteId),
+  const usoQ = useQuery({
+    queryKey: ['admin_cliente_resumo_uso', clienteId],
+    queryFn: () => carregarUsoResumo(clienteId),
+    enabled: Boolean(clienteId),
+    staleTime: 60_000,
+  });
+
+  const treinouQ = useQuery({
+    queryKey: ['admin_cliente_resumo_treinou', clienteId],
+    queryFn: () => listarTreinouResumo(clienteId),
     enabled: Boolean(clienteId),
   });
 
@@ -84,8 +84,32 @@ export function AcompanhamentoResumoPanel({ clienteId, clienteNome }: Props) {
     enabled: Boolean(clienteId),
   });
 
-  const payload = ultimoQ.data?.payload ?? null;
+  const salvarTreinou = useMutation({
+    mutationFn: (params: { secao: ResumoSecaoId; status: TreinouStatus }) =>
+      salvarTreinouResumo({
+        clienteId,
+        secao: params.secao,
+        status: params.status,
+        adminEmail: adminProfile?.email ?? session?.user?.email ?? null,
+      }),
+    onMutate: (params) => {
+      setSecaoSalvando(params.secao);
+      setErro(null);
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['admin_cliente_resumo_treinou', clienteId] });
+      setSecaoSalvando(null);
+    },
+    onError: (e) => {
+      setSecaoSalvando(null);
+      setErro(e instanceof Error ? e.message : 'Erro ao salvar treinou');
+    },
+  });
+
   const tickets = ticketsQ.data ?? [];
+  const treinouMap = treinouQ.data;
+  const usoMap = usoQ.data ?? {};
+  const carregando = usoQ.isLoading || treinouQ.isLoading || ticketsQ.isLoading;
 
   return (
     <View style={{ gap: 12 }}>
@@ -94,26 +118,33 @@ export function AcompanhamentoResumoPanel({ clienteId, clienteNome }: Props) {
           Resumo{clienteNome ? ` · ${clienteNome}` : ''}
         </Text>
         <Pressable
-          onPress={() => setFormAberto(true)}
+          onPress={() => {
+            void qc.invalidateQueries({ queryKey: ['admin_cliente_resumo_uso', clienteId] });
+            void qc.invalidateQueries({ queryKey: ['confec_tickets_abertos', clienteId] });
+          }}
           style={({ pressed }) => [
-            styles.botao,
-            { backgroundColor: theme.cadastroAction, opacity: pressed ? 0.85 : 1 },
+            styles.botaoSec,
+            { borderColor: theme.border, opacity: pressed ? 0.85 : 1 },
           ]}
         >
-          <FontAwesome name="pencil" size={12} color={theme.cadastroActionText} />
-          <Text style={{ color: theme.cadastroActionText, fontWeight: '800', fontSize: 13 }}>Atualizar uso</Text>
+          <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>Atualizar uso</Text>
         </Pressable>
       </View>
+      <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+        Uso vem do banco automaticamente. Toque em Treinou para alternar o status.
+      </Text>
 
-      {ultimoQ.isLoading || ticketsQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
-      {ultimoQ.isError ? (
-        <Text style={{ color: theme.error }}>{(ultimoQ.error as Error).message}</Text>
+      {carregando ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+      {usoQ.isError ? <Text style={{ color: theme.error }}>{(usoQ.error as Error).message}</Text> : null}
+      {treinouQ.isError ? (
+        <Text style={{ color: theme.error }}>{(treinouQ.error as Error).message}</Text>
       ) : null}
       {ticketsQ.isError ? (
         <Text style={{ color: theme.error }}>{(ticketsQ.error as Error).message}</Text>
       ) : null}
+      {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
 
-      {!ultimoQ.isLoading ? (
+      {!carregando ? (
         <View style={[styles.tabela, { borderColor: theme.border }]}>
           <View style={[styles.linhaCabecalho, { backgroundColor: theme.surfaceMuted, borderBottomColor: theme.border }]}>
             <Text style={[styles.celSecao, { color: theme.textMuted, fontWeight: '800' }]}>Seção</Text>
@@ -122,8 +153,8 @@ export function AcompanhamentoResumoPanel({ clienteId, clienteNome }: Props) {
             <Text style={[styles.celPend, { color: theme.textMuted, fontWeight: '800' }]}>Pendência</Text>
           </View>
           {RESUMO_SECOES.map((secao) => {
-            const bloco = payload?.[secao];
-            const treinou = bloco?.treinou ?? 'nao_treinou';
+            const treinou = treinouMap?.[secao] ?? 'nao_treinou';
+            const salvando = secaoSalvando === secao && salvarTreinou.isPending;
             return (
               <View
                 key={secao}
@@ -132,11 +163,32 @@ export function AcompanhamentoResumoPanel({ clienteId, clienteNome }: Props) {
                 <Text style={[styles.celSecao, { color: theme.headerText, fontWeight: '800' }]}>
                   {RESUMO_SECAO_LABEL[secao]}
                 </Text>
-                <Text style={[styles.celTreinou, { color: theme.text, fontSize: 12 }]}>
-                  {TREINOU_LABEL[treinou]}
-                </Text>
+                <View style={styles.celTreinou}>
+                  <Pressable
+                    disabled={salvarTreinou.isPending}
+                    onPress={() =>
+                      salvarTreinou.mutate({ secao, status: proximoTreinou(treinou) })
+                    }
+                    style={({ pressed }) => [
+                      styles.chipTreinou,
+                      {
+                        borderColor: theme.cadastroAction,
+                        backgroundColor: theme.surfaceMuted,
+                        opacity: pressed || salvando ? 0.7 : 1,
+                      },
+                    ]}
+                  >
+                    {salvando ? (
+                      <ActivityIndicator size="small" color={theme.cadastroAction} />
+                    ) : (
+                      <Text style={{ color: theme.cadastroAction, fontWeight: '800', fontSize: 12 }}>
+                        {TREINOU_LABEL[treinou]}
+                      </Text>
+                    )}
+                  </Pressable>
+                </View>
                 <Text style={[styles.celUso, { color: theme.text, fontSize: 12, lineHeight: 17 }]}>
-                  {textoUsoSecao(secao, bloco?.uso ?? {})}
+                  {textoUsoSecao(secao, usoMap[secao] ?? {})}
                 </Text>
                 <View style={styles.celPend}>
                   <TextoTickets tickets={ticketsDaSecao(tickets, secao)} />
@@ -146,271 +198,18 @@ export function AcompanhamentoResumoPanel({ clienteId, clienteNome }: Props) {
           })}
         </View>
       ) : null}
-
-      {ultimoQ.data ? (
-        <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-          Última atualização {formatDateTimeBR(ultimoQ.data.created_at)}
-          {ultimoQ.data.admin_email ? ` · ${ultimoQ.data.admin_email}` : ''}
-        </Text>
-      ) : !ultimoQ.isLoading ? (
-        <Text style={{ color: theme.textMuted, fontSize: 13 }}>
-          Ainda não há registro de uso. Clique em Atualizar uso para lançar o primeiro.
-        </Text>
-      ) : null}
-
-      <AtualizarUsoResumoModal
-        visible={formAberto}
-        clienteId={clienteId}
-        onClose={() => setFormAberto(false)}
-        onSaved={() => {
-          void qc.invalidateQueries({ queryKey: ['admin_cliente_resumo_ultimo', clienteId] });
-          void qc.invalidateQueries({ queryKey: ['admin_cliente_resumo_historico', clienteId] });
-          setFormAberto(false);
-        }}
-        adminEmail={adminProfile?.email ?? session?.user?.email ?? null}
-      />
     </View>
   );
 }
 
-function AtualizarUsoResumoModal({
-  visible,
-  clienteId,
-  onClose,
-  onSaved,
-  adminEmail,
-}: {
-  visible: boolean;
-  clienteId: string;
-  onClose: () => void;
-  onSaved: () => void;
-  adminEmail?: string | null;
-}) {
-  const { theme } = useTheme();
-  const [payload, setPayload] = useState<ResumoPayload>(() => normalizarPayload(null));
-  const [erro, setErro] = useState<string | null>(null);
-  const [sugerido, setSugerido] = useState(false);
-
-  const historicoQ = useQuery({
-    queryKey: ['admin_cliente_resumo_historico', clienteId],
-    queryFn: () => listarSnapshotsResumo(clienteId),
-    enabled: visible && Boolean(clienteId),
-  });
-
-  const carregarQ = useQuery({
-    queryKey: ['admin_cliente_resumo_form', clienteId, visible],
-    queryFn: () => montarPayloadFormularioResumo(clienteId),
-    enabled: visible && Boolean(clienteId),
-  });
-
-  useEffect(() => {
-    if (!visible || !carregarQ.data) return;
-    setPayload(carregarQ.data.payload);
-    setSugerido(carregarQ.data.sugerido);
-    setErro(null);
-  }, [visible, carregarQ.data]);
-
-  const salvar = useMutation({
-    mutationFn: () =>
-      salvarSnapshotResumo({
-        clienteId,
-        payload,
-        adminEmail,
-      }),
-    onSuccess: () => {
-      setErro(null);
-      onSaved();
-    },
-    onError: (e) => setErro(e instanceof Error ? e.message : 'Erro ao salvar'),
-  });
-
-  function setTreinou(secao: ResumoSecaoId, treinou: TreinouStatus) {
-    setPayload((atual) => ({
-      ...atual,
-      [secao]: { ...atual[secao], treinou },
-    }));
-  }
-
-  function setMetrica(
-    secao: ResumoSecaoId,
-    campo: keyof ResumoPayload[ResumoSecaoId]['uso'],
-    patch: Partial<{ quantidade: string; ultima_data: string }>,
-  ) {
-    setPayload((atual) => {
-      const atualM = atual[secao].uso[campo] ?? metricaVazia();
-      let quantidade = atualM.quantidade;
-      if (patch.quantidade !== undefined) {
-        const t = patch.quantidade.trim();
-        quantidade = t === '' ? null : Number(t);
-        if (quantidade != null && !Number.isFinite(quantidade)) quantidade = null;
-      }
-      return {
-        ...atual,
-        [secao]: {
-          ...atual[secao],
-          uso: {
-            ...atual[secao].uso,
-            [campo]: {
-              quantidade,
-              ultima_data:
-                patch.ultima_data !== undefined
-                  ? /^\d{4}-\d{2}-\d{2}$/.test(patch.ultima_data.trim())
-                    ? patch.ultima_data.trim()
-                    : null
-                  : atualM.ultima_data,
-            },
-          },
-        },
-      };
-    });
-  }
-
-  function carregarHistorico(item: ResumoSnapshotRow) {
-    setPayload(item.payload);
-    setSugerido(false);
-    setErro(null);
-  }
-
-  const historico = useMemo(() => historicoQ.data ?? [], [historicoQ.data]);
-
-  return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={[styles.sheet, { backgroundColor: theme.background, borderColor: theme.border, zIndex: 2 }]}>
-          <View style={styles.tituloRow}>
-            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 16, flex: 1 }}>
-              Atualizar uso / treinou
-            </Text>
-            <Pressable onPress={onClose} hitSlop={8}>
-              <FontAwesome name="times" size={16} color={theme.textMuted} />
-            </Pressable>
-          </View>
-          {sugerido ? (
-            <Text style={{ color: theme.cadastroAction, fontSize: 12, fontWeight: '700' }}>
-              Valores sugeridos a partir do sistema. Revise e salve para registrar.
-            </Text>
-          ) : null}
-
-          <ScrollView style={{ maxHeight: 560 }} contentContainerStyle={{ gap: 14, paddingBottom: 8 }}>
-            {carregarQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
-
-            {RESUMO_SECOES.map((secao) => (
-              <View key={secao} style={[styles.blocoSecao, { borderColor: theme.border, backgroundColor: theme.surface }]}>
-                <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 14 }}>
-                  {RESUMO_SECAO_LABEL[secao]}
-                </Text>
-                <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '700' }}>Treinou</Text>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {TREINOU_STATUS.map((status) => {
-                    const ativo = payload[secao].treinou === status;
-                    return (
-                      <Pressable
-                        key={status}
-                        onPress={() => setTreinou(secao, status)}
-                        style={[
-                          styles.chip,
-                          {
-                            borderColor: ativo ? theme.cadastroAction : theme.border,
-                            backgroundColor: ativo ? theme.surfaceMuted : theme.background,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={{
-                            color: ativo ? theme.cadastroAction : theme.text,
-                            fontWeight: ativo ? '800' : '600',
-                            fontSize: 12,
-                          }}
-                        >
-                          {TREINOU_LABEL[status]}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                {CAMPOS_USO_POR_SECAO[secao].length === 0 ? (
-                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>Sem campos de uso por enquanto.</Text>
-                ) : (
-                  CAMPOS_USO_POR_SECAO[secao].map((campo) => {
-                    const m = payload[secao].uso[campo.key] ?? metricaVazia();
-                    return (
-                      <View key={campo.key} style={{ gap: 6 }}>
-                        <Text style={{ color: theme.text, fontWeight: '700', fontSize: 13 }}>{campo.label}</Text>
-                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-                          <View style={{ flexGrow: 1, flexBasis: 120, minWidth: 100 }}>
-                            <FormField label="Quantidade">
-                              <FormInput
-                                value={m.quantidade == null ? '' : `${m.quantidade}`}
-                                onChangeText={(quantidade) => setMetrica(secao, campo.key, { quantidade })}
-                                keyboardType="number-pad"
-                                placeholder="0"
-                              />
-                            </FormField>
-                          </View>
-                          <View style={{ flexGrow: 1, flexBasis: 140, minWidth: 120 }}>
-                            <FormField label="Última data">
-                              <FormDateInput
-                                value={m.ultima_data ?? ''}
-                                onChange={(ultima_data) => setMetrica(secao, campo.key, { ultima_data })}
-                              />
-                            </FormField>
-                          </View>
-                        </View>
-                      </View>
-                    );
-                  })
-                )}
-              </View>
-            ))}
-
-            <View style={{ gap: 8 }}>
-              <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 14 }}>Histórico</Text>
-              {historicoQ.isLoading ? <ActivityIndicator color={theme.cadastroAction} /> : null}
-              {!historicoQ.isLoading && historico.length === 0 ? (
-                <Text style={{ color: theme.textMuted, fontSize: 13 }}>Nenhum registro anterior.</Text>
-              ) : null}
-              {historico.map((item) => (
-                <Pressable
-                  key={item.id}
-                  onPress={() => carregarHistorico(item)}
-                  style={[styles.histItem, { borderColor: theme.border, backgroundColor: theme.surface }]}
-                >
-                  <Text style={{ color: theme.headerText, fontWeight: '700', fontSize: 13 }}>
-                    {formatDateTimeBR(item.created_at)}
-                  </Text>
-                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                    {item.admin_email?.trim() || '—'} · toque para carregar no formulário
-                  </Text>
-                  <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>
-                    Cadastros clientes: {formatarMetricaUso(item.payload.cadastros.uso.clientes)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          </ScrollView>
-
-          {erro ? <Text style={{ color: theme.error, fontWeight: '700' }}>{erro}</Text> : null}
-          <PrimaryButton
-            label="Salvar novo registro"
-            loading={salvar.isPending}
-            onPress={() => salvar.mutate()}
-          />
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 const styles = StyleSheet.create({
-  botao: {
-    minHeight: 36,
-    paddingHorizontal: 12,
+  botaoSec: {
+    minHeight: 32,
+    paddingHorizontal: 10,
     borderRadius: 8,
-    flexDirection: 'row',
+    borderWidth: 1,
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'center',
   },
   tabela: {
     borderWidth: 1,
@@ -433,27 +232,16 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   celSecao: { flexBasis: '18%', flexGrow: 0, flexShrink: 0, fontSize: 12 },
-  celTreinou: { flexBasis: '20%', flexGrow: 0, flexShrink: 0 },
+  celTreinou: { flexBasis: '22%', flexGrow: 0, flexShrink: 0 },
   celUso: { flex: 1, flexGrow: 1 },
   celPend: { flexBasis: '22%', flexGrow: 0, flexShrink: 1 },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  sheet: {
-    width: '100%',
-    maxWidth: 720,
-    maxHeight: '92%',
+  chipTreinou: {
+    alignSelf: 'flex-start',
     borderWidth: 1,
-    borderRadius: 16,
-    padding: 16,
-    gap: 10,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    minHeight: 30,
+    justifyContent: 'center',
   },
-  tituloRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  blocoSecao: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  histItem: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 2 },
 });
