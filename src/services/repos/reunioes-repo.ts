@@ -1,5 +1,6 @@
 import { supabase } from '@/src/lib/supabase';
 import { dataCalendarioBrasil, dataHojeBrasil, instanteNaDataBrasil } from '@/src/utils/format';
+import { diaDoRegistroReuniao } from '@/src/utils/reuniao-sem-registro';
 
 export type ReuniaoClienteRow = {
   id: string;
@@ -17,6 +18,8 @@ export type ReuniaoClienteRow = {
   reuniao_cancelada?: boolean | null;
   confec_card_id?: string | null;
   admin_email?: string | null;
+  /** Dia do registro (YYYY-MM-DD), inclusive lançamento retroativo. */
+  data_registro?: string | null;
   created_at?: string | null;
 };
 
@@ -34,9 +37,14 @@ let suporteAvulsa: boolean | null = null;
 let suporteGeradoIa: boolean | null = null;
 let suporteComentario: boolean | null = null;
 let suporteReuniaoCancelada: boolean | null = null;
+let suporteDataRegistro: boolean | null = null;
 
 function faltaColunaAvulsa(message: string): boolean {
   return /avulsa/i.test(message);
+}
+
+function faltaColunaDataRegistro(message: string): boolean {
+  return /data_registro/i.test(message);
 }
 
 async function consultarReunioes<T>(
@@ -48,6 +56,7 @@ async function consultarReunioes<T>(
     suporteGeradoIa === false ? '' : 'gerado_ia',
     suporteComentario === false ? '' : 'comentario_conclusao',
     suporteReuniaoCancelada === false ? '' : 'reuniao_cancelada',
+    suporteDataRegistro === false ? '' : 'data_registro',
   ].filter(Boolean);
   const colunas = [colunasBase, ...extras].join(',');
   const primeiro = await montar(colunas);
@@ -56,6 +65,7 @@ async function consultarReunioes<T>(
     if (extras.includes('gerado_ia')) suporteGeradoIa = true;
     if (extras.includes('comentario_conclusao')) suporteComentario = true;
     if (extras.includes('reuniao_cancelada')) suporteReuniaoCancelada = true;
+    if (extras.includes('data_registro')) suporteDataRegistro = true;
     return primeiro;
   }
   const mensagem = primeiro.error.message;
@@ -74,6 +84,10 @@ async function consultarReunioes<T>(
   }
   if (suporteReuniaoCancelada !== false && /reuniao_cancelada/i.test(mensagem)) {
     suporteReuniaoCancelada = false;
+    mudou = true;
+  }
+  if (suporteDataRegistro !== false && faltaColunaDataRegistro(mensagem)) {
+    suporteDataRegistro = false;
     mudou = true;
   }
   if (!mudou) return primeiro;
@@ -181,10 +195,9 @@ export type ResumoReunioesCliente = {
   ultimaCriacao: string | null;
 };
 
-/** Pendências em aberto = reuniões ainda não concluídas. Última reunião = created_at do registro mais novo. */
+/** Pendências em aberto = reuniões ainda não concluídas. Última reunião = data_registro/created_at mais recente. */
 export async function resumirReunioesPorCliente(clienteIds: string[]): Promise<Map<string, ResumoReunioesCliente>> {
   const map = new Map<string, ResumoReunioesCliente>();
-  const maisRecente = new Map<string, string>();
   if (!clienteIds.length) return map;
 
   const CHUNK = 200;
@@ -199,6 +212,7 @@ export async function resumirReunioesPorCliente(clienteIds: string[]): Promise<M
       cliente_id: string;
       concluida?: boolean | null;
       created_at?: string | null;
+      data_registro?: string | null;
       pendencia?: string | null;
       avulsa?: boolean | null;
     }[]) {
@@ -209,12 +223,9 @@ export async function resumirReunioesPorCliente(clienteIds: string[]): Promise<M
         map.set(row.cliente_id, atual);
         continue;
       }
-      const criado = `${row.created_at ?? ''}`;
-      const criadoMs = Date.parse(criado);
-      const anteriorMs = Date.parse(maisRecente.get(row.cliente_id) ?? '');
-      if (criado && Number.isFinite(criadoMs) && (!Number.isFinite(anteriorMs) || criadoMs >= anteriorMs)) {
-        maisRecente.set(row.cliente_id, criado);
-        atual.ultimaCriacao = dataCalendarioBrasil(criado);
+      const diaReg = diaDoRegistroReuniao(row);
+      if (diaReg && (!atual.ultimaCriacao || diaReg > atual.ultimaCriacao)) {
+        atual.ultimaCriacao = diaReg;
       }
       map.set(row.cliente_id, atual);
     }
@@ -258,7 +269,7 @@ export async function criarPendenciasReuniao(params: {
     ? itens
     : [{ texto: '', dataRetorno: diaRegistro }];
 
-  const linhasInsert = (comData: boolean) =>
+  const linhasInsert = (opts: { comCreatedAt: boolean; comDataRegistro: boolean }) =>
     linhas.map((item) => ({
       cliente_id: params.clienteId,
       empresa_nome: empresa,
@@ -271,16 +282,36 @@ export async function criarPendenciasReuniao(params: {
       admin_email: params.adminEmail ?? null,
       ...(params.geradoIa ? { gerado_ia: true } : {}),
       ...(params.reuniaoCancelada ? { reuniao_cancelada: true } : {}),
-      ...(comData && createdAt ? { created_at: createdAt } : {}),
+      ...(opts.comDataRegistro && suporteDataRegistro !== false ? { data_registro: diaRegistro } : {}),
+      ...(opts.comCreatedAt && createdAt ? { created_at: createdAt } : {}),
     })) as never;
 
-  let { data, error } = await supabase.from('admin_cliente_reunioes').insert(linhasInsert(true)).select(SELECT_REUNIAO);
+  async function tentarInsert(opts: { comCreatedAt: boolean; comDataRegistro: boolean }) {
+    const selectCols =
+      opts.comDataRegistro && suporteDataRegistro !== false
+        ? `${SELECT_REUNIAO},data_registro`
+        : SELECT_REUNIAO;
+    return supabase.from('admin_cliente_reunioes').insert(linhasInsert(opts)).select(selectCols);
+  }
+
+  let { data, error } = await tentarInsert({
+    comCreatedAt: Boolean(createdAt),
+    comDataRegistro: true,
+  });
+
+  if (error && faltaColunaDataRegistro(error.message)) {
+    suporteDataRegistro = false;
+    ({ data, error } = await tentarInsert({ comCreatedAt: Boolean(createdAt), comDataRegistro: false }));
+  }
   if (error && createdAt && /created_at|timestamp|time zone/i.test(error.message)) {
-    ({ data, error } = await supabase.from('admin_cliente_reunioes').insert(linhasInsert(false)).select(SELECT_REUNIAO));
+    ({ data, error } = await tentarInsert({
+      comCreatedAt: false,
+      comDataRegistro: suporteDataRegistro !== false,
+    }));
   }
 
   if (error) {
-    if (/gerado_ia|reuniao_cancelada/i.test(error.message)) {
+    if (/gerado_ia|reuniao_cancelada|data_registro/i.test(error.message)) {
       throw new Error('Execute supabase/sql/admin_cliente_reunioes.sql no Supabase.');
     }
     if (/admin_cliente_reunioes|schema cache/i.test(error.message)) {
@@ -291,21 +322,34 @@ export async function criarPendenciasReuniao(params: {
   if (!data?.length) throw new Error('Não foi possível registrar a reunião.');
 
   let rows = data as unknown as ReuniaoClienteRow[];
-  // Garante a data retroativa: se o insert ignorou created_at (default now()), corrige com update.
-  if (createdAt && diaRegistro) {
-    const idsDesalinhados = rows
-      .filter((row) => dataCalendarioBrasil(row.created_at) !== diaRegistro)
-      .map((row) => row.id)
-      .filter(Boolean);
-    if (idsDesalinhados.length) {
-      const { error: updError } = await supabase
+  const ids = rows.map((row) => row.id).filter(Boolean);
+
+  // data_registro é a fonte da verdade do dia (retroativo). Não depende de alterar created_at.
+  if (ids.length && suporteDataRegistro !== false) {
+    const faltaData = rows.some((row) => `${row.data_registro ?? ''}`.slice(0, 10) !== diaRegistro);
+    if (faltaData) {
+      const { error: updDr } = await supabase
         .from('admin_cliente_reunioes')
-        .update({ created_at: createdAt } as never)
-        .in('id', idsDesalinhados);
-      if (updError) throw new Error(updError.message);
-      rows = rows.map((row) =>
-        idsDesalinhados.includes(row.id) ? { ...row, created_at: createdAt } : row,
-      );
+        .update({ data_registro: diaRegistro } as never)
+        .in('id', ids);
+      if (updDr && faltaColunaDataRegistro(updDr.message)) {
+        suporteDataRegistro = false;
+      } else if (!updDr) {
+        rows = rows.map((row) => ({ ...row, data_registro: diaRegistro }));
+      }
+    } else {
+      rows = rows.map((row) => ({ ...row, data_registro: row.data_registro ?? diaRegistro }));
+    }
+  }
+
+  // Best-effort em created_at só para exibição — nunca impede o salvamento.
+  if (ids.length && createdAt && rows.some((row) => dataCalendarioBrasil(row.created_at) !== diaRegistro)) {
+    const { error: updCa } = await supabase
+      .from('admin_cliente_reunioes')
+      .update({ created_at: createdAt } as never)
+      .in('id', ids);
+    if (!updCa) {
+      rows = rows.map((row) => ({ ...row, created_at: createdAt }));
     }
   }
 
@@ -441,18 +485,41 @@ export async function atualizarReuniaoCliente(params: {
   if (params.assuntos !== undefined) patch.assuntos = params.assuntos?.trim() || null;
   if (params.proximaAcao !== undefined) patch.proxima_acao = params.proximaAcao?.trim() || null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro)) {
+    if (suporteDataRegistro !== false) patch.data_registro = dataRegistro;
     const diaAtual = dataCalendarioBrasil(params.createdAtAtual);
     if (diaAtual !== dataRegistro) {
       patch.created_at = instanteNaDataBrasil(dataRegistro, '12:00:00');
     }
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('admin_cliente_reunioes')
     .update(patch as never)
     .eq('id', params.id)
     .select('id')
     .single();
+
+  if (error && patch.data_registro != null && faltaColunaDataRegistro(error.message)) {
+    suporteDataRegistro = false;
+    delete patch.data_registro;
+    ({ data, error } = await supabase
+      .from('admin_cliente_reunioes')
+      .update(patch as never)
+      .eq('id', params.id)
+      .select('id')
+      .single());
+  }
+
+  // Se created_at for imutável no banco, tenta de novo só com os demais campos.
+  if (error && patch.created_at != null && /created_at|timestamp|time zone/i.test(error.message)) {
+    delete patch.created_at;
+    ({ data, error } = await supabase
+      .from('admin_cliente_reunioes')
+      .update(patch as never)
+      .eq('id', params.id)
+      .select('id')
+      .single());
+  }
 
   if (error) throw new Error(erroPermissaoReuniao(error.message));
   if (!data) throw new Error('Não foi possível atualizar a reunião.');

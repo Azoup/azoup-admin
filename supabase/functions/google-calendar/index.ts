@@ -516,20 +516,26 @@ async function gravarResumoIa(
     .gte('created_at', inicio)
     .lte('created_at', fim);
   if (anteriores.error && !/gerado_ia/i.test(anteriores.error.message)) throw new Error(anteriores.error.message);
-  const { error } = await supabaseAdmin.from('admin_cliente_reunioes').insert({
+  const payload = {
     cliente_id: params.clienteId,
     empresa_nome: params.empresaNome,
     assuntos,
     proxima_acao: null,
     pendencia: '',
     data_retorno: params.dia,
+    data_registro: params.dia,
     participante_ids: [],
     concluida: false,
     avulsa: false,
     gerado_ia: true,
     admin_email: params.adminEmail,
     created_at: `${params.dia}T12:00:00-03:00`,
-  });
+  };
+  let { error } = await supabaseAdmin.from('admin_cliente_reunioes').insert(payload);
+  if (error && /data_registro/i.test(error.message)) {
+    const { data_registro: _omit, ...semDataRegistro } = payload;
+    ({ error } = await supabaseAdmin.from('admin_cliente_reunioes').insert(semDataRegistro));
+  }
   if (error) throw new Error(error.message);
 }
 
@@ -558,12 +564,38 @@ async function gerarResumosPendentes(
 
   const registros = await supabaseAdmin
     .from('admin_cliente_reunioes')
-    .select('cliente_id,created_at,avulsa')
+    .select('cliente_id,created_at,data_registro,avulsa')
     .gte('created_at', RESUMO_IA_DESDE)
     .order('created_at', { ascending: false })
     .limit(5000);
-  let reunioes = (registros.data ?? []) as Array<{ cliente_id?: string; created_at?: string; avulsa?: boolean }>;
-  if (registros.error && /avulsa/i.test(registros.error.message)) {
+  let reunioes = (registros.data ?? []) as Array<{
+    cliente_id?: string;
+    created_at?: string;
+    data_registro?: string;
+    avulsa?: boolean;
+  }>;
+  if (registros.error && /data_registro/i.test(registros.error.message)) {
+    const semDataReg = await supabaseAdmin
+      .from('admin_cliente_reunioes')
+      .select('cliente_id,created_at,avulsa')
+      .gte('created_at', RESUMO_IA_DESDE)
+      .order('created_at', { ascending: false })
+      .limit(5000);
+    if (semDataReg.error && /avulsa/i.test(semDataReg.error.message)) {
+      const semAvulsa = await supabaseAdmin
+        .from('admin_cliente_reunioes')
+        .select('cliente_id,created_at')
+        .gte('created_at', RESUMO_IA_DESDE)
+        .order('created_at', { ascending: false })
+        .limit(2000);
+      if (semAvulsa.error) throw new Error(semAvulsa.error.message);
+      reunioes = (semAvulsa.data ?? []) as typeof reunioes;
+    } else if (semDataReg.error) {
+      throw new Error(semDataReg.error.message);
+    } else {
+      reunioes = (semDataReg.data ?? []) as typeof reunioes;
+    }
+  } else if (registros.error && /avulsa/i.test(registros.error.message)) {
     const semAvulsa = await supabaseAdmin
       .from('admin_cliente_reunioes')
       .select('cliente_id,created_at')
@@ -580,7 +612,8 @@ async function gerarResumosPendentes(
   for (const row of reunioes) {
     if (row.avulsa) continue;
     const clienteId = `${row.cliente_id ?? ''}`.trim();
-    const dia = diaBrasil(`${row.created_at ?? ''}`);
+    const diaReg = `${row.data_registro ?? ''}`.trim().slice(0, 10);
+    const dia = /^\d{4}-\d{2}-\d{2}$/.test(diaReg) ? diaReg : diaBrasil(`${row.created_at ?? ''}`);
     if (clienteId && dia) cobertas.add(`${clienteId}|${dia}`);
   }
 

@@ -98,6 +98,7 @@ import {
 } from '@/src/utils/kanban-drag';
 import { agoraHorarioLocal, hojeIsoLocal } from '@/src/utils/conversa-datetime';
 import { dataCalendarioBrasil, formatConversaQuando, formatDataHoraBrasil, formatDateTimeBR, formatYmdBR } from '@/src/utils/format';
+import { diaDoRegistroReuniao } from '@/src/utils/reuniao-sem-registro';
 import type { AdminClienteCongelamentoRow, AdminClienteConversaRow } from '@/src/types/azoup';
 import { digitsOnlyPhone } from '@/src/utils/whatsapp';
 
@@ -626,7 +627,7 @@ function EditarReuniaoBloco({
   const { theme } = useTheme();
   const [pendencia, setPendencia] = useState(reuniao.pendencia ?? '');
   const [dataRetorno, setDataRetorno] = useState(`${reuniao.data_retorno ?? ''}`.slice(0, 10));
-  const [dataRegistro, setDataRegistro] = useState(dataCalendarioBrasil(reuniao.created_at) ?? '');
+  const [dataRegistro, setDataRegistro] = useState(diaDoRegistroReuniao(reuniao) ?? '');
   const [assuntos, setAssuntos] = useState(reuniao.assuntos ?? '');
   const [proximaAcao, setProximaAcao] = useState(reuniao.proxima_acao ?? '');
 
@@ -1091,7 +1092,7 @@ export function HistoricoClienteTela({
     const registroNoDia = (inicio: string) => {
       const dia = dataCalendarioBrasil(inicio);
       if (!dia) return [];
-      return registros.filter((row) => dataCalendarioBrasil(row.created_at) === dia);
+      return registros.filter((row) => diaDoRegistroReuniao(row) === dia);
     };
     return { futuras, passadas, registroNoDia };
   }, [agendaQ.data, reunioesQ.data]);

@@ -10,13 +10,23 @@ export function chaveClienteDia(clienteId?: string | null, instante?: string | D
   return `${id}|${dia}`;
 }
 
+/** Dia do registro: data_registro (retroativo) ou created_at. */
+export function diaDoRegistroReuniao(row: {
+  data_registro?: string | null;
+  created_at?: string | null;
+}): string | null {
+  const dia = `${row.data_registro ?? ''}`.trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dia)) return dia;
+  return dataCalendarioBrasil(row.created_at);
+}
+
 /** Mesma cobertura da agenda: um registro manual no dia do cliente. */
 export function cobertasDeRegistrosManuais(
-  registros: Array<{ cliente_id?: string | null; created_at?: string | null }>,
+  registros: Array<{ cliente_id?: string | null; created_at?: string | null; data_registro?: string | null }>,
 ): Set<string> {
   const cobertas = new Set<string>();
   for (const row of registros) {
-    const chave = chaveClienteDia(row.cliente_id, row.created_at);
+    const chave = chaveClienteDia(row.cliente_id, diaDoRegistroReuniao(row));
     if (chave) cobertas.add(chave);
   }
   return cobertas;

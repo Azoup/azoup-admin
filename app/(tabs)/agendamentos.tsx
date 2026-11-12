@@ -39,7 +39,12 @@ import type { ClienteAzoupRow } from '@/src/types/azoup';
 import type { AcompanhamentoCliente } from '@/src/utils/acompanhamento';
 import { descricaoTemHtml } from '@/src/utils/agenda-html';
 import { dataCalendarioBrasil, dataHojeBrasil, formatDateTimeBR, formatYmdBR, somarDiasYmd } from '@/src/utils/format';
-import { chaveClienteDia, cobertasDeRegistrosManuais, eventoAgendaSemRegistro } from '@/src/utils/reuniao-sem-registro';
+import {
+  chaveClienteDia,
+  cobertasDeRegistrosManuais,
+  diaDoRegistroReuniao,
+  eventoAgendaSemRegistro,
+} from '@/src/utils/reuniao-sem-registro';
 
 function clienteDoAgendamento(ev: GoogleAgendaEvento): AcompanhamentoCliente | null {
   const id = `${ev.cliente_id ?? ev.cliente?.id ?? ''}`.trim();
@@ -389,7 +394,7 @@ export default function AgendamentosScreen() {
   const registrosPorClienteDia = useMemo(() => {
     const map = new Map<string, { id: string; assuntos: string; autor: string; empresa: string; cancelada: boolean }[]>();
     for (const row of registrosQ.data ?? []) {
-      const chave = chaveClienteDia(row.cliente_id, row.created_at);
+      const chave = chaveClienteDia(row.cliente_id, diaDoRegistroReuniao(row));
       if (!chave) continue;
       const lista = map.get(chave) ?? [];
       lista.push({

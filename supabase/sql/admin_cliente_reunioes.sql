@@ -42,6 +42,16 @@ comment on column public.admin_cliente_reunioes.reuniao_cancelada is
   'true = a reunião da agenda correspondente a este registro foi cancelada.';
 
 alter table public.admin_cliente_reunioes
+  add column if not exists data_registro date;
+
+comment on column public.admin_cliente_reunioes.data_registro is
+  'Dia do registro da reunião (calendário). Permite lançamento retroativo sem depender de alterar created_at.';
+
+update public.admin_cliente_reunioes
+set data_registro = (created_at at time zone 'America/Sao_Paulo')::date
+where data_registro is null;
+
+alter table public.admin_cliente_reunioes
   add column if not exists confec_card_id uuid references public.confec_kanban_cards(id) on delete set null;
 
 comment on column public.admin_cliente_reunioes.confec_card_id is
