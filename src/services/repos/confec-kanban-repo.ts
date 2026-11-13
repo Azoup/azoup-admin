@@ -1,7 +1,10 @@
 import { ehSecaoConfec, type ConfecSecao } from '@/src/constants/confec-notas';
 import { gerarESalvarNotaConfec } from '@/src/services/confec-notas-api';
 import { supabase } from '@/src/lib/supabase';
-import { garantirPendenciaDoTicketConfec } from '@/src/services/repos/reunioes-repo';
+import {
+  garantirPendenciaDoTicketConfec,
+  sincronizarPendenciaDoTicketConfec,
+} from '@/src/services/repos/reunioes-repo';
 
 export const BUCKET_CONFEC = 'confec-kanban-files';
 export const LIMITE_ARQUIVO_BYTES = 5 * 1024 * 1024 * 1024;
@@ -461,9 +464,11 @@ export async function atualizarCardConfec(params: {
   const tela = `${params.tela ?? ''}`.trim();
   const destino = params.colunas.find((coluna) => coluna.slug === params.status);
   const origem = params.colunas.find((coluna) => coluna.slug === params.statusAnterior);
-  const entrou = Boolean(destino && ehColunaConclusao(destino, params.colunas) && origem && !ehColunaConclusao(origem, params.colunas));
-  const saiu = Boolean(origem && ehColunaConclusao(origem, params.colunas) && destino && !ehColunaConclusao(destino, params.colunas));
-  if (entrou || (destino && ehColunaConclusao(destino, params.colunas))) {
+  const destinoFinal = Boolean(destino && ehColunaConclusao(destino, params.colunas));
+  const origemFinal = Boolean(origem && ehColunaConclusao(origem, params.colunas));
+  const entrou = destinoFinal && !origemFinal;
+  const saiu = origemFinal && !destinoFinal;
+  if (destinoFinal) {
     validarPublicacaoNota({ secao, tela });
   }
 
@@ -481,7 +486,7 @@ export async function atualizarCardConfec(params: {
     status: params.status,
     updated_at: new Date().toISOString(),
   };
-  if (entrou) {
+  if (destinoFinal) {
     const etiqueta = await garantirEtiquetaConcluido();
     labelIds = [etiqueta.id];
     patch.completed_at = new Date().toISOString();
@@ -513,6 +518,12 @@ export async function atualizarCardConfec(params: {
       .maybeSingle();
     if (card) await garantirPendenciaDoCardConfec(card as Parameters<typeof garantirPendenciaDoCardConfec>[0]);
   }
+  if (destinoFinal || saiu) {
+    await sincronizarPendenciaDoTicketConfec({
+      cardId: params.id,
+      concluida: destinoFinal,
+    }).catch(() => undefined);
+  }
 }
 
 export async function moverCardConfec(params: {
@@ -530,9 +541,11 @@ export async function moverCardConfec(params: {
   const destino = params.colunas.find((coluna) => coluna.slug === params.status);
   const origem = params.colunas.find((coluna) => coluna.slug === params.statusAnterior);
   if (!destino) throw new Error('Coluna inválida.');
-  const entrou = ehColunaConclusao(destino, params.colunas) && origem && !ehColunaConclusao(origem, params.colunas);
-  const saiu = origem && ehColunaConclusao(origem, params.colunas) && !ehColunaConclusao(destino, params.colunas);
-  if (entrou) {
+  const destinoFinal = ehColunaConclusao(destino, params.colunas);
+  const origemFinal = Boolean(origem && ehColunaConclusao(origem, params.colunas));
+  const entrou = destinoFinal && !origemFinal;
+  const saiu = origemFinal && !destinoFinal;
+  if (destinoFinal) {
     validarPublicacaoNota({ secao: params.secao, tela: params.tela });
   }
   const patch: Record<string, unknown> = {
@@ -541,7 +554,7 @@ export async function moverCardConfec(params: {
   };
   if (params.gravarPosicao) patch.position = params.position;
   let labelIds = params.labelIds;
-  if (entrou) {
+  if (destinoFinal) {
     const etiqueta = await garantirEtiquetaConcluido();
     labelIds = [etiqueta.id];
     patch.completed_at = new Date().toISOString();
@@ -555,7 +568,7 @@ export async function moverCardConfec(params: {
   }
   const { error } = await supabase.from('confec_kanban_cards').update(patch as never).eq('id', params.id);
   if (error) throw erroTabela(error.message);
-  if (entrou || saiu) await substituirEtiquetas(params.id, labelIds);
+  if (destinoFinal || saiu) await substituirEtiquetas(params.id, labelIds);
   if (entrou) {
     await aposEntrarEmFinalizados({
       id: params.id,
@@ -563,6 +576,12 @@ export async function moverCardConfec(params: {
       tela: params.tela,
       telaNova: params.telaNova,
     });
+  }
+  if (destinoFinal || saiu) {
+    await sincronizarPendenciaDoTicketConfec({
+      cardId: params.id,
+      concluida: destinoFinal,
+    }).catch(() => undefined);
   }
 }
 
@@ -616,20 +635,23 @@ export async function listarTicketsAbertosPorCliente(clienteId: string): Promise
   const colunas = (colunasData ?? []) as ConfecColuna[];
   const conclusao = colunaDeConclusao(colunas);
   const conclusaoSlug = conclusao?.slug ?? 'finalizados';
+  const slugsFinais = new Set(
+    colunas.filter((c) => ehColunaConclusao(c, colunas)).map((c) => c.slug).concat(conclusaoSlug),
+  );
 
   const { data, error } = await supabase
     .from('confec_kanban_cards')
     .select('id,ticket_number,title,secao,status,completed_at')
     .eq('cliente_id', clienteId)
-    .is('completed_at', null)
-    .neq('status', conclusaoSlug)
     .order('created_at', { ascending: false })
     .limit(500);
   if (error) throw erroTabela(error.message);
 
   return ((data ?? []) as Array<Record<string, unknown>>)
     .filter((row) => {
-      const status = `${row.status ?? ''}`;
+      if (`${row.completed_at ?? ''}`.trim()) return false;
+      const status = `${row.status ?? ''}`.trim();
+      if (slugsFinais.has(status)) return false;
       const coluna = colunas.find((c) => c.slug === status);
       return !(coluna && ehColunaConclusao(coluna, colunas));
     })
@@ -701,6 +723,7 @@ export async function excluirColunaConfec(id: string, colunas: ConfecColuna[]): 
       for (const cardId of ids) {
         if (entrou) {
           await substituirEtiquetas(cardId, [etiqueta.id]);
+          await sincronizarPendenciaDoTicketConfec({ cardId, concluida: true }).catch(() => undefined);
           continue;
         }
         const { data: vinculos, error } = await supabase.from('confec_kanban_card_labels').select('label_id').eq('card_id', cardId);
@@ -709,6 +732,7 @@ export async function excluirColunaConfec(id: string, colunas: ConfecColuna[]): 
           .map((row) => row.label_id)
           .filter((labelId) => labelId !== etiqueta.id);
         await substituirEtiquetas(cardId, labelIds);
+        await sincronizarPendenciaDoTicketConfec({ cardId, concluida: false }).catch(() => undefined);
       }
     }
   }

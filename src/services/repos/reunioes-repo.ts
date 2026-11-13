@@ -442,6 +442,43 @@ export async function garantirPendenciaDoTicketConfec(params: {
   });
 }
 
+/** Marca a pendência ligada ao ticket Confec como concluída/reaberta (sem exigir comentário manual). */
+export async function sincronizarPendenciaDoTicketConfec(params: {
+  cardId: string;
+  concluida: boolean;
+  comentario?: string | null;
+}): Promise<void> {
+  const cardId = `${params.cardId ?? ''}`.trim();
+  if (!cardId) return;
+  const patch: Record<string, unknown> = { concluida: params.concluida };
+  if (params.concluida) {
+    patch.comentario_conclusao =
+      `${params.comentario ?? ''}`.trim() || 'Ticket finalizado no Kanban Confec.';
+  }
+  const { error } = await supabase
+    .from('admin_cliente_reunioes')
+    .update(patch as never)
+    .eq('confec_card_id', cardId)
+    .eq('concluida', !params.concluida);
+  if (error) {
+    if (/confec_card_id/i.test(error.message)) {
+      throw new Error('Execute supabase/sql/admin_cliente_reunioes.sql no Supabase.');
+    }
+    if (/comentario_conclusao/i.test(error.message)) {
+      const { error: semComentario } = await supabase
+        .from('admin_cliente_reunioes')
+        .update({ concluida: params.concluida } as never)
+        .eq('confec_card_id', cardId);
+      if (semComentario && !/confec_card_id|0 rows/i.test(semComentario.message)) {
+        throw new Error(semComentario.message);
+      }
+      return;
+    }
+    if (/0 rows|PGRST116/i.test(error.message)) return;
+    throw new Error(error.message);
+  }
+}
+
 export async function definirReuniaoConcluida(id: string, concluida: boolean, comentario?: string | null): Promise<void> {
   if (!id) throw new Error('Pendência inválida.');
   const texto = `${comentario ?? ''}`.trim();
