@@ -425,10 +425,9 @@ export async function garantirPendenciaDoTicketConfec(params: {
     .eq('confec_card_id', cardId)
     .limit(1);
   if (busca) {
-    if (/confec_card_id/i.test(busca.message)) {
+    if (/confec_card_id|admin_cliente_reunioes|schema cache/i.test(busca.message)) {
       throw new Error('Execute supabase/sql/admin_cliente_reunioes.sql no Supabase.');
     }
-    if (/admin_cliente_reunioes|schema cache/i.test(busca.message)) return;
     throw new Error(busca.message);
   }
   if (existente?.length) return;

@@ -499,6 +499,9 @@ export default function KanbanConfecScreen() {
 
   const salvar = useMutation({
     mutationFn: async (atual: Rascunho) => {
+      if (!`${atual.clienteId ?? ''}`.trim()) {
+        throw new Error('Selecione o cliente do ticket.');
+      }
       if (!atual.id) {
         return criarCardConfec({
           title: atual.title,
@@ -620,6 +623,10 @@ export default function KanbanConfecScreen() {
       return null;
     }
     const title = normalizarTitulo(atual.title) || 'Novo ticket';
+    if (!`${atual.clienteId ?? ''}`.trim()) {
+      setErro('Selecione o cliente do ticket antes de anexar.');
+      return null;
+    }
     const id = await criarCardConfec({
       title,
       status: atual.status,
@@ -1176,13 +1183,13 @@ export default function KanbanConfecScreen() {
                 <FormField label="Observações / correções (DEV)">
                   <FormInput value={rascunho.devNotes} onChangeText={(devNotes) => setRascunho({ ...rascunho, devNotes })} multiline style={styles.area} />
                 </FormField>
-                <FormField label="Cliente">
+                <FormField label="Cliente" required>
                   <ClienteSearchPicker
                     todosClientes={clientesQ.data ?? []}
                     value={clienteRascunho}
                     onChange={(cliente: ClienteAzoupRow | null) => setRascunho({ ...rascunho, clienteId: cliente?.id ?? null })}
                     loading={clientesQ.isLoading}
-                    placeholderBusca="Buscar cliente (opcional)"
+                    placeholderBusca="Buscar cliente"
                   />
                 </FormField>
                 <FormField label="Analista">

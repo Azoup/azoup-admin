@@ -356,13 +356,25 @@ async function garantirPendenciaDoCardConfec(card: {
   cliente_id?: string | null;
   created_by_email?: string | null;
 }): Promise<void> {
+  const cardId = `${card.id ?? ''}`.trim();
   const clienteId = `${card.cliente_id ?? ''}`.trim();
-  if (!clienteId || !card.id) return;
-  const numero = Number(card.ticket_number);
+  if (!cardId) return;
+  if (!clienteId) {
+    throw new Error('Selecione o cliente do ticket para gerar a pendência.');
+  }
+  let numero = Number(card.ticket_number);
+  if (!Number.isFinite(numero) || numero <= 0) {
+    const { data } = await supabase
+      .from('confec_kanban_cards')
+      .select('ticket_number')
+      .eq('id', cardId)
+      .maybeSingle();
+    numero = Number((data as { ticket_number?: number } | null)?.ticket_number);
+  }
   const codigo = Number.isFinite(numero) && numero > 0 ? `#${numeroTicket(numero)}` : '';
   const titulo = normalizarTitulo(`${card.title ?? ''}`) || 'Ticket';
   await garantirPendenciaDoTicketConfec({
-    cardId: card.id,
+    cardId,
     clienteId,
     empresaNome: await nomeClienteConfec(clienteId),
     pendencia: codigo ? `Ticket Confec ${codigo} — ${titulo}` : `Ticket Confec — ${titulo}`,
@@ -386,6 +398,8 @@ export async function criarCardConfec(params: {
 }): Promise<string> {
   const title = normalizarTitulo(params.title);
   if (!title) throw new Error('Informe o título do ticket.');
+  const clienteId = `${params.clienteId ?? ''}`.trim();
+  if (!clienteId) throw new Error('Selecione o cliente do ticket.');
   const secao = `${params.secao ?? ''}`.trim();
   const tela = `${params.tela ?? ''}`.trim();
   const { data: posicao, error: posErro } = await supabase
@@ -402,7 +416,7 @@ export async function criarCardConfec(params: {
       title,
       description: params.description?.trim() || null,
       dev_notes: params.devNotes?.trim() || null,
-      cliente_id: params.clienteId || null,
+      cliente_id: clienteId,
       analista_email: params.analistaEmail?.trim() || null,
       desenvolvedor_email: params.desenvolvedorEmail?.trim() || null,
       created_by_email: params.createdByEmail,
@@ -423,7 +437,7 @@ export async function criarCardConfec(params: {
     created_by_email?: string | null;
   };
   if (params.labelIds?.length) await substituirEtiquetas(criado.id, params.labelIds);
-  await garantirPendenciaDoCardConfec(criado);
+  await garantirPendenciaDoCardConfec({ ...criado, cliente_id: criado.cliente_id || clienteId });
   return criado.id;
 }
 
@@ -510,13 +524,25 @@ export async function atualizarCardConfec(params: {
       telaNova: Boolean(params.telaNova),
     });
   }
-  if (params.clienteId) {
+  const clienteIdAtual = `${params.clienteId ?? ''}`.trim();
+  if (clienteIdAtual) {
     const { data: card } = await supabase
       .from('confec_kanban_cards')
       .select('id,ticket_number,title,cliente_id,created_by_email')
       .eq('id', params.id)
       .maybeSingle();
-    if (card) await garantirPendenciaDoCardConfec(card as Parameters<typeof garantirPendenciaDoCardConfec>[0]);
+    if (card) {
+      await garantirPendenciaDoCardConfec({
+        ...(card as {
+          id: string;
+          ticket_number?: number | null;
+          title?: string | null;
+          cliente_id?: string | null;
+          created_by_email?: string | null;
+        }),
+        cliente_id: clienteIdAtual,
+      });
+    }
   }
   if (destinoFinal || saiu) {
     await sincronizarPendenciaDoTicketConfec({
