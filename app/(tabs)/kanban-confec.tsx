@@ -1,5 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocalSearchParams } from 'expo-router';
 import { createElement, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -359,6 +360,7 @@ function TicketCard({
 export default function KanbanConfecScreen() {
   const { theme } = useTheme();
   const { canAccessScreen, canDeleteRecords, papel, adminProfile, session } = useAdminAuth();
+  const params = useLocalSearchParams<{ card?: string | string[] }>();
   const email = adminProfile?.email ?? session?.user?.email ?? '';
   const owner = papel === 'owner';
   const qc = useQueryClient();
@@ -373,6 +375,7 @@ export default function KanbanConfecScreen() {
   const [secaoFiltro, setSecaoFiltro] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [detalheId, setDetalheId] = useState<string | null>(null);
+  const cardAbertoViaRota = useRef<string | null>(null);
   const [rascunho, setRascunho] = useState<Rascunho | null>(null);
   const [etiquetasAbertas, setEtiquetasAbertas] = useState(false);
   const [colunaEdit, setColunaEdit] = useState<ConfecColuna | null>(null);
@@ -434,6 +437,18 @@ export default function KanbanConfecScreen() {
   const colunas = quadro?.colunas ?? [];
   const conclusao = colunaDeConclusao(colunas);
   const ordemVisual = periodo === 'recentes' || periodo === 'antigos';
+
+  useEffect(() => {
+    const bruto = params.card;
+    const cardId = `${Array.isArray(bruto) ? bruto[0] : bruto ?? ''}`.trim();
+    if (!cardId || !quadro?.cards?.length) return;
+    if (cardAbertoViaRota.current === cardId && detalheId === cardId) return;
+    const existe = quadro.cards.some((card) => card.id === cardId);
+    if (!existe) return;
+    cardAbertoViaRota.current = cardId;
+    setDetalheId(cardId);
+    setRascunho(null);
+  }, [params.card, quadro?.cards, detalheId]);
 
   const porColuna = useMemo(() => {
     const map = new Map<string, ConfecCard[]>();

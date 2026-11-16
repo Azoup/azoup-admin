@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
@@ -41,7 +42,13 @@ function proximoTreinou(atual: TreinouStatus): TreinouStatus {
   return TREINOU_STATUS[(idx + 1) % TREINOU_STATUS.length] ?? 'nao_treinou';
 }
 
-function TextoTickets({ tickets }: { tickets: TicketConfecAberto[] }) {
+function TextoTickets({
+  tickets,
+  onAbrir,
+}: {
+  tickets: TicketConfecAberto[];
+  onAbrir: (ticket: TicketConfecAberto) => void;
+}) {
   const { theme } = useTheme();
   if (!tickets.length) {
     return <Text style={{ color: theme.textMuted, fontSize: 12 }}>—</Text>;
@@ -49,10 +56,12 @@ function TextoTickets({ tickets }: { tickets: TicketConfecAberto[] }) {
   return (
     <View style={{ gap: 2 }}>
       {tickets.map((t) => (
-        <Text key={t.id} style={{ color: theme.cadastroAction, fontWeight: '700', fontSize: 12 }}>
-          #{numeroTicket(t.ticket_number)}
-          {t.titulo ? ` · ${t.titulo}` : ''}
-        </Text>
+        <Pressable key={t.id} onPress={() => onAbrir(t)} hitSlop={4}>
+          <Text style={{ color: theme.cadastroAction, fontWeight: '700', fontSize: 12, textDecorationLine: 'underline' }}>
+            #{numeroTicket(t.ticket_number)}
+            {t.titulo ? ` · ${t.titulo}` : ''}
+          </Text>
+        </Pressable>
       ))}
     </View>
   );
@@ -61,9 +70,17 @@ function TextoTickets({ tickets }: { tickets: TicketConfecAberto[] }) {
 export function AcompanhamentoResumoPanel({ clienteId, clienteNome }: Props) {
   const { theme } = useTheme();
   const { adminProfile, session } = useAdminAuth();
+  const router = useRouter();
   const qc = useQueryClient();
   const [erro, setErro] = useState<string | null>(null);
   const [secaoSalvando, setSecaoSalvando] = useState<ResumoSecaoId | null>(null);
+
+  function abrirTicketConfec(ticket: TicketConfecAberto) {
+    router.push({
+      pathname: '/(tabs)/kanban-confec',
+      params: { card: ticket.id },
+    });
+  }
 
   const usoQ = useQuery({
     queryKey: ['admin_cliente_resumo_uso', clienteId],
@@ -191,7 +208,7 @@ export function AcompanhamentoResumoPanel({ clienteId, clienteNome }: Props) {
                   {textoUsoSecao(secao, usoMap[secao] ?? {})}
                 </Text>
                 <View style={styles.celPend}>
-                  <TextoTickets tickets={ticketsDaSecao(tickets, secao)} />
+                  <TextoTickets tickets={ticketsDaSecao(tickets, secao)} onAbrir={abrirTicketConfec} />
                 </View>
               </View>
             );
