@@ -1471,7 +1471,8 @@ async function importarChamadosRecentes(
   const departmentId = await departamentoAzoupConfec();
   const base = { order: [['startedAt', 'DESC']] as [string, string][], perPage: 50 };
   const rows: Record<string, unknown>[] = [];
-  for (let page = 1; page <= 4; page++) {
+  // Até 400 tickets recentes do departamento — cobre mais clientes no último contato.
+  for (let page = 1; page <= 8; page++) {
     let data: unknown;
     try {
       data = await digisac(
@@ -1558,7 +1559,7 @@ async function marcarBuscaDigisac(
   }
 }
 
-/** Clientes sem chamado, ou com telefone extra novo, para puxar os tickets da Digisac. */
+/** Sem chamado / telefone novo / já tinha chamado mas busca antiga — atualiza tickets e último contato. */
 async function importarChamadosFaltantes(
   supabaseAdmin: ReturnType<typeof createClient>,
 ): Promise<number> {
@@ -1586,7 +1587,9 @@ async function importarChamadosFaltantes(
       extraEm.set(id, Math.max(extraEm.get(id) ?? 0, quando));
     }
   }
-  const limiteBusca = Date.now() - 12 * 3_600_000;
+  // Sem chamado: rebusca a cada 12h. Com chamado: revalida a cada 6h (evita último contato preso).
+  const limiteSemChamado = Date.now() - 12 * 3_600_000;
+  const limiteRefresh = Date.now() - 6 * 3_600_000;
   const fila = (pessoas.data ?? [])
     .map((row) => `${(row as { id?: string }).id ?? ''}`.trim())
     .filter((id) => {
@@ -1594,10 +1597,11 @@ async function importarChamadosFaltantes(
       const verificado = buscaEm.get(id) ?? 0;
       const extraNovo = (extraEm.get(id) ?? 0) > verificado;
       if (extraNovo) return true;
-      if (comChamado.has(id)) return false;
-      return verificado < limiteBusca;
+      if (!comChamado.has(id)) return verificado < limiteSemChamado;
+      return verificado < limiteRefresh;
     })
-    .slice(0, 12);
+    .sort((a, b) => (buscaEm.get(a) ?? 0) - (buscaEm.get(b) ?? 0))
+    .slice(0, 20);
 
   let gravados = 0;
   for (const clienteId of fila) {
@@ -1609,8 +1613,10 @@ async function importarChamadosFaltantes(
       }
       const chamados: Chamado[] = [];
       const vistos = new Set<string>();
+      // 4 páginas nos refresh: pega tickets mais novos do contato (último contato atualizado).
+      const paginas = comChamado.has(clienteId) ? 4 : 2;
       for (const contactId of contato.contactIds) {
-        for (const chamado of await listarTickets(contactId, departmentId, 2)) {
+        for (const chamado of await listarTickets(contactId, departmentId, paginas)) {
           if (vistos.has(chamado.id)) continue;
           vistos.add(chamado.id);
           chamados.push(chamado);
@@ -1639,15 +1645,22 @@ async function pendentesDeChamado(supabaseAdmin: ReturnType<typeof createClient>
   ]);
   if (pessoas.error) return 0;
   const comChamado = new Set((ja.data ?? []).map((row) => `${(row as { cliente_id?: string }).cliente_id ?? ''}`));
-  const limiteBusca = Date.now() - 12 * 3_600_000;
-  const buscado = new Set(
-    (buscas.error ? [] : buscas.data ?? [])
-      .filter((row) => Date.parse(`${(row as { verificado_em?: string }).verificado_em ?? ''}`) > limiteBusca)
-      .map((row) => `${(row as { cliente_id?: string }).cliente_id ?? ''}`),
-  );
+  const buscaEm = new Map<string, number>();
+  for (const row of buscas.error ? [] : buscas.data ?? []) {
+    const id = `${(row as { cliente_id?: string }).cliente_id ?? ''}`.trim();
+    const quando = Date.parse(`${(row as { verificado_em?: string }).verificado_em ?? ''}`);
+    if (id && Number.isFinite(quando)) buscaEm.set(id, quando);
+  }
+  const limiteSemChamado = Date.now() - 12 * 3_600_000;
+  const limiteRefresh = Date.now() - 6 * 3_600_000;
   return (pessoas.data ?? [])
-    .map((row) => `${(row as { id?: string }).id ?? ''}`)
-    .filter((id) => id && !comChamado.has(id) && !buscado.has(id)).length;
+    .map((row) => `${(row as { id?: string }).id ?? ''}`.trim())
+    .filter((id) => {
+      if (!id) return false;
+      const verificado = buscaEm.get(id) ?? 0;
+      if (!comChamado.has(id)) return verificado < limiteSemChamado;
+      return verificado < limiteRefresh;
+    }).length;
 }
 
 async function refletirUltimoChamado(supabaseAdmin: ReturnType<typeof createClient>): Promise<void> {
