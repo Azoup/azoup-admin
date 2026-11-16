@@ -354,14 +354,21 @@ export async function listarUltimoContatoPorCliente(clienteIds: string[]): Promi
 
     const chamados = await supabase
       .from('admin_digisac_chamados')
-      .select('cliente_id,inicio')
+      .select('cliente_id,inicio,fim')
       .in('cliente_id', chunk)
       .order('inicio', { ascending: false });
     if (chamados.error) {
       console.warn('[ultimo-contato] admin_digisac_chamados', chamados.error.message);
     } else {
-      for (const row of (chamados.data ?? []) as { cliente_id?: string; inicio?: string | null }[]) {
-        guardarData(chamadosPorCliente, `${row.cliente_id ?? ''}`, dataCalendarioBrasil(row.inicio));
+      for (const row of (chamados.data ?? []) as {
+        cliente_id?: string;
+        inicio?: string | null;
+        fim?: string | null;
+      }[]) {
+        const id = `${row.cliente_id ?? ''}`;
+        guardarData(chamadosPorCliente, id, dataCalendarioBrasil(row.inicio));
+        // Ticket aberto com mensagem nova grava a atividade em fim; fechado usa endedAt.
+        guardarData(chamadosPorCliente, id, dataCalendarioBrasil(row.fim));
       }
     }
 

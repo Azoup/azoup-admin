@@ -365,7 +365,14 @@ function mapChamado(row: Record<string, unknown>): Chamado | null {
   if (!id) return null;
   const protocolo = `${row.protocol ?? ''}`.trim();
   const inicio = `${row.startedAt ?? row.createdAt ?? ''}`.trim();
-  const fim = `${row.endedAt ?? ''}`.trim();
+  const fimBruto = `${row.endedAt ?? ''}`.trim();
+  const atualizado = `${row.updatedAt ?? ''}`.trim();
+  // Em ticket aberto, Digisac atualiza updatedAt a cada mensagem — isso é o último contato real.
+  const fim =
+    fimBruto ||
+    (row.isOpen === true && atualizado && (!inicio || Date.parse(atualizado) > Date.parse(inicio))
+      ? atualizado
+      : '');
   const contactId = idCampo(row.contactId);
   const departmentId = idCampo(row.departmentId) || idCampo(row.department);
   return {
@@ -1217,6 +1224,22 @@ async function contatosDoCliente(
     }
   }
 
+  // Contato Digisac já ligado a chamado/envio: reusa mesmo se a busca por telefone falhar
+  // (número LID/WhatsApp divergente do cadastro). Sem isso o último contato fica preso.
+  const vinculados: string[] = [];
+  for (const salvo of await contactIdsJaVinculados(supabaseAdmin, clienteId)) {
+    if (vistos.has(salvo)) {
+      vinculados.push(salvo);
+      continue;
+    }
+    const row = await hidratarContato(salvo);
+    const id = pickId(row);
+    if (!id || !row) continue;
+    porId.set(id, row);
+    vistos.add(id);
+    vinculados.push(id);
+  }
+
   const extraIds = extras.flatMap((extra) => extra.contactIds);
   const naConexao = (id: string | null | undefined) => {
     if (!id) return false;
@@ -1229,8 +1252,11 @@ async function contatosDoCliente(
   if (!envioContactId) {
     envioContactId = principalIds.find((id) => naConexao(id)) ?? null;
   }
+  if (!envioContactId) {
+    envioContactId = vinculados.find((id) => naConexao(id)) ?? vinculados[0] ?? null;
+  }
 
-  const contactIds = [...new Set([...principalIds, ...extraIds])];
+  const contactIds = [...new Set([...principalIds, ...extraIds, ...vinculados])];
   if (!contactIds.length) return vazio('sem_contato', extras);
   return { situacao: null, contactIds, extras, envioContactId };
 }
@@ -1447,7 +1473,7 @@ async function datasUltimoChamado(
 ): Promise<Record<string, string>> {
   const { data, error } = await supabaseAdmin
     .from('admin_digisac_chamados')
-    .select('cliente_id,inicio')
+    .select('cliente_id,inicio,fim')
     .not('inicio', 'is', null)
     .order('inicio', { ascending: false })
     .limit(5000);
@@ -1458,9 +1484,12 @@ async function datasUltimoChamado(
   const map: Record<string, string> = {};
   for (const row of data ?? []) {
     const id = `${(row as { cliente_id?: string }).cliente_id ?? ''}`.trim();
-    if (!id || map[id]) continue;
-    const dia = diaDoChamado(`${(row as { inicio?: string }).inicio ?? ''}`);
-    if (dia) map[id] = dia;
+    if (!id) continue;
+    const inicio = diaDoChamado(`${(row as { inicio?: string }).inicio ?? ''}`);
+    const fim = diaDoChamado(`${(row as { fim?: string | null }).fim ?? ''}`);
+    const dia = [inicio, fim].filter(Boolean).sort().at(-1) ?? null;
+    if (!dia) continue;
+    if (!map[id] || dia > map[id]) map[id] = dia;
   }
   return map;
 }
@@ -1469,7 +1498,8 @@ async function importarChamadosRecentes(
   supabaseAdmin: ReturnType<typeof createClient>,
 ): Promise<number> {
   const departmentId = await departamentoAzoupConfec();
-  const base = { order: [['startedAt', 'DESC']] as [string, string][], perPage: 50 };
+  // updatedAt: pega ticket antigo com mensagem nova (último contato). startedAt sozinho deixa ativo preso.
+  const base = { order: [['updatedAt', 'DESC']] as [string, string][], perPage: 50 };
   const rows: Record<string, unknown>[] = [];
   // Até 400 tickets recentes do departamento — cobre mais clientes no último contato.
   for (let page = 1; page <= 8; page++) {
