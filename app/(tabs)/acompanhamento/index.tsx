@@ -2250,12 +2250,11 @@ function PendenciasAbertasModal({
   const [erro, setErro] = useState<string | null>(null);
   const q = useQuery({
     queryKey: ['admin_cliente_reunioes', cliente?.id, 'pendencias-abertas-modal'],
-    queryFn: () => listarReunioes(),
+    queryFn: async () => {
+      if (!cliente?.id) return [];
+      return (await listarPendenciasDoCliente(cliente.id)).filter((row) => !row.concluida);
+    },
     enabled: visible && Boolean(cliente?.id),
-    select: (rows) =>
-      rows.filter(
-        (row) => row.cliente_id === cliente?.id && !row.concluida && `${row.pendencia ?? ''}`.trim(),
-      ),
   });
 
   const editar = useMutation({

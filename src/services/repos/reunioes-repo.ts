@@ -408,7 +408,7 @@ export async function criarPendenciaAvulsa(params: {
   return data as unknown as ReuniaoClienteRow;
 }
 
-/** Uma pendência por ticket Confec, no nome de quem abriu o card. */
+/** Uma pendência por ticket Confec; se o cliente do card mudar, realinha a pendência. */
 export async function garantirPendenciaDoTicketConfec(params: {
   cardId: string;
   clienteId: string;
@@ -421,7 +421,7 @@ export async function garantirPendenciaDoTicketConfec(params: {
   if (!cardId || !clienteId) return;
   const { data: existente, error: busca } = await supabase
     .from('admin_cliente_reunioes')
-    .select('id')
+    .select('id,cliente_id,empresa_nome,pendencia')
     .eq('confec_card_id', cardId)
     .limit(1);
   if (busca) {
@@ -430,7 +430,26 @@ export async function garantirPendenciaDoTicketConfec(params: {
     }
     throw new Error(busca.message);
   }
-  if (existente?.length) return;
+  const atual = (existente ?? [])[0] as
+    | { id?: string; cliente_id?: string | null; empresa_nome?: string | null; pendencia?: string | null }
+    | undefined;
+  if (atual?.id) {
+    const clienteAtual = `${atual.cliente_id ?? ''}`.trim();
+    const empresa = `${params.empresaNome ?? ''}`.trim() || null;
+    const texto = params.pendencia.trim();
+    const precisaCliente = clienteAtual !== clienteId;
+    const precisaEmpresa = empresa != null && `${atual.empresa_nome ?? ''}`.trim() !== empresa;
+    const precisaTexto = Boolean(texto) && `${atual.pendencia ?? ''}`.trim() !== texto;
+    if (precisaCliente || precisaEmpresa || precisaTexto) {
+      const patch: Record<string, unknown> = {};
+      if (precisaCliente) patch.cliente_id = clienteId;
+      if (precisaEmpresa) patch.empresa_nome = empresa;
+      if (precisaTexto) patch.pendencia = texto;
+      const { error: upd } = await supabase.from('admin_cliente_reunioes').update(patch as never).eq('id', atual.id);
+      if (upd && !/0 rows|PGRST116/i.test(upd.message)) throw new Error(upd.message);
+    }
+    return;
+  }
   await criarPendenciaAvulsa({
     clienteId,
     empresaNome: params.empresaNome,
