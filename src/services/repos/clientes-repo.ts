@@ -265,7 +265,7 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
   });
 }
 
-async function buscarAssinaturaRecente(clienteId: string): Promise<AssinaturaClienteRow | null> {
+export async function buscarAssinaturaRecente(clienteId: string): Promise<AssinaturaClienteRow | null> {
   const { data, error } = await supabase
     .from('assinaturas_clientes')
     .select('*')

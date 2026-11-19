@@ -68,17 +68,57 @@ export function rotuloCupomAssinatura(cupom?: AssinaturaCupomRow | null): string
   return `${codigo}${desconto}`;
 }
 
+export type ModuloContratadoInfo = {
+  chave: 'pdv' | 'ecommerce' | 'conciliacao';
+  label: string;
+  contratado: boolean;
+  quantidade: number;
+  /** Texto pronto: "Sim · 2 assentos" ou "Não". */
+  resumo: string;
+};
+
+/** PDV, e-commerce e conciliação bancária contratados na assinatura. */
+export function listarModulosContratados(assinatura?: AssinaturaClienteRow | null): ModuloContratadoInfo[] {
+  const pdv = Number(assinatura?.pdv_assentos_contratados) || 0;
+  const ecom = Number(assinatura?.ecommerce_lojas_contratadas) || 0;
+  const conc = Number(assinatura?.conciliacao_contas_contratadas) || 0;
+  return [
+    {
+      chave: 'pdv',
+      label: 'PDV',
+      contratado: pdv > 0,
+      quantidade: pdv,
+      resumo: pdv > 0 ? `Sim · ${pdv} ${pdv === 1 ? 'assento' : 'assentos'}` : 'Não',
+    },
+    {
+      chave: 'ecommerce',
+      label: 'Integração e-commerce',
+      contratado: ecom > 0,
+      quantidade: ecom,
+      resumo: ecom > 0 ? `Sim · ${ecom} ${ecom === 1 ? 'loja' : 'lojas'}` : 'Não',
+    },
+    {
+      chave: 'conciliacao',
+      label: 'Conciliação bancária',
+      contratado: conc > 0,
+      quantidade: conc,
+      resumo: conc > 0 ? `Sim · ${conc} ${conc === 1 ? 'conta' : 'contas'}` : 'Não',
+    },
+  ];
+}
+
 export function rotuloPacoteAssinatura(assinatura?: AssinaturaClienteRow | null): string {
   if (!assinatura) return '—';
   const partes: string[] = [];
-  const pdv = Number(assinatura.pdv_assentos_contratados) || 0;
-  const ecom = Number(assinatura.ecommerce_lojas_contratadas) || 0;
-  const conc = Number(assinatura.conciliacao_contas_contratadas) || 0;
+  for (const modulo of listarModulosContratados(assinatura)) {
+    if (modulo.contratado) {
+      if (modulo.chave === 'pdv') partes.push(`${modulo.quantidade} PDV`);
+      else if (modulo.chave === 'ecommerce') partes.push(`${modulo.quantidade} e-commerce`);
+      else partes.push(`${modulo.quantidade} conciliação`);
+    }
+  }
   const users = Number(assinatura.usuarios_adicionais ?? assinatura.usuarios_extras) || 0;
   const empresas = Number(assinatura.empresas_adicionais ?? assinatura.empresas_extras) || 0;
-  if (pdv) partes.push(`${pdv} PDV`);
-  if (ecom) partes.push(`${ecom} e-commerce`);
-  if (conc) partes.push(`${conc} conciliação`);
   if (users) partes.push(`${users} usuário(s) extra`);
   if (empresas) partes.push(`${empresas} empresa(s) extra`);
   return partes.length ? partes.join(' · ') : '—';

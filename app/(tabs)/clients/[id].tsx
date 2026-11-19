@@ -44,6 +44,7 @@ import type { ClienteAzoupAdminView } from '@/src/types/azoup';
 import { dataCancelamentoAssinatura, dataVencimentoInadimplencia, rotuloStatusAssinatura } from '@/src/utils/assinatura-status';
 import {
   isClienteAsaas,
+  listarModulosContratados,
   rotuloBillingType,
   rotuloCicloCobranca,
   rotuloCupomAssinatura,
@@ -625,7 +626,13 @@ export default function ClientDetailScreen() {
                     : formatBRLFromCentavos(data.plano?.valor_mensal_centavos)
           }
         />
-        <Meta label="Pacote" value={rotuloPacoteAssinatura(data.assinatura)} />
+        <View style={{ gap: 4, marginTop: 4, marginBottom: 4 }}>
+          <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 13 }}>Módulos contratados</Text>
+          {listarModulosContratados(data.assinatura).map((modulo) => (
+            <Meta key={modulo.chave} label={modulo.label} value={modulo.resumo} />
+          ))}
+        </View>
+        <Meta label="Pacote / adicionais" value={rotuloPacoteAssinatura(data.assinatura)} />
         {clienteAsaas ? (
           <>
             <Meta label="Promoção" value={rotuloPromocaoResumo(data.assinatura)} />

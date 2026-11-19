@@ -44,7 +44,8 @@ import {
   type DigisacChamadosResposta,
   type DigisacExtraResposta,
 } from '@/src/services/digisac-historico-api';
-import { buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
+import { buscarAssinaturaRecente, buscarMetricasUsoCliente } from '@/src/services/repos/clientes-repo';
+import { listarModulosContratados } from '@/src/utils/assinatura-asaas';
 import {
   atualizarConversaCliente,
   criarConversaCliente,
@@ -1129,6 +1130,13 @@ export function HistoricoClienteTela({
     enabled: Boolean(cliente.id),
   });
 
+  const assinaturaQ = useQuery({
+    queryKey: ['assinatura_modulos_cliente', cliente.id],
+    queryFn: () => buscarAssinaturaRecente(cliente.id),
+    enabled: Boolean(cliente.id),
+    staleTime: 60_000,
+  });
+
   const chamadosQ = useQuery({
     queryKey: ['digisac_chamados', cliente.id],
     queryFn: () => listarChamadosDigisac(cliente.id),
@@ -1679,6 +1687,21 @@ export function HistoricoClienteTela({
               <Text style={{ color: theme.text, fontSize: 14 }}>
                 Plano: <Text style={{ fontWeight: '800' }}>{cliente?.plano_nome?.trim() || '—'}</Text>
               </Text>
+              <View style={{ gap: 2 }}>
+                <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: '700' }}>Módulos contratados</Text>
+                {assinaturaQ.isLoading ? (
+                  <Text style={{ color: theme.textMuted, fontSize: 13 }}>Carregando…</Text>
+                ) : (
+                  listarModulosContratados(assinaturaQ.data).map((modulo) => (
+                    <Text key={modulo.chave} style={{ color: theme.text, fontSize: 14 }}>
+                      {modulo.label}:{' '}
+                      <Text style={{ fontWeight: '800', color: modulo.contratado ? theme.cadastroAction : theme.text }}>
+                        {modulo.resumo}
+                      </Text>
+                    </Text>
+                  ))
+                )}
+              </View>
               {cliente?.dias_trial_restantes != null ? (
                 <Text style={{ color: theme.text, fontSize: 14 }}>
                   Trial:{' '}
