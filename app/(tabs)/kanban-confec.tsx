@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { createElement, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -360,6 +360,7 @@ function TicketCard({
 export default function KanbanConfecScreen() {
   const { theme } = useTheme();
   const { canAccessScreen, canDeleteRecords, papel, adminProfile, session } = useAdminAuth();
+  const router = useRouter();
   const params = useLocalSearchParams<{ card?: string | string[] }>();
   const email = adminProfile?.email ?? session?.user?.email ?? '';
   const owner = papel === 'owner';
@@ -441,14 +442,28 @@ export default function KanbanConfecScreen() {
   useEffect(() => {
     const bruto = params.card;
     const cardId = `${Array.isArray(bruto) ? bruto[0] : bruto ?? ''}`.trim();
-    if (!cardId || !quadro?.cards?.length) return;
-    if (cardAbertoViaRota.current === cardId && detalheId === cardId) return;
+    if (!cardId) {
+      cardAbertoViaRota.current = null;
+      return;
+    }
+    if (!quadro?.cards?.length) return;
+    // Abre uma vez por deep link; não reabre se o usuário fechou o modal.
+    if (cardAbertoViaRota.current === cardId) return;
     const existe = quadro.cards.some((card) => card.id === cardId);
     if (!existe) return;
     cardAbertoViaRota.current = cardId;
     setDetalheId(cardId);
     setRascunho(null);
-  }, [params.card, quadro?.cards, detalheId]);
+  }, [params.card, quadro?.cards]);
+
+  function fecharDetalhe() {
+    setDetalheId(null);
+    const bruto = params.card;
+    const cardId = `${Array.isArray(bruto) ? bruto[0] : bruto ?? ''}`.trim();
+    if (!cardId) return;
+    cardAbertoViaRota.current = null;
+    router.setParams({ card: '' });
+  }
 
   const porColuna = useMemo(() => {
     const map = new Map<string, ConfecCard[]>();
@@ -935,9 +950,9 @@ export default function KanbanConfecScreen() {
         })}
       </ScrollView>
 
-      <Modal visible={detalhe != null && rascunho == null} animationType="fade" transparent onRequestClose={() => setDetalheId(null)}>
+      <Modal visible={detalhe != null && rascunho == null} animationType="fade" transparent onRequestClose={fecharDetalhe}>
         <View style={styles.overlay}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setDetalheId(null)} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={fecharDetalhe} />
           <ScrollView style={styles.modal} contentContainerStyle={{ gap: 8 }}>
             {detalhe ? (
               <View style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -1165,7 +1180,7 @@ export default function KanbanConfecScreen() {
                       excluirCardConfec(detalhe.id)
                         .then(() => {
                           auditar('Excluiu card do Kanban Confec', detalhe.id, { titulo: detalhe.title }, null);
-                          setDetalheId(null);
+                          fecharDetalhe();
                           void qc.invalidateQueries({ queryKey: ['confec_kanban'] });
                         })
                         .catch((e) => setErro(e instanceof Error ? e.message : 'Erro ao excluir'))
