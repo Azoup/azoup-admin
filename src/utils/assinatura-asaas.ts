@@ -25,7 +25,9 @@ export function rotuloCicloCobranca(ciclo?: string | null): string {
   const v = `${ciclo ?? ''}`.trim().toLowerCase();
   if (v === 'mensal') return 'Mensal';
   if (v === 'anual_parcelado') return 'Anual (parcelado)';
-  return '—';
+  if (v === 'anual_fidelidade') return 'Anual (fidelidade)';
+  if (v === 'anual') return 'Anual';
+  return v ? v : '—';
 }
 
 export function rotuloBillingType(tipo?: string | null): string {

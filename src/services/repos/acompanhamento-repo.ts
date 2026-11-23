@@ -24,12 +24,13 @@ function colunaKanban(kb?: AdminAcompanhamentoKanbanRow): AcompanhamentoColuna |
 
 export type AcompanhamentoAgrupado = Record<AcompanhamentoColuna, AcompanhamentoCliente[]>;
 
-/** Trial vigente ou cliente em algum plano. */
+/** Trial vigente, plano ativo/inadimplente, ou cadastro recente (ASAAS pode gravar a assinatura segundos depois). */
 function isClienteNoAcompanhamento(row: {
   assinatura_status?: string | null;
   trial_fim?: string | null;
   plano_id?: string | null;
   plano_nome?: string | null;
+  created_at?: string | null;
 }): boolean {
   const grupo = classificarStatusAssinatura({
     status: row.assinatura_status,
@@ -37,6 +38,9 @@ function isClienteNoAcompanhamento(row: {
   });
   if (grupo === 'ativa' || grupo === 'trial' || grupo === 'inadimplente') return true;
   if (grupo === 'outro' && (`${row.plano_id ?? ''}`.trim() || `${row.plano_nome ?? ''}`.trim())) return true;
+  const criado = Date.parse(`${row.created_at ?? ''}`);
+  // Janela curta: evita sumir da fila enquanto o checkout ASAAS termina de gravar a assinatura.
+  if (Number.isFinite(criado) && Date.now() - criado < 3 * 86_400_000) return true;
   return false;
 }
 

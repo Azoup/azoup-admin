@@ -128,14 +128,30 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
 
   const ids = rows.map((c) => c.id);
 
+  const carregarAssinaturasEmLotes = async (): Promise<AssinaturaClienteRow[]> => {
+    const out: AssinaturaClienteRow[] = [];
+    const CHUNK = 200;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const { data, error } = await supabase
+        .from('assinaturas_clientes')
+        .select('*')
+        .in('cliente_id', chunk)
+        .limit(5000);
+      if (error) throw new Error(error.message);
+      if (data?.length) out.push(...(data as AssinaturaClienteRow[]));
+    }
+    return out;
+  };
+
   const [
-    { data: todasAssinaturas, error: eAss },
+    todasAssinaturas,
     { data: todosOverrides, error: eOv },
     { data: todasFaturas, error: eFat },
     { data: empresasMatriz, error: eEmp },
     cuponsPorCliente,
   ] = await Promise.all([
-    supabase.from('assinaturas_clientes').select('*').in('cliente_id', ids).limit(10000),
+    carregarAssinaturasEmLotes(),
     supabase.from('assinatura_limites_override').select('*').in('cliente_id', ids).limit(10000),
     supabase.from('historico_faturas').select('*').in('cliente_id', ids).limit(5000),
     supabase
@@ -151,8 +167,6 @@ export async function listarClientesAzoup(): Promise<ClienteAzoupAdminView[]> {
       return new Map<string, AssinaturaCupomRow>();
     }),
   ]);
-
-  if (eAss) throw new Error(eAss.message);
   if (eFat) throw new Error(eFat.message);
   if (eEmp) throw new Error(eEmp.message);
   if (eOv) {
