@@ -553,9 +553,13 @@ export default function PreCadastroAsaasScreen() {
     },
   });
 
-  async function copiarLink(link: string) {
+  async function copiarLink(link: string, opts?: { fecharModal?: boolean }) {
     try {
       await copiarTexto(link);
+      if (opts?.fecharModal) {
+        setModalAberto(false);
+        return;
+      }
       Alert.alert('Copiado', 'Link copiado para a área de transferência.');
     } catch (e) {
       Alert.alert('Copiar', e instanceof Error ? e.message : 'Falha ao copiar.');
@@ -996,9 +1000,6 @@ export default function PreCadastroAsaasScreen() {
                   <Text selectable style={{ color: theme.cadastroAction }}>
                     {linkGerado}
                   </Text>
-                  <Pressable onPress={() => void copiarLink(linkGerado)}>
-                    <Text style={{ color: theme.cadastroAction, fontWeight: '700' }}>Copiar link</Text>
-                  </Pressable>
                   <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                     Login = e-mail · senha inicial 12345678 (Confec exige troca).
                   </Text>
@@ -1007,27 +1008,25 @@ export default function PreCadastroAsaasScreen() {
             </ScrollView>
 
             <View style={styles.modalFooter}>
-              <Pressable
-                onPress={() => setModalAberto(false)}
-                style={({ pressed }) => [styles.cancelBtn, { opacity: pressed ? 0.85 : 1, borderColor: theme.border }]}>
-                <Text style={{ color: theme.textMuted, fontWeight: '700' }}>
-                  {linkGerado ? 'Fechar' : 'Cancelar'}
-                </Text>
-              </Pressable>
               {!linkGerado ? (
-                <PrimaryButton
-                  label={salvarMutation.isPending ? 'Salvando…' : 'Salvar e gerar link'}
-                  loading={salvarMutation.isPending}
-                  onPress={() => salvarMutation.mutate()}
-                  disabled={!planoId}
-                  style={{ flex: 1 }}
-                />
+                <>
+                  <Pressable
+                    onPress={() => setModalAberto(false)}
+                    style={({ pressed }) => [styles.cancelBtn, { opacity: pressed ? 0.85 : 1, borderColor: theme.border }]}>
+                    <Text style={{ color: theme.textMuted, fontWeight: '700' }}>Cancelar</Text>
+                  </Pressable>
+                  <PrimaryButton
+                    label={salvarMutation.isPending ? 'Salvando…' : 'Salvar e gerar link'}
+                    loading={salvarMutation.isPending}
+                    onPress={() => salvarMutation.mutate()}
+                    disabled={!planoId}
+                    style={{ flex: 1 }}
+                  />
+                </>
               ) : (
                 <PrimaryButton
-                  label="Criar outro"
-                  onPress={() => {
-                    limparForm();
-                  }}
+                  label="Copiar link"
+                  onPress={() => void copiarLink(linkGerado, { fecharModal: true })}
                   style={{ flex: 1 }}
                 />
               )}
