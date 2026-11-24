@@ -250,6 +250,12 @@ export async function criarPendenciasReuniao(params: {
   if (!params.reuniaoCancelada && !params.participanteIds.length) {
     throw new Error('Selecione ao menos um participante.');
   }
+  if (params.reuniaoCancelada) {
+    const motivo = params.assuntos?.trim() || '';
+    if (motivo.length < 3 || /^reuni[aã]o cancelada\.?$/i.test(motivo)) {
+      throw new Error('Informe o motivo do cancelamento da reunião.');
+    }
+  }
 
   const itens = params.pendencias
     .map((item) => ({ texto: item.texto.trim(), dataRetorno: item.dataRetorno.trim() }))

@@ -1952,6 +1952,11 @@ export function HistoricoClienteTela({
                                     ? 'Reunião cancelada'
                                     : `Registro do mesmo dia${reuniao.gerado_ia ? ' · IA' : ''}`}
                                 </Text>
+                                {reuniao.reuniao_cancelada && reuniao.assuntos?.trim() ? (
+                                  <Text style={{ color: theme.error, fontSize: 12, fontWeight: '700' }}>
+                                    Motivo: {reuniao.assuntos.trim()}
+                                  </Text>
+                                ) : null}
                                 <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                                   {formatDateTimeBR(reuniao.created_at)} · {reuniao.admin_email?.trim() || '—'}
                                 </Text>
@@ -1995,6 +2000,11 @@ export function HistoricoClienteTela({
                         </Text>
                         {reuniao.reuniao_cancelada ? (
                           <Text style={{ color: theme.error, fontSize: 12, fontWeight: '800' }}>Reunião cancelada</Text>
+                        ) : null}
+                        {reuniao.reuniao_cancelada && reuniao.assuntos?.trim() ? (
+                          <Text style={{ color: theme.error, fontSize: 12, fontWeight: '700' }}>
+                            Motivo: {reuniao.assuntos.trim()}
+                          </Text>
                         ) : null}
                         <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                           {reuniao.gerado_ia ? 'Registrado pela IA' : `Registrado por ${reuniao.admin_email?.trim() || '—'}`}

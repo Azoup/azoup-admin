@@ -48,6 +48,8 @@ export function RegistrarReuniaoModal({
   const [dataRegistro, setDataRegistro] = useState(dataHojeBrasil);
   const [linhas, setLinhas] = useState<LinhaPendencia[]>([linhaVazia()]);
   const [geradoIa, setGeradoIa] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
+  const [motivoCancelamento, setMotivoCancelamento] = useState('');
   const [erro, setErro] = useState<string | null>(null);
 
   const usuariosQ = useQuery({
@@ -65,6 +67,8 @@ export function RegistrarReuniaoModal({
     setDataRegistro(/^\d{4}-\d{2}-\d{2}$/.test(dataInicial) ? dataInicial : dataHojeBrasil());
     setLinhas([linhaVazia()]);
     setGeradoIa(false);
+    setCancelando(false);
+    setMotivoCancelamento('');
     setErro(null);
   }, [visible, cliente?.id, dataRegistroInicial]);
 
@@ -79,17 +83,23 @@ export function RegistrarReuniaoModal({
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dataRegistro.trim())) {
         throw new Error('Informe a data do registro.');
       }
+      const motivo = motivoCancelamento.trim();
+      if (reuniaoCancelada && motivo.length < 3) {
+        throw new Error('Informe o motivo do cancelamento da reunião.');
+      }
       const criadas = await criarPendenciasReuniao({
         clienteId: cliente.id,
         empresaNome: cliente.empresa_nome?.trim() || cliente.nome,
-        assuntos: reuniaoCancelada ? assuntos.trim() || 'Reunião cancelada' : assuntos,
-        proximaAcao,
-        participanteIds: selecionados,
+        assuntos: reuniaoCancelada ? motivo : assuntos,
+        proximaAcao: reuniaoCancelada ? null : proximaAcao,
+        participanteIds: reuniaoCancelada ? [] : selecionados,
         adminEmail: adminProfile?.email ?? session?.user?.email ?? null,
         dataRegistro,
-        geradoIa,
+        geradoIa: reuniaoCancelada ? false : geradoIa,
         reuniaoCancelada,
-        pendencias: linhas.map((linha) => ({ texto: linha.texto, dataRetorno: linha.dataRetorno })),
+        pendencias: reuniaoCancelada
+          ? []
+          : linhas.map((linha) => ({ texto: linha.texto, dataRetorno: linha.dataRetorno })),
       });
       const primeiraData = criadas.map((item) => item.data_retorno).sort()[0] ?? null;
       try {
@@ -300,43 +310,90 @@ export function RegistrarReuniaoModal({
 
               {erro ? <Text style={{ color: theme.error }}>{erro}</Text> : null}
 
-              <PrimaryButton
-                label="SALVAR REUNIÃO"
-                loading={salvarMutation.isPending && salvarMutation.variables !== true}
-                disabled={salvarMutation.isPending}
-                onPress={() => {
-                  setErro(null);
-                  salvarMutation.mutate(false);
-                }}
-              />
-              <Pressable
-                disabled={salvarMutation.isPending}
-                onPress={() => {
-                  setErro(null);
-                  salvarMutation.mutate(true);
-                }}
-                style={({ pressed }) => [
-                  styles.adicionar,
-                  {
-                    borderColor: theme.error,
-                    opacity: pressed || salvarMutation.isPending ? 0.7 : 1,
-                  },
-                ]}
-              >
-                {salvarMutation.isPending && salvarMutation.variables === true ? (
-                  <ActivityIndicator color={theme.error} />
-                ) : (
-                  <FontAwesome name="ban" size={13} color={theme.error} />
-                )}
-                <Text style={{ color: theme.error, fontWeight: '800', fontSize: 13 }}>
-                  {salvarMutation.isPending && salvarMutation.variables === true
-                    ? 'Salvando…'
-                    : 'Marcar reunião cancelada'}
-                </Text>
-              </Pressable>
-              <Text style={{ color: theme.textMuted, fontSize: 12 }}>
-                Use quando a reunião da agenda não aconteceu. O dia fica com registro e aparece como cancelada.
-              </Text>
+              {!cancelando ? (
+                <>
+                  <PrimaryButton
+                    label="SALVAR REUNIÃO"
+                    loading={salvarMutation.isPending && salvarMutation.variables !== true}
+                    disabled={salvarMutation.isPending}
+                    onPress={() => {
+                      setErro(null);
+                      salvarMutation.mutate(false);
+                    }}
+                  />
+                  <Pressable
+                    disabled={salvarMutation.isPending}
+                    onPress={() => {
+                      setErro(null);
+                      setCancelando(true);
+                    }}
+                    style={({ pressed }) => [
+                      styles.adicionar,
+                      {
+                        borderColor: theme.error,
+                        opacity: pressed || salvarMutation.isPending ? 0.7 : 1,
+                      },
+                    ]}
+                  >
+                    <FontAwesome name="ban" size={13} color={theme.error} />
+                    <Text style={{ color: theme.error, fontWeight: '800', fontSize: 13 }}>
+                      Marcar reunião cancelada
+                    </Text>
+                  </Pressable>
+                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                    Use quando a reunião da agenda não aconteceu. Será obrigatório informar o motivo para o dia
+                    não ficar como sem registro.
+                  </Text>
+                </>
+              ) : (
+                <View style={[styles.pendenciaBloco, { borderColor: theme.error, gap: 10 }]}>
+                  <Text style={{ color: theme.error, fontWeight: '800', fontSize: 14 }}>
+                    Cancelar reunião da agenda
+                  </Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                    O dia fica com registro (não aparece como “sem registro”). Informe o motivo.
+                  </Text>
+                  <FormField label="Data do registro">
+                    <FormDateInput value={dataRegistro} onChange={setDataRegistro} />
+                  </FormField>
+                  <FormField label="Motivo do cancelamento" required>
+                    <FormInput
+                      value={motivoCancelamento}
+                      onChangeText={setMotivoCancelamento}
+                      multiline
+                      placeholder="Ex.: cliente remarcou, não compareceu, indisponibilidade…"
+                      style={styles.area}
+                    />
+                  </FormField>
+                  <PrimaryButton
+                    label={
+                      salvarMutation.isPending && salvarMutation.variables === true
+                        ? 'Salvando…'
+                        : 'CONFIRMAR CANCELAMENTO'
+                    }
+                    loading={salvarMutation.isPending && salvarMutation.variables === true}
+                    disabled={salvarMutation.isPending}
+                    variant="danger"
+                    onPress={() => {
+                      setErro(null);
+                      salvarMutation.mutate(true);
+                    }}
+                  />
+                  <Pressable
+                    disabled={salvarMutation.isPending}
+                    onPress={() => {
+                      setCancelando(false);
+                      setErro(null);
+                    }}
+                    style={({ pressed }) => [
+                      styles.adicionar,
+                      { borderColor: theme.border, opacity: pressed ? 0.85 : 1 },
+                    ]}
+                  >
+                    <Text style={{ color: theme.textMuted, fontWeight: '700', fontSize: 13 }}>Voltar</Text>
+                  </Pressable>
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
