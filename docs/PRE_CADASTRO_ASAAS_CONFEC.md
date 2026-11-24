@@ -43,13 +43,15 @@ Criada no Supabase pelo painel (`supabase/sql/migration_admin_pre_cadastros.sql`
 
 ### Dados do titular (espelho `SignUpScreen`)
 
-`nome_dono`, `cpf`, `email`, `telefone`, `cep`, `rua`, `numero`, `bairro`, `cidade`, `estado`, `pais_codigo` (default `1058`).
+`nome_dono`, `cpf`, `email`, `telefone`, `pais_codigo` (default `1058`).
+
+Endereço do titular (`cep`, `rua`, `numero`, `bairro`, `cidade`, `estado`) **é o mesmo da empresa**: o painel grava espelhado e o Confec, ao materializar `clientes_azoup`, usa o endereço da empresa.
 
 ### Dados da empresa (espelho `CompanySignUpScreen`)
 
 `cnpj`, `razao_social`, `nome_fantasia`, `ie`, `cep_empresa`, `rua_empresa`, `numero_empresa`, `bairro_empresa`, `cidade_empresa`, `estado_empresa`, `regime_tributario`, `apuracao_pis_cofins` (nullable; cliente completa o resto).
 
-Regra: admin preenche o que tiver; campos vazios = obrigatórios na tela do Convite no Confec.
+Regra: admin preenche o que tiver; campos vazios = obrigatórios na tela do Convite no Confec. **Não pedir endereço do titular no convite** — só o da empresa.
 
 ## 4. Cotação (mesma regra do Confec hoje)
 

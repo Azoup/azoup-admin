@@ -511,6 +511,13 @@ export default function PreCadastroAsaasScreen() {
         cpf: soDigitos(cpf) || null,
         email: email.trim(),
         telefone: soDigitos(telefone) || null,
+        // clientes_azoup usa o mesmo endereço da empresa
+        cep: soDigitos(cepEmpresa) || null,
+        rua: ruaEmpresa.trim() || null,
+        numero: numeroEmpresa.trim() || null,
+        bairro: bairroEmpresa.trim() || null,
+        cidade: cidadeEmpresa.trim() || null,
+        estado: estadoEmpresa.trim().toUpperCase() || null,
         cnpj: soDigitos(cnpj) || null,
         razao_social: razaoSocial.trim() || null,
         nome_fantasia: nomeFantasia.trim() || null,
