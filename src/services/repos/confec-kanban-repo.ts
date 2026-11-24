@@ -185,8 +185,14 @@ export async function carregarQuadroConfec(): Promise<QuadroConfec> {
         .order('position'),
       supabase.from('confec_kanban_labels').select('id,name,color').order('name'),
       supabase.from('confec_kanban_card_labels').select('card_id,label_id'),
-      supabase.from('confec_kanban_card_images').select('id,card_id,storage_path,nome,created_by_email'),
-      supabase.from('confec_kanban_card_files').select('id,card_id,storage_path,nome,tamanho,mime,created_by_email'),
+      supabase
+        .from('confec_kanban_card_images')
+        .select('id,card_id,storage_path,nome,created_by_email,created_at')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('confec_kanban_card_files')
+        .select('id,card_id,storage_path,nome,tamanho,mime,created_by_email,created_at')
+        .order('created_at', { ascending: false }),
       supabase
         .from('confec_kanban_card_comments')
         .select('id,card_id,texto,author_email,created_at')
@@ -838,9 +844,9 @@ function aceitaArquivo(mime: string, nome: string): boolean {
   const tipo = mime.toLowerCase();
   if (MIME_OK.some((prefixo) => (prefixo.endsWith('/') ? tipo.startsWith(prefixo) : tipo === prefixo))) return true;
   if (tipo === 'application/octet-stream') {
-    return /\.(png|jpe?g|gif|webp|mp4|mov|pdf|txt|csv|xlsx?|docx?|pptx?|zip|rar|7z)$/i.test(nome);
+    return /\.(png|jpe?g|gif|webp|heic|heif|mp4|mov|pdf|txt|csv|xlsx?|docx?|pptx?|zip|rar|7z)$/i.test(nome);
   }
-  return /\.(png|jpe?g|gif|webp|mp4|mov|pdf|txt|csv|xlsx?|docx?|pptx?|zip|rar|7z)$/i.test(nome);
+  return /\.(png|jpe?g|gif|webp|heic|heif|mp4|mov|pdf|txt|csv|xlsx?|docx?|pptx?|zip|rar|7z)$/i.test(nome);
 }
 
 function mimeDoArquivo(mime: string, nome: string): string {
@@ -851,6 +857,8 @@ function mimeDoArquivo(mime: string, nome: string): string {
   if (n.endsWith('.jpg') || n.endsWith('.jpeg')) return 'image/jpeg';
   if (n.endsWith('.gif')) return 'image/gif';
   if (n.endsWith('.webp')) return 'image/webp';
+  if (n.endsWith('.heic')) return 'image/heic';
+  if (n.endsWith('.heif')) return 'image/heif';
   if (n.endsWith('.pdf')) return 'application/pdf';
   if (n.endsWith('.txt')) return 'text/plain';
   if (n.endsWith('.csv')) return 'text/csv';
@@ -870,7 +878,7 @@ function mimeDoArquivo(mime: string, nome: string): string {
 
 export function ehImagemAnexo(mime: string, nome: string): boolean {
   const tipo = mimeDoArquivo(mime, nome);
-  return tipo.startsWith('image/') || /\.(png|jpe?g|gif|webp)$/i.test(nome);
+  return tipo.startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif)$/i.test(nome);
 }
 
 export async function enviarAnexoConfec(params: {
@@ -880,7 +888,7 @@ export async function enviarAnexoConfec(params: {
   mime: string;
   imagem: boolean;
   authorEmail: string;
-}): Promise<void> {
+}): Promise<ConfecAnexo> {
   if (!params.cardId) throw new Error('Salve o ticket antes de anexar.');
   if (!params.arquivo || params.arquivo.size <= 0) throw new Error('Arquivo vazio.');
   if (params.arquivo.size > LIMITE_ARQUIVO_BYTES) throw new Error('O arquivo passa de 5 GB.');
@@ -889,12 +897,21 @@ export async function enviarAnexoConfec(params: {
   const imagem = params.imagem || ehImagemAnexo(mime, params.nome);
   const seguro = params.nome.replace(/[^\w.\-]+/g, '_').slice(0, 80) || 'arquivo';
   const path = `${params.cardId}/${Date.now()}-${seguro}`;
-  const { error: up } = await supabase.storage.from(BUCKET_CONFEC).upload(path, params.arquivo, {
+  // ArrayBuffer evita falha intermitente de upload com File/Blob em alguns browsers.
+  const bytes = await params.arquivo.arrayBuffer();
+  if (!bytes.byteLength) throw new Error('Arquivo vazio.');
+  const { error: up } = await supabase.storage.from(BUCKET_CONFEC).upload(path, bytes, {
     contentType: mime,
     upsert: false,
     cacheControl: '3600',
   });
-  if (up) throw new Error(up.message || 'Falha ao enviar o arquivo para o storage.');
+  if (up) {
+    const msg = up.message || 'Falha ao enviar o arquivo para o storage.';
+    if (/row-level security|policy|not allowed|unauthorized|403/i.test(msg)) {
+      throw new Error('Sem permissão para enviar anexo. Confirme se sua sessão de admin está ativa.');
+    }
+    throw new Error(msg);
+  }
   const tabela = imagem ? 'confec_kanban_card_images' : 'confec_kanban_card_files';
   const linha = imagem
     ? { card_id: params.cardId, storage_path: path, nome: params.nome, created_by_email: params.authorEmail }
@@ -902,15 +919,25 @@ export async function enviarAnexoConfec(params: {
         card_id: params.cardId,
         storage_path: path,
         nome: params.nome,
-        tamanho: params.arquivo.size,
+        tamanho: bytes.byteLength,
         mime,
         created_by_email: params.authorEmail,
       };
-  const { error } = await supabase.from(tabela).insert(linha as never);
-  if (error) {
+  const { data, error } = await supabase
+    .from(tabela)
+    .insert(linha as never)
+    .select('id,card_id,storage_path,nome,created_by_email')
+    .single();
+  if (error || !data) {
     await supabase.storage.from(BUCKET_CONFEC).remove([path]);
-    throw erroTabela(error.message);
+    throw erroTabela(error?.message || 'Não foi possível salvar o anexo no ticket.');
   }
+  const row = data as ConfecAnexo;
+  return {
+    ...row,
+    nome: row.nome || params.nome,
+    url: urlPublica(path),
+  };
 }
 
 export async function excluirAnexoConfec(anexo: ConfecAnexo, imagem: boolean): Promise<void> {

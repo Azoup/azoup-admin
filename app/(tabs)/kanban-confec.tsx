@@ -345,6 +345,13 @@ function TicketCard({
             </Text>
           ))}
         </View>
+        {card.imagens.length || card.arquivos.length ? (
+          <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 4 }}>
+            {card.imagens.length ? `${card.imagens.length} imagem(ns)` : ''}
+            {card.imagens.length && card.arquivos.length ? ' · ' : ''}
+            {card.arquivos.length ? `${card.arquivos.length} arquivo(s)` : ''}
+          </Text>
+        ) : null}
         <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 6 }}>
           {card.analista_email || 'Sem analista'} · {card.desenvolvedor_email || 'Sem desenvolvedor'}
         </Text>
@@ -692,7 +699,7 @@ export default function KanbanConfecScreen() {
       if (!cardId) return;
       const comoImagem = imagem || ehImagemAnexo(arquivo.type, arquivo.name);
       const nome = arquivo.name || (comoImagem ? `imagem-colada-${Date.now()}.png` : 'arquivo');
-      await enviarAnexoConfec({
+      const anexo = await enviarAnexoConfec({
         cardId,
         arquivo,
         nome,
@@ -705,7 +712,20 @@ export default function KanbanConfecScreen() {
         arquivos: comoImagem ? 0 : 1,
         nome,
       });
-      await qc.invalidateQueries({ queryKey: ['confec_kanban'] });
+      qc.setQueryData(['confec_kanban'], (atual: Awaited<ReturnType<typeof carregarQuadroConfec>> | undefined) => {
+        if (!atual) return atual;
+        return {
+          ...atual,
+          cards: atual.cards.map((card) => {
+            if (card.id !== cardId) return card;
+            if (comoImagem) {
+              return { ...card, imagens: [anexo, ...card.imagens.filter((item) => item.id !== anexo.id)] };
+            }
+            return { ...card, arquivos: [anexo, ...card.arquivos.filter((item) => item.id !== anexo.id)] };
+          }),
+        };
+      });
+      await qc.refetchQueries({ queryKey: ['confec_kanban'] });
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro ao anexar');
     } finally {

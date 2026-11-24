@@ -247,6 +247,7 @@ set public = excluded.public,
 
 drop policy if exists confec_kanban_files_select on storage.objects;
 drop policy if exists confec_kanban_files_insert on storage.objects;
+drop policy if exists confec_kanban_files_update on storage.objects;
 drop policy if exists confec_kanban_files_delete on storage.objects;
 
 create policy confec_kanban_files_select
@@ -257,6 +258,12 @@ using (bucket_id = 'confec-kanban-files');
 create policy confec_kanban_files_insert
 on storage.objects for insert
 to authenticated
+with check (bucket_id = 'confec-kanban-files' and public.painel_admin_ativo());
+
+create policy confec_kanban_files_update
+on storage.objects for update
+to authenticated
+using (bucket_id = 'confec-kanban-files' and public.painel_admin_ativo())
 with check (bucket_id = 'confec-kanban-files' and public.painel_admin_ativo());
 
 create policy confec_kanban_files_delete
