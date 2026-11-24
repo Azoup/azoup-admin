@@ -309,6 +309,101 @@ export type InserirCupomAdminInput = {
   created_by_admin?: string | null;
 };
 
+export type PreCadastroStatus =
+  | 'rascunho'
+  | 'link_gerado'
+  | 'preenchendo'
+  | 'aguardando_pagamento'
+  | 'pago'
+  | 'cancelado'
+  | 'expirado';
+
+export interface AdminPreCadastroRow {
+  id: string;
+  token: string;
+  status: PreCadastroStatus | string;
+  plano_id: number;
+  usuarios_adicionais: number;
+  empresas_adicionais: number;
+  pdv_assentos: number;
+  ecommerce_lojas: number;
+  conciliacao_contas: number;
+  valor_mensal_calculado: number;
+  valor_mensal_override?: number | null;
+  valor_anual_calculado: number;
+  valor_anual_override?: number | null;
+  desconto_anual_percent_usado: number;
+  nome_dono?: string | null;
+  cpf?: string | null;
+  email: string;
+  telefone?: string | null;
+  cep?: string | null;
+  rua?: string | null;
+  numero?: string | null;
+  bairro?: string | null;
+  cidade?: string | null;
+  estado?: string | null;
+  pais_codigo?: string | null;
+  cnpj?: string | null;
+  razao_social?: string | null;
+  nome_fantasia?: string | null;
+  ie?: string | null;
+  cep_empresa?: string | null;
+  rua_empresa?: string | null;
+  numero_empresa?: string | null;
+  bairro_empresa?: string | null;
+  cidade_empresa?: string | null;
+  estado_empresa?: string | null;
+  regime_tributario?: string | null;
+  apuracao_pis_cofins?: string | null;
+  cliente_id?: string | null;
+  empresa_id?: string | null;
+  assinatura_id?: number | null;
+  criado_por_admin?: string | null;
+  expira_em?: string | null;
+  criado_em?: string | null;
+  atualizado_em?: string | null;
+}
+
+export type InserirPreCadastroInput = {
+  plano_id: number;
+  usuarios_adicionais?: number;
+  empresas_adicionais?: number;
+  pdv_assentos?: number;
+  ecommerce_lojas?: number;
+  conciliacao_contas?: number;
+  valor_mensal_calculado: number;
+  valor_mensal_override?: number | null;
+  valor_anual_calculado: number;
+  valor_anual_override?: number | null;
+  desconto_anual_percent_usado: number;
+  nome_dono?: string | null;
+  cpf?: string | null;
+  email: string;
+  telefone?: string | null;
+  cep?: string | null;
+  rua?: string | null;
+  numero?: string | null;
+  bairro?: string | null;
+  cidade?: string | null;
+  estado?: string | null;
+  pais_codigo?: string | null;
+  cnpj?: string | null;
+  razao_social?: string | null;
+  nome_fantasia?: string | null;
+  ie?: string | null;
+  cep_empresa?: string | null;
+  rua_empresa?: string | null;
+  numero_empresa?: string | null;
+  bairro_empresa?: string | null;
+  cidade_empresa?: string | null;
+  estado_empresa?: string | null;
+  regime_tributario?: string | null;
+  apuracao_pis_cofins?: string | null;
+  criado_por_admin?: string | null;
+  status?: PreCadastroStatus;
+};
+
 export interface CfopPadraoRow {
   codigo: string;
   descricao: string;

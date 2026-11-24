@@ -10,6 +10,12 @@ import { useTheme } from '@/src/contexts/ThemeContext';
 
 const LINKS = [
   {
+    href: '/billing/pre-cadastro' as const,
+    title: 'Pré-cadastro ASAAS',
+    body: 'Pré-cadastra cliente, define plano/módulos/preço e gera o link do Confec para completar e pagar.',
+    icon: 'user-plus' as const,
+  },
+  {
     href: '/billing/trial' as const,
     title: 'Período de teste padrão',
     body: 'Define admin_billing_settings.trial_dias_padrao sem precisar de deploy.',
@@ -46,7 +52,7 @@ export default function BillingHubScreen() {
 
   return (
     <Screen scroll>
-      <PageHeader title="Cobrança" subtitle="Gerencie período de teste, desconto anual, promoção, cupons Stripe/Asaas e planos disponíveis." />
+      <PageHeader title="Cobrança" subtitle="Pré-cadastro ASAAS, período de teste, desconto anual, promoção, cupons Stripe/Asaas e planos." />
 
       {LINKS.map((item) => (
         <Link key={item.href} href={item.href} asChild>

@@ -17,6 +17,7 @@ export default function BillingStackLayout() {
       <Stack.Screen name="promocao" />
       <Stack.Screen name="coupons" />
       <Stack.Screen name="plans" />
+      <Stack.Screen name="pre-cadastro" />
     </Stack>
   );
 }
