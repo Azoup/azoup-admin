@@ -70,10 +70,68 @@ function maskCep(value: string): string {
   return `${d.slice(0, 5)}-${d.slice(5)}`;
 }
 
-function parseQty(raw: string): number {
-  const n = Math.floor(Number(soDigitos(raw) || raw.trim() || '0'));
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return n;
+function clampQty(value: number): number {
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.floor(value);
+}
+
+function QtyStepper({
+  value,
+  onChange,
+  disabled,
+  min = 0,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+  disabled?: boolean;
+  min?: number;
+}) {
+  const { theme } = useTheme();
+  const atual = clampQty(value);
+  const podeMenos = !disabled && atual > min;
+  const podeMais = !disabled;
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Diminuir"
+        disabled={!podeMenos}
+        onPress={() => onChange(clampQty(atual - 1))}
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 8,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: theme.surfaceMuted,
+          borderWidth: 1,
+          borderColor: theme.borderInput,
+          opacity: podeMenos ? 1 : 0.4,
+        }}>
+        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.headerText, lineHeight: 22 }}>−</Text>
+      </Pressable>
+      <Text style={{ minWidth: 28, textAlign: 'center', fontSize: 17, fontWeight: '800', color: theme.headerText }}>
+        {atual}
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Aumentar"
+        disabled={!podeMais}
+        onPress={() => onChange(clampQty(atual + 1))}
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 8,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: theme.cadastroAction,
+          opacity: podeMais ? 1 : 0.4,
+        }}>
+        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.cadastroActionText, lineHeight: 22 }}>+</Text>
+      </Pressable>
+    </View>
+  );
 }
 
 async function copiarTexto(texto: string): Promise<void> {
@@ -109,11 +167,11 @@ export default function PreCadastroAsaasScreen() {
   const ultimoCepBuscado = useRef('');
 
   const [planoId, setPlanoId] = useState<string | null>(null);
-  const [usuariosAdicionais, setUsuariosAdicionais] = useState('0');
-  const [empresasAdicionais, setEmpresasAdicionais] = useState('0');
-  const [pdvAssentos, setPdvAssentos] = useState('0');
-  const [ecommerceLojas, setEcommerceLojas] = useState('0');
-  const [conciliacaoContas, setConciliacaoContas] = useState('0');
+  const [usuariosAdicionais, setUsuariosAdicionais] = useState(0);
+  const [empresasAdicionais, setEmpresasAdicionais] = useState(0);
+  const [pdvAssentos, setPdvAssentos] = useState(0);
+  const [ecommerceLojas, setEcommerceLojas] = useState(0);
+  const [conciliacaoContas, setConciliacaoContas] = useState(0);
 
   const [overrideMensal, setOverrideMensal] = useState('');
   const [overrideAnual, setOverrideAnual] = useState('');
@@ -237,11 +295,11 @@ export default function PreCadastroAsaasScreen() {
       precoPdv: precoPdvDeSettings(settings),
       precoEcommerce: precoEcommerceDeSettings(settings),
       precoConciliacao: precoConciliacaoDeSettings(settings),
-      usuariosAdicionais: parseQty(usuariosAdicionais),
-      empresasAdicionais: parseQty(empresasAdicionais),
-      pdvAssentos: parseQty(pdvAssentos),
-      ecommerceLojas: parseQty(ecommerceLojas),
-      conciliacaoContas: parseQty(conciliacaoContas),
+      usuariosAdicionais: clampQty(usuariosAdicionais),
+      empresasAdicionais: clampQty(empresasAdicionais),
+      pdvAssentos: clampQty(pdvAssentos),
+      ecommerceLojas: clampQty(ecommerceLojas),
+      conciliacaoContas: clampQty(conciliacaoContas),
       descontoAnualPercent: Number(settings?.desconto_plano_anual_percent) || 0,
     });
   }, [
@@ -284,11 +342,11 @@ export default function PreCadastroAsaasScreen() {
 
       const row = await inserirPreCadastro({
         plano_id: Number(planoSelecionado.id),
-        usuarios_adicionais: parseQty(usuariosAdicionais),
-        empresas_adicionais: parseQty(empresasAdicionais),
-        pdv_assentos: parseQty(pdvAssentos),
-        ecommerce_lojas: parseQty(ecommerceLojas),
-        conciliacao_contas: parseQty(conciliacaoContas),
+        usuarios_adicionais: clampQty(usuariosAdicionais),
+        empresas_adicionais: clampQty(empresasAdicionais),
+        pdv_assentos: clampQty(pdvAssentos),
+        ecommerce_lojas: clampQty(ecommerceLojas),
+        conciliacao_contas: clampQty(conciliacaoContas),
         valor_mensal_calculado: quote.totalMensal,
         valor_mensal_override: mensalOverrideNum,
         valor_anual_calculado: quote.totalAnual,
@@ -454,31 +512,85 @@ export default function PreCadastroAsaasScreen() {
             disabled={!canManageBilling || planosQuery.isLoading}
           />
         </FormField>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-          <View style={{ minWidth: 140, flex: 1 }}>
-            <FormField label="Usuários adicionais">
-              <FormInput value={usuariosAdicionais} onChangeText={setUsuariosAdicionais} keyboardType="number-pad" editable={canManageBilling} />
-            </FormField>
+
+        {planoSelecionado ? (
+          <View
+            style={{
+              gap: 6,
+              padding: 12,
+              borderRadius: 10,
+              backgroundColor: theme.surfaceMuted,
+              borderWidth: 1,
+              borderColor: theme.border,
+            }}>
+            <Text style={{ fontWeight: '800', color: theme.headerText }}>Incluso no plano</Text>
+            <Text style={{ color: theme.textMuted }}>
+              {Number(planoSelecionado.usuarios_inclusos) || 0}{' '}
+              {(Number(planoSelecionado.usuarios_inclusos) || 0) === 1 ? 'usuário' : 'usuários'}
+              {' · '}
+              {Number(planoSelecionado.empresas_incluidas) || 0}{' '}
+              {(Number(planoSelecionado.empresas_incluidas) || 0) === 1 ? 'empresa' : 'empresas'}
+              {Number(planoSelecionado.armazenamento_gb) > 0
+                ? ` · ${Number(planoSelecionado.armazenamento_gb)} GB`
+                : ''}
+              {Number(planoSelecionado.credito_ia_mensal) > 0
+                ? ` · ${Number(planoSelecionado.credito_ia_mensal).toLocaleString('pt-BR')} créditos IA/mês`
+                : ''}
+            </Text>
+            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+              PDV, e-commerce e conciliação não vêm no plano base — adicione abaixo se contratar.
+            </Text>
           </View>
-          <View style={{ minWidth: 140, flex: 1 }}>
-            <FormField label="Empresas adicionais">
-              <FormInput value={empresasAdicionais} onChangeText={setEmpresasAdicionais} keyboardType="number-pad" editable={canManageBilling} />
-            </FormField>
+        ) : (
+          <Text style={{ color: theme.textMuted }}>Selecione um plano para ver o que já está incluso.</Text>
+        )}
+
+        <View style={{ gap: 14 }}>
+          <View style={{ gap: 6 }}>
+            <Text style={{ fontWeight: '700', color: theme.headerText }}>Usuários adicionais</Text>
+            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+              Inclusos no plano: {Number(planoSelecionado?.usuarios_inclusos) || 0}
+              {Number(planoSelecionado?.preco_usuario_adicional) > 0
+                ? ` · extra ${formatBRLFromReais(Number(planoSelecionado?.preco_usuario_adicional))}/mês`
+                : ''}
+            </Text>
+            <QtyStepper value={usuariosAdicionais} onChange={setUsuariosAdicionais} disabled={!canManageBilling} />
           </View>
-          <View style={{ minWidth: 140, flex: 1 }}>
-            <FormField label="Assentos PDV">
-              <FormInput value={pdvAssentos} onChangeText={setPdvAssentos} keyboardType="number-pad" editable={canManageBilling} />
-            </FormField>
+
+          <View style={{ gap: 6 }}>
+            <Text style={{ fontWeight: '700', color: theme.headerText }}>Empresas adicionais</Text>
+            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+              Inclusas no plano: {Number(planoSelecionado?.empresas_incluidas) || 0}
+              {` · extra ${formatBRLFromReais(precoEmpresaDoPlano(planoSelecionado))}/mês`}
+            </Text>
+            <QtyStepper value={empresasAdicionais} onChange={setEmpresasAdicionais} disabled={!canManageBilling} />
           </View>
-          <View style={{ minWidth: 140, flex: 1 }}>
-            <FormField label="Lojas e-commerce">
-              <FormInput value={ecommerceLojas} onChangeText={setEcommerceLojas} keyboardType="number-pad" editable={canManageBilling} />
-            </FormField>
+
+          <View style={{ gap: 6 }}>
+            <Text style={{ fontWeight: '700', color: theme.headerText }}>Assentos PDV</Text>
+            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+              Inclusos: 0 · {formatBRLFromReais(precoPdvDeSettings(settingsQuery.data))}/assento/mês
+            </Text>
+            <QtyStepper value={pdvAssentos} onChange={setPdvAssentos} disabled={!canManageBilling} />
           </View>
-          <View style={{ minWidth: 140, flex: 1 }}>
-            <FormField label="Contas conciliação">
-              <FormInput value={conciliacaoContas} onChangeText={setConciliacaoContas} keyboardType="number-pad" editable={canManageBilling} />
-            </FormField>
+
+          <View style={{ gap: 6 }}>
+            <Text style={{ fontWeight: '700', color: theme.headerText }}>Lojas e-commerce</Text>
+            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+              Inclusas: 0 · {formatBRLFromReais(precoEcommerceDeSettings(settingsQuery.data))}/loja/mês
+            </Text>
+            <QtyStepper value={ecommerceLojas} onChange={setEcommerceLojas} disabled={!canManageBilling} />
+          </View>
+
+          <View style={{ gap: 6 }}>
+            <Text style={{ fontWeight: '700', color: theme.headerText }}>Contas conciliação</Text>
+            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+              Inclusas: 0
+              {precoConciliacaoDeSettings(settingsQuery.data) > 0
+                ? ` · ${formatBRLFromReais(precoConciliacaoDeSettings(settingsQuery.data))}/conta/mês`
+                : ' · sem cobrança unitária configurada'}
+            </Text>
+            <QtyStepper value={conciliacaoContas} onChange={setConciliacaoContas} disabled={!canManageBilling} />
           </View>
         </View>
       </ScreenCard>
