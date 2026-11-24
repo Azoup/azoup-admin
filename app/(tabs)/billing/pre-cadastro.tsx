@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
-import { Alert, Platform, Pressable, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Platform, Pressable, View } from 'react-native';
 
 import { BackLink } from '@/components/ui/BackLink';
 import { FormField } from '@/components/ui/FormField';
@@ -15,6 +15,7 @@ import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { registrarAuditoria } from '@/src/services/audit';
+import { buscarDadosCnpj } from '@/src/services/cnpj-service';
 import { listarPlanos, obterBillingSettings } from '@/src/services/repos/billing-repo';
 import {
   inserirPreCadastro,
@@ -101,6 +102,8 @@ export default function PreCadastroAsaasScreen() {
   const [bairroEmpresa, setBairroEmpresa] = useState('');
   const [cidadeEmpresa, setCidadeEmpresa] = useState('');
   const [estadoEmpresa, setEstadoEmpresa] = useState('');
+  const [buscandoCnpj, setBuscandoCnpj] = useState(false);
+  const ultimoCnpjBuscado = useRef('');
 
   const [planoId, setPlanoId] = useState<string | null>(null);
   const [usuariosAdicionais, setUsuariosAdicionais] = useState('0');
@@ -112,6 +115,50 @@ export default function PreCadastroAsaasScreen() {
   const [overrideMensal, setOverrideMensal] = useState('');
   const [overrideAnual, setOverrideAnual] = useState('');
   const [linkGerado, setLinkGerado] = useState<string | null>(null);
+
+  const preencherPorCnpj = useCallback(async (cnpjValue: string) => {
+    if (!canManageBilling) return;
+    const digits = soDigitos(cnpjValue);
+    if (digits.length !== 14) return;
+    if (digits === ultimoCnpjBuscado.current) return;
+
+    setBuscandoCnpj(true);
+    try {
+      const data = await buscarDadosCnpj(digits);
+      if (!data) return;
+      ultimoCnpjBuscado.current = digits;
+      setRazaoSocial(data.razaoSocial);
+      setNomeFantasia(data.nomeFantasia || data.razaoSocial);
+      if (data.cep) setCepEmpresa(maskCep(data.cep));
+      if (data.logradouro) setRuaEmpresa(data.logradouro);
+      if (data.numero) setNumeroEmpresa(data.numero);
+      if (data.bairro) setBairroEmpresa(data.bairro);
+      if (data.municipio) setCidadeEmpresa(data.municipio);
+      if (data.uf) setEstadoEmpresa(data.uf.slice(0, 2));
+      setTelefone((atual) => (soDigitos(atual).length ? atual : data.telefone ? maskPhone(data.telefone) : atual));
+      setEmail((atual) => (atual.trim() ? atual : data.email || ''));
+    } catch (err) {
+      Alert.alert(
+        'CNPJ',
+        err instanceof Error
+          ? err.message
+          : 'Não conseguimos buscar os dados deste CNPJ. Preencha manualmente.',
+      );
+    } finally {
+      setBuscandoCnpj(false);
+    }
+  }, [canManageBilling]);
+
+  function onChangeCnpj(raw: string) {
+    const masked = maskCnpj(raw);
+    setCnpj(masked);
+    const digits = soDigitos(masked);
+    if (digits.length < 14) {
+      ultimoCnpjBuscado.current = '';
+      return;
+    }
+    void preencherPorCnpj(digits);
+  }
 
   const planosQuery = useQuery({ queryKey: ['planos_assinatura'], queryFn: listarPlanos });
   const settingsQuery = useQuery({ queryKey: ['admin_billing_settings'], queryFn: obterBillingSettings });
@@ -284,8 +331,22 @@ export default function PreCadastroAsaasScreen() {
 
       <ScreenCard style={{ gap: 12, marginTop: 12 }}>
         <SectionTitle>Empresa</SectionTitle>
-        <FormField label="CNPJ">
-          <FormInput value={cnpj} onChangeText={(v) => setCnpj(maskCnpj(v))} placeholder="00.000.000/0000-00" keyboardType="number-pad" editable={canManageBilling} />
+        <FormField
+          label="CNPJ"
+          helper={buscandoCnpj ? 'Buscando dados na Receita…' : 'Ao completar 14 dígitos, preenchemos razão social e endereço.'}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <FormInput
+                value={cnpj}
+                onChangeText={onChangeCnpj}
+                onBlur={() => void preencherPorCnpj(cnpj)}
+                placeholder="00.000.000/0000-00"
+                keyboardType="number-pad"
+                editable={canManageBilling && !buscandoCnpj}
+              />
+            </View>
+            {buscandoCnpj ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+          </View>
         </FormField>
         <FormField label="Razão social">
           <FormInput value={razaoSocial} onChangeText={setRazaoSocial} editable={canManageBilling} />
