@@ -265,6 +265,59 @@ export default function PreCadastroAsaasScreen() {
     limparForm();
   }, [modalAberto, limparForm]);
 
+  const preencherPorCep = useCallback(
+    async (cepValue: string, opts?: { forcar?: boolean; soSeFaltarRua?: boolean }) => {
+      if (!canManageBilling) return;
+      const digits = soDigitos(cepValue);
+      if (digits.length !== 8) return;
+      if (!opts?.forcar && digits === ultimoCepBuscado.current) return;
+
+      setBuscandoCep(true);
+      try {
+        const data = await buscarEnderecoPorCep(digits);
+        if (!data) return;
+        ultimoCepBuscado.current = digits;
+        if (data.rua) {
+          if (opts?.soSeFaltarRua) {
+            setRuaEmpresa((atual) => (atual.trim() ? atual : data.rua));
+          } else {
+            setRuaEmpresa(data.rua);
+          }
+        }
+        if (data.bairro) {
+          if (opts?.soSeFaltarRua) {
+            setBairroEmpresa((atual) => (atual.trim() ? atual : data.bairro));
+          } else {
+            setBairroEmpresa(data.bairro);
+          }
+        }
+        if (data.cidade) {
+          if (opts?.soSeFaltarRua) {
+            setCidadeEmpresa((atual) => (atual.trim() ? atual : data.cidade));
+          } else {
+            setCidadeEmpresa(data.cidade);
+          }
+        }
+        if (data.estado) {
+          if (opts?.soSeFaltarRua) {
+            setEstadoEmpresa((atual) => (atual.trim() ? atual : data.estado.slice(0, 2)));
+          } else {
+            setEstadoEmpresa(data.estado.slice(0, 2));
+          }
+        }
+      } catch (err) {
+        if (opts?.soSeFaltarRua) return;
+        Alert.alert(
+          'CEP',
+          err instanceof Error ? err.message : 'Não foi possível buscar o CEP. Preencha o endereço manualmente.',
+        );
+      } finally {
+        setBuscandoCep(false);
+      }
+    },
+    [canManageBilling],
+  );
+
   const preencherPorCnpj = useCallback(
     async (cnpjValue: string) => {
       if (!canManageBilling) return;
@@ -279,10 +332,7 @@ export default function PreCadastroAsaasScreen() {
         ultimoCnpjBuscado.current = digits;
         setRazaoSocial(data.razaoSocial);
         setNomeFantasia(data.nomeFantasia || data.razaoSocial);
-        if (data.cep) {
-          setCepEmpresa(maskCep(data.cep));
-          ultimoCepBuscado.current = soDigitos(data.cep);
-        }
+        if (data.cep) setCepEmpresa(maskCep(data.cep));
         if (data.logradouro) setRuaEmpresa(data.logradouro);
         if (data.numero) setNumeroEmpresa(data.numero);
         if (data.bairro) setBairroEmpresa(data.bairro);
@@ -290,6 +340,15 @@ export default function PreCadastroAsaasScreen() {
         if (data.uf) setEstadoEmpresa(data.uf.slice(0, 2));
         setTelefone((atual) => (soDigitos(atual).length ? atual : data.telefone ? maskPhone(data.telefone) : atual));
         setEmail((atual) => (atual.trim() ? atual : data.email || ''));
+
+        // Se a Receita não trouxe a rua, completa pelo CEP (ViaCEP).
+        const cepDigits = soDigitos(data.cep);
+        if (cepDigits.length === 8 && !`${data.logradouro ?? ''}`.trim()) {
+          ultimoCepBuscado.current = '';
+          await preencherPorCep(cepDigits, { forcar: true, soSeFaltarRua: true });
+        } else if (cepDigits.length === 8) {
+          ultimoCepBuscado.current = cepDigits;
+        }
       } catch (err) {
         Alert.alert(
           'CNPJ',
@@ -299,35 +358,7 @@ export default function PreCadastroAsaasScreen() {
         setBuscandoCnpj(false);
       }
     },
-    [canManageBilling],
-  );
-
-  const preencherPorCep = useCallback(
-    async (cepValue: string) => {
-      if (!canManageBilling) return;
-      const digits = soDigitos(cepValue);
-      if (digits.length !== 8) return;
-      if (digits === ultimoCepBuscado.current) return;
-
-      setBuscandoCep(true);
-      try {
-        const data = await buscarEnderecoPorCep(digits);
-        if (!data) return;
-        ultimoCepBuscado.current = digits;
-        if (data.rua) setRuaEmpresa(data.rua);
-        if (data.bairro) setBairroEmpresa(data.bairro);
-        if (data.cidade) setCidadeEmpresa(data.cidade);
-        if (data.estado) setEstadoEmpresa(data.estado.slice(0, 2));
-      } catch (err) {
-        Alert.alert(
-          'CEP',
-          err instanceof Error ? err.message : 'Não foi possível buscar o CEP. Preencha o endereço manualmente.',
-        );
-      } finally {
-        setBuscandoCep(false);
-      }
-    },
-    [canManageBilling],
+    [canManageBilling, preencherPorCep],
   );
 
   function onChangeCnpj(raw: string) {

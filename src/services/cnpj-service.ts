@@ -17,6 +17,35 @@ function digitsOnly(value: string): string {
   return String(value || '').replace(/\D/g, '');
 }
 
+function texto(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+/** Junta tipo (Rua/Av.) + logradouro, como no Confec. */
+function montarLogradouro(...partes: unknown[]): string {
+  return partes
+    .map((p) => texto(p))
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function pickLogradouro(data: Record<string, unknown>): string {
+  const tipo =
+    data.descricao_tipo_de_logradouro ??
+    data.tipo_logradouro ??
+    data.tipoLogradouro ??
+    data.tipo;
+  const log =
+    data.logradouro ??
+    data.street ??
+    data.rua ??
+    data.endereco ??
+    data.address;
+  return montarLogradouro(tipo, log);
+}
+
 function emptyResult(): CnpjLookupData {
   return {
     razaoSocial: '',
@@ -33,53 +62,71 @@ function emptyResult(): CnpjLookupData {
 }
 
 function fromBrasilApi(data: Record<string, unknown>): CnpjLookupData | null {
-  const razao = String(data.razao_social ?? '').trim();
+  const razao = texto(data.razao_social);
   if (!razao) return null;
   return {
     razaoSocial: razao,
-    nomeFantasia: String(data.nome_fantasia ?? data.razao_social ?? '').trim() || razao,
-    cep: digitsOnly(String(data.cep ?? '')),
-    logradouro: String(data.logradouro ?? '').trim(),
-    numero: String(data.numero ?? '').trim(),
-    bairro: String(data.bairro ?? '').trim(),
-    municipio: String(data.municipio ?? '').trim(),
-    uf: String(data.uf ?? '').trim().toUpperCase(),
-    telefone: digitsOnly(String(data.ddd_telefone_1 ?? '')),
-    email: String(data.email ?? '').trim(),
+    nomeFantasia: texto(data.nome_fantasia) || razao,
+    cep: digitsOnly(texto(data.cep)),
+    logradouro: pickLogradouro(data),
+    numero: texto(data.numero),
+    bairro: texto(data.bairro),
+    municipio: texto(data.municipio),
+    uf: texto(data.uf).toUpperCase(),
+    telefone: digitsOnly(texto(data.ddd_telefone_1)),
+    email: texto(data.email),
   };
 }
 
 function fromOpenCnpj(data: Record<string, unknown>): CnpjLookupData | null {
-  const razao = String(data.razao_social ?? data.nome ?? '').trim();
+  const razao = texto(data.razao_social ?? data.nome);
   if (!razao) return null;
+  const nested =
+    data.estabelecimento && typeof data.estabelecimento === 'object'
+      ? (data.estabelecimento as Record<string, unknown>)
+      : null;
+  const source = nested ?? data;
   return {
     razaoSocial: razao,
-    nomeFantasia: String(data.nome_fantasia ?? data.fantasia ?? razao).trim() || razao,
-    cep: digitsOnly(String(data.cep ?? '')),
-    logradouro: String(data.logradouro ?? '').trim(),
-    numero: String(data.numero ?? '').trim(),
-    bairro: String(data.bairro ?? '').trim(),
-    municipio: String(data.municipio ?? data.cidade ?? '').trim(),
-    uf: String(data.uf ?? '').trim().toUpperCase(),
-    telefone: digitsOnly(String(data.ddd_telefone_1 ?? data.telefone ?? '')),
-    email: String(data.email ?? '').trim(),
+    nomeFantasia: texto(source.nome_fantasia ?? data.nome_fantasia ?? data.fantasia) || razao,
+    cep: digitsOnly(texto(source.cep ?? data.cep)),
+    logradouro: pickLogradouro(source) || pickLogradouro(data),
+    numero: texto(source.numero ?? data.numero),
+    bairro: texto(source.bairro ?? data.bairro),
+    municipio: texto(
+      source.municipio ??
+        data.municipio ??
+        data.cidade ??
+        (source.cidade && typeof source.cidade === 'object'
+          ? (source.cidade as Record<string, unknown>).nome
+          : null),
+    ),
+    uf: texto(
+      source.uf ??
+        data.uf ??
+        (source.estado && typeof source.estado === 'object'
+          ? (source.estado as Record<string, unknown>).sigla
+          : null),
+    ).toUpperCase(),
+    telefone: digitsOnly(texto(source.ddd_telefone_1 ?? data.ddd_telefone_1 ?? data.telefone)),
+    email: texto(source.email ?? data.email),
   };
 }
 
 function fromMinhaReceita(data: Record<string, unknown>): CnpjLookupData | null {
-  const razao = String(data.razao_social ?? data.nome ?? '').trim();
+  const razao = texto(data.razao_social ?? data.nome);
   if (!razao) return null;
   return {
     razaoSocial: razao,
-    nomeFantasia: String(data.nome_fantasia ?? data.fantasia ?? razao).trim() || razao,
-    cep: digitsOnly(String(data.cep ?? '')),
-    logradouro: String(data.logradouro ?? '').trim(),
-    numero: String(data.numero ?? '').trim(),
-    bairro: String(data.bairro ?? '').trim(),
-    municipio: String(data.municipio ?? '').trim(),
-    uf: String(data.uf ?? '').trim().toUpperCase(),
-    telefone: digitsOnly(String(data.ddd_telefone_1 ?? data.telefone ?? '')),
-    email: String(data.email ?? '').trim(),
+    nomeFantasia: texto(data.nome_fantasia ?? data.fantasia) || razao,
+    cep: digitsOnly(texto(data.cep)),
+    logradouro: pickLogradouro(data),
+    numero: texto(data.numero),
+    bairro: texto(data.bairro),
+    municipio: texto(data.municipio),
+    uf: texto(data.uf).toUpperCase(),
+    telefone: digitsOnly(texto(data.ddd_telefone_1 ?? data.telefone)),
+    email: texto(data.email),
   };
 }
 
@@ -100,6 +147,21 @@ async function getJson(url: string): Promise<Record<string, unknown> | null> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function mergePreferindoCompleto(base: CnpjLookupData, extra: CnpjLookupData): CnpjLookupData {
+  return {
+    razaoSocial: base.razaoSocial || extra.razaoSocial,
+    nomeFantasia: base.nomeFantasia || extra.nomeFantasia,
+    cep: base.cep || extra.cep,
+    logradouro: base.logradouro || extra.logradouro,
+    numero: base.numero || extra.numero,
+    bairro: base.bairro || extra.bairro,
+    municipio: base.municipio || extra.municipio,
+    uf: base.uf || extra.uf,
+    telefone: base.telefone || extra.telefone,
+    email: base.email || extra.email,
+  };
 }
 
 /**
@@ -125,10 +187,15 @@ export async function buscarDadosCnpj(cnpj: string): Promise<CnpjLookupData | nu
     },
   ];
 
+  let melhor: CnpjLookupData | null = null;
   for (const run of providers) {
     const result = await run();
-    if (result?.razaoSocial) return result;
+    if (!result?.razaoSocial) continue;
+    melhor = melhor ? mergePreferindoCompleto(melhor, result) : result;
+    if (melhor.logradouro && melhor.cep && melhor.municipio) break;
   }
+
+  if (melhor?.razaoSocial) return melhor;
 
   throw new Error('Não conseguimos buscar os dados deste CNPJ agora. Preencha manualmente ou tente de novo.');
 }
