@@ -15,6 +15,7 @@ import { Text } from '@/components/Themed';
 import { useAdminAuth } from '@/src/contexts/AdminAuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { registrarAuditoria } from '@/src/services/audit';
+import { buscarEnderecoPorCep } from '@/src/services/cep-service';
 import { buscarDadosCnpj } from '@/src/services/cnpj-service';
 import { listarPlanos, obterBillingSettings } from '@/src/services/repos/billing-repo';
 import {
@@ -103,7 +104,9 @@ export default function PreCadastroAsaasScreen() {
   const [cidadeEmpresa, setCidadeEmpresa] = useState('');
   const [estadoEmpresa, setEstadoEmpresa] = useState('');
   const [buscandoCnpj, setBuscandoCnpj] = useState(false);
+  const [buscandoCep, setBuscandoCep] = useState(false);
   const ultimoCnpjBuscado = useRef('');
+  const ultimoCepBuscado = useRef('');
 
   const [planoId, setPlanoId] = useState<string | null>(null);
   const [usuariosAdicionais, setUsuariosAdicionais] = useState('0');
@@ -129,7 +132,10 @@ export default function PreCadastroAsaasScreen() {
       ultimoCnpjBuscado.current = digits;
       setRazaoSocial(data.razaoSocial);
       setNomeFantasia(data.nomeFantasia || data.razaoSocial);
-      if (data.cep) setCepEmpresa(maskCep(data.cep));
+      if (data.cep) {
+        setCepEmpresa(maskCep(data.cep));
+        ultimoCepBuscado.current = soDigitos(data.cep);
+      }
       if (data.logradouro) setRuaEmpresa(data.logradouro);
       if (data.numero) setNumeroEmpresa(data.numero);
       if (data.bairro) setBairroEmpresa(data.bairro);
@@ -149,6 +155,31 @@ export default function PreCadastroAsaasScreen() {
     }
   }, [canManageBilling]);
 
+  const preencherPorCep = useCallback(async (cepValue: string) => {
+    if (!canManageBilling) return;
+    const digits = soDigitos(cepValue);
+    if (digits.length !== 8) return;
+    if (digits === ultimoCepBuscado.current) return;
+
+    setBuscandoCep(true);
+    try {
+      const data = await buscarEnderecoPorCep(digits);
+      if (!data) return;
+      ultimoCepBuscado.current = digits;
+      if (data.rua) setRuaEmpresa(data.rua);
+      if (data.bairro) setBairroEmpresa(data.bairro);
+      if (data.cidade) setCidadeEmpresa(data.cidade);
+      if (data.estado) setEstadoEmpresa(data.estado.slice(0, 2));
+    } catch (err) {
+      Alert.alert(
+        'CEP',
+        err instanceof Error ? err.message : 'Não foi possível buscar o CEP. Preencha o endereço manualmente.',
+      );
+    } finally {
+      setBuscandoCep(false);
+    }
+  }, [canManageBilling]);
+
   function onChangeCnpj(raw: string) {
     const masked = maskCnpj(raw);
     setCnpj(masked);
@@ -158,6 +189,17 @@ export default function PreCadastroAsaasScreen() {
       return;
     }
     void preencherPorCnpj(digits);
+  }
+
+  function onChangeCep(raw: string) {
+    const masked = maskCep(raw);
+    setCepEmpresa(masked);
+    const digits = soDigitos(masked);
+    if (digits.length < 8) {
+      ultimoCepBuscado.current = '';
+      return;
+    }
+    void preencherPorCep(digits);
   }
 
   const planosQuery = useQuery({ queryKey: ['planos_assinatura'], queryFn: listarPlanos });
@@ -354,8 +396,22 @@ export default function PreCadastroAsaasScreen() {
         <FormField label="Nome fantasia">
           <FormInput value={nomeFantasia} onChangeText={setNomeFantasia} editable={canManageBilling} />
         </FormField>
-        <FormField label="CEP">
-          <FormInput value={cepEmpresa} onChangeText={(v) => setCepEmpresa(maskCep(v))} keyboardType="number-pad" editable={canManageBilling} />
+        <FormField
+          label="CEP"
+          helper={buscandoCep ? 'Buscando endereço…' : 'Ao completar 8 dígitos, preenchemos logradouro, bairro, cidade e UF.'}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <FormInput
+                value={cepEmpresa}
+                onChangeText={onChangeCep}
+                onBlur={() => void preencherPorCep(cepEmpresa)}
+                placeholder="00000-000"
+                keyboardType="number-pad"
+                editable={canManageBilling && !buscandoCep}
+              />
+            </View>
+            {buscandoCep ? <ActivityIndicator color={theme.cadastroAction} /> : null}
+          </View>
         </FormField>
         <FormField label="Logradouro">
           <FormInput value={ruaEmpresa} onChangeText={setRuaEmpresa} editable={canManageBilling} />
