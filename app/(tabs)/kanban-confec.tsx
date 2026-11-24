@@ -60,6 +60,7 @@ import {
   useCardPointerDrag,
 } from '@/src/utils/kanban-drag';
 import { abrirPdfConcluidosConfec } from '@/src/utils/pdf-kanban-confec';
+import { abrirPdfQuadroConfec } from '@/src/utils/pdf-kanban-quadro';
 
 const SCROLL = '[data-kanban-scroll="confec"]';
 const CORES = ['#94A3B8', '#4C9AFF', '#F5C542', '#22C55E', '#F07167', '#A78BFA', '#10b981'];
@@ -485,6 +486,31 @@ export default function KanbanConfecScreen() {
     return map;
   }, [quadro?.cards, colunas, busca, etiquetaFiltro, analista, desenvolvedor, secaoFiltro, periodo, de, ate]);
 
+  const filtrosPdfResumo = useMemo(() => {
+    const partes: string[] = [];
+    const q = busca.trim();
+    if (q) partes.push(`Busca “${q}”`);
+    if (secaoFiltro) partes.push(`Seção ${secaoFiltro}`);
+    if (analista && analista !== VAZIO) partes.push(`Analista ${analista}`);
+    if (desenvolvedor && desenvolvedor !== VAZIO) partes.push(`Dev ${desenvolvedor}`);
+    if (etiquetaFiltro.length) {
+      const nomes = etiquetaFiltro
+        .map((id) => (quadro?.etiquetas ?? []).find((e) => e.id === id)?.name || id)
+        .filter(Boolean);
+      if (nomes.length) partes.push(`Etiquetas ${nomes.join(', ')}`);
+    }
+    if (periodo !== 'ordem') {
+      let rotulo = ROTULO_PERIODO[periodo];
+      if (periodo === 'intervalo') {
+        const deBr = de ? de.split('-').reverse().join('/') : '—';
+        const ateBr = ate ? ate.split('-').reverse().join('/') : '—';
+        rotulo = `Intervalo ${deBr}–${ateBr}`;
+      }
+      partes.push(rotulo);
+    }
+    return partes;
+  }, [busca, secaoFiltro, analista, desenvolvedor, etiquetaFiltro, periodo, de, ate, quadro?.etiquetas]);
+
   const detalhe = quadro?.cards.find((card) => card.id === detalheId) ?? null;
   const clienteRascunho = (clientesQ.data ?? []).find((cliente) => cliente.id === rascunho?.clienteId) ?? null;
   rascunhoRef.current = rascunho;
@@ -793,6 +819,23 @@ export default function KanbanConfecScreen() {
         <View style={styles.barraTopo}>
           <Text style={[styles.titulo, { color: theme.headerText }]}>Kanban Confec</Text>
           <View style={styles.acoes}>
+            <Pressable
+              onPress={() => {
+                try {
+                  setErro(null);
+                  abrirPdfQuadroConfec({
+                    colunas,
+                    porColuna,
+                    filtrosResumo: filtrosPdfResumo,
+                  });
+                } catch (e) {
+                  setErro(e instanceof Error ? e.message : 'Não foi possível gerar o PDF do quadro.');
+                }
+              }}
+              style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
+            >
+              <Text style={[styles.btnTexto, { color: theme.headerText }]}>PDF do quadro</Text>
+            </Pressable>
             <Pressable
               onPress={() => setPdfAberto(true)}
               style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
