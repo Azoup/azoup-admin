@@ -1,5 +1,5 @@
 import { numeroTicket, type ConfecCard, type ConfecColuna } from '@/src/services/repos/confec-kanban-repo';
-import { dataHojeBrasil, formatDataHoraBrasil, formatDateTimeBR } from '@/src/utils/format';
+import { dataHojeBrasil, formatDataHoraBrasil } from '@/src/utils/format';
 
 const PAGINA_LARGURA = 595.28;
 const PAGINA_ALTURA = 841.89;
@@ -276,19 +276,18 @@ function textoLimpo(valor?: string | null): string {
   return `${valor ?? ''}`.replace(/\s+/g, ' ').trim();
 }
 
-function clienteLinha(card: ConfecCard): string {
-  const empresa = textoLimpo(card.cliente_empresa) || textoLimpo(card.cliente_empresa_razao);
-  const nome = textoLimpo(card.cliente_nome);
-  if (empresa && nome) return `${empresa} · ${nome}`;
-  return empresa || nome || 'Cliente não informado';
-}
-
-function secaoLinha(card: ConfecCard): string {
-  const partes = [
-    textoLimpo(card.secao),
-    textoLimpo(card.tela) ? `${textoLimpo(card.tela)}${card.tela_nova ? ' (nova)' : ''}` : '',
-  ].filter(Boolean);
-  return partes.join(' · ');
+function ehColunaCancelados(coluna: ConfecColuna): boolean {
+  const slug = `${coluna.slug ?? ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  const titulo = `${coluna.title ?? ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  return slug === 'cancelados' || slug === 'cancelado' || titulo === 'cancelados' || titulo === 'cancelado';
 }
 
 export type QuadroPdfInput = {
@@ -301,7 +300,8 @@ export function gerarPdfQuadroConfec(input: QuadroPdfInput): Uint8Array {
   const geradoEmMs = Date.now();
   const geradoEm = `Gerado em ${formatDataHoraBrasil(new Date(geradoEmMs).toISOString())}`;
   const pdf = new RelatorioPdf();
-  const total = input.colunas.reduce((acc, coluna) => acc + (input.porColuna.get(coluna.slug)?.length ?? 0), 0);
+  const colunas = input.colunas.filter((coluna) => !ehColunaCancelados(coluna));
+  const total = colunas.reduce((acc, coluna) => acc + (input.porColuna.get(coluna.slug)?.length ?? 0), 0);
 
   pdf.paragrafo('Status das demandas — Kanban Confec', { tamanho: 18, negrito: true, espacoDepois: 4 });
   pdf.paragrafo(
@@ -319,7 +319,7 @@ export function gerarPdfQuadroConfec(input: QuadroPdfInput): Uint8Array {
     pdf.paragrafo('Filtros: nenhum (quadro completo)', { tamanho: 9, cor: COR_SUAVE, espacoDepois: 10 });
   }
 
-  for (const coluna of input.colunas) {
+  for (const coluna of colunas) {
     const cards = input.porColuna.get(coluna.slug) ?? [];
     pdf.faixaColuna(coluna.title, cards.length);
     if (!cards.length) {
@@ -332,30 +332,12 @@ export function gerarPdfQuadroConfec(input: QuadroPdfInput): Uint8Array {
     }
 
     cards.forEach((card, indice) => {
-      pdf.linha();
-      pdf.paragrafo(`${indice + 1}. #${numeroTicket(card.ticket_number)}  ${textoLimpo(card.title) || 'Sem título'}`, {
+      if (indice > 0) pdf.linha();
+      pdf.paragrafo(`#${numeroTicket(card.ticket_number)}  ${textoLimpo(card.title) || 'Sem título'}`, {
         tamanho: 11,
         negrito: true,
-        espacoDepois: 2,
+        espacoDepois: 6,
       });
-      pdf.paragrafo(`Cliente: ${clienteLinha(card)}`, { tamanho: 10, espacoDepois: 1 });
-      const secao = secaoLinha(card);
-      if (secao) pdf.paragrafo(`Área: ${secao}`, { tamanho: 9, cor: COR_SUAVE, espacoDepois: 1 });
-      const etiquetas = (card.etiquetas ?? []).map((e) => e.name).filter(Boolean);
-      if (etiquetas.length) {
-        pdf.paragrafo(`Etiquetas: ${etiquetas.join(', ')}`, { tamanho: 9, cor: COR_SUAVE, espacoDepois: 1 });
-      }
-      pdf.paragrafo(`Criado em: ${formatDateTimeBR(card.created_at)}`, { tamanho: 9, cor: COR_SUAVE, espacoDepois: 1 });
-      if (card.completed_at) {
-        pdf.paragrafo(`Concluído em: ${formatDateTimeBR(card.completed_at)}`, {
-          tamanho: 9,
-          cor: COR_SUAVE,
-          espacoDepois: 1,
-        });
-      }
-      const descricao = textoLimpo(card.description);
-      pdf.paragrafo('Descrição', { tamanho: 9, negrito: true, espacoDepois: 1 });
-      pdf.paragrafo(descricao || 'Sem descrição.', { tamanho: 10, espacoDepois: 8 });
     });
     pdf.espaco(6);
   }
