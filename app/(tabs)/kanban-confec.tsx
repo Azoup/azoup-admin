@@ -393,6 +393,7 @@ export default function KanbanConfecScreen() {
   const [pdfAberto, setPdfAberto] = useState(false);
   const [pdfQuadroAberto, setPdfQuadroAberto] = useState(false);
   const [pdfColunasSlugs, setPdfColunasSlugs] = useState<string[]>([]);
+  const [pdfQuadroErro, setPdfQuadroErro] = useState<string | null>(null);
   const [imagemAberta, setImagemAberta] = useState<string | null>(null);
   const [anexando, setAnexando] = useState(false);
   const anexandoRef = useRef(false);
@@ -521,6 +522,7 @@ export default function KanbanConfecScreen() {
 
   function abrirModalPdfQuadro() {
     setErro(null);
+    setPdfQuadroErro(null);
     setPdfColunasSlugs(colunasPdfDisponiveis.map((coluna) => coluna.slug));
     setPdfQuadroAberto(true);
   }
@@ -528,11 +530,11 @@ export default function KanbanConfecScreen() {
   function gerarPdfQuadroSelecionado() {
     const selecionadas = colunasPdfDisponiveis.filter((coluna) => pdfColunasSlugs.includes(coluna.slug));
     if (!selecionadas.length) {
-      setErro('Selecione ao menos uma coluna para o PDF.');
+      setPdfQuadroErro('Selecione ao menos uma coluna para o PDF.');
       return;
     }
     try {
-      setErro(null);
+      setPdfQuadroErro(null);
       abrirPdfQuadroConfec({
         colunas: selecionadas,
         porColuna,
@@ -540,7 +542,7 @@ export default function KanbanConfecScreen() {
       });
       setPdfQuadroAberto(false);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Não foi possível gerar o PDF do quadro.');
+      setPdfQuadroErro(e instanceof Error ? e.message : 'Não foi possível gerar o PDF do quadro.');
     }
   }
 
@@ -1555,6 +1557,7 @@ export default function KanbanConfecScreen() {
                     label={`${coluna.title} (${qtd})`}
                     checked={marcada}
                     onCheckedChange={(checked) => {
+                      setPdfQuadroErro(null);
                       setPdfColunasSlugs((atual) =>
                         checked
                           ? atual.includes(coluna.slug)
@@ -1569,19 +1572,29 @@ export default function KanbanConfecScreen() {
             </ScrollView>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               <Pressable
-                onPress={() => setPdfColunasSlugs(colunasPdfDisponiveis.map((coluna) => coluna.slug))}
+                onPress={() => {
+                  setPdfQuadroErro(null);
+                  setPdfColunasSlugs(colunasPdfDisponiveis.map((coluna) => coluna.slug));
+                }}
                 style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
               >
                 <Text style={[styles.btnTexto, { color: theme.headerText }]}>Marcar todas</Text>
               </Pressable>
               <Pressable
-                onPress={() => setPdfColunasSlugs([])}
+                onPress={() => {
+                  setPdfQuadroErro(null);
+                  setPdfColunasSlugs([]);
+                }}
                 style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
               >
                 <Text style={[styles.btnTexto, { color: theme.headerText }]}>Desmarcar todas</Text>
               </Pressable>
             </View>
-            <PrimaryButton label="Gerar PDF" onPress={gerarPdfQuadroSelecionado} />
+            {pdfQuadroErro ? <Text style={{ color: theme.error }}>{pdfQuadroErro}</Text> : null}
+            <PrimaryButton
+              label={`Gerar PDF${pdfColunasSlugs.length ? ` (${pdfColunasSlugs.length})` : ''}`}
+              onPress={gerarPdfQuadroSelecionado}
+            />
           </View>
         </View>
       </Modal>
