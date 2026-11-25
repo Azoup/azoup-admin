@@ -276,7 +276,7 @@ function textoLimpo(valor?: string | null): string {
   return `${valor ?? ''}`.replace(/\s+/g, ' ').trim();
 }
 
-function ehColunaCancelados(coluna: ConfecColuna): boolean {
+export function ehColunaCancelados(coluna: ConfecColuna): boolean {
   const slug = `${coluna.slug ?? ''}`
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')

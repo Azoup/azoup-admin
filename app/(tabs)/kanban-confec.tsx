@@ -5,6 +5,7 @@ import { createElement, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ClienteSearchPicker } from '@/components/ui/ClienteSearchPicker';
+import { FormCheckbox } from '@/components/ui/FormCheckbox';
 import { FormDateInput } from '@/components/ui/FormDateInput';
 import { FormField } from '@/components/ui/FormField';
 import { FormInput } from '@/components/ui/FormInput';
@@ -60,7 +61,7 @@ import {
   useCardPointerDrag,
 } from '@/src/utils/kanban-drag';
 import { abrirPdfConcluidosConfec } from '@/src/utils/pdf-kanban-confec';
-import { abrirPdfQuadroConfec } from '@/src/utils/pdf-kanban-quadro';
+import { abrirPdfQuadroConfec, ehColunaCancelados } from '@/src/utils/pdf-kanban-quadro';
 
 const SCROLL = '[data-kanban-scroll="confec"]';
 const CORES = ['#94A3B8', '#4C9AFF', '#F5C542', '#22C55E', '#F07167', '#A78BFA', '#10b981'];
@@ -390,6 +391,8 @@ export default function KanbanConfecScreen() {
   const [colunaEdit, setColunaEdit] = useState<ConfecColuna | null>(null);
   const [novaLista, setNovaLista] = useState(false);
   const [pdfAberto, setPdfAberto] = useState(false);
+  const [pdfQuadroAberto, setPdfQuadroAberto] = useState(false);
+  const [pdfColunasSlugs, setPdfColunasSlugs] = useState<string[]>([]);
   const [imagemAberta, setImagemAberta] = useState<string | null>(null);
   const [anexando, setAnexando] = useState(false);
   const anexandoRef = useRef(false);
@@ -510,6 +513,36 @@ export default function KanbanConfecScreen() {
     }
     return partes;
   }, [busca, secaoFiltro, analista, desenvolvedor, etiquetaFiltro, periodo, de, ate, quadro?.etiquetas]);
+
+  const colunasPdfDisponiveis = useMemo(
+    () => colunas.filter((coluna) => !ehColunaCancelados(coluna)),
+    [colunas],
+  );
+
+  function abrirModalPdfQuadro() {
+    setErro(null);
+    setPdfColunasSlugs(colunasPdfDisponiveis.map((coluna) => coluna.slug));
+    setPdfQuadroAberto(true);
+  }
+
+  function gerarPdfQuadroSelecionado() {
+    const selecionadas = colunasPdfDisponiveis.filter((coluna) => pdfColunasSlugs.includes(coluna.slug));
+    if (!selecionadas.length) {
+      setErro('Selecione ao menos uma coluna para o PDF.');
+      return;
+    }
+    try {
+      setErro(null);
+      abrirPdfQuadroConfec({
+        colunas: selecionadas,
+        porColuna,
+        filtrosResumo: filtrosPdfResumo,
+      });
+      setPdfQuadroAberto(false);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Não foi possível gerar o PDF do quadro.');
+    }
+  }
 
   const detalhe = quadro?.cards.find((card) => card.id === detalheId) ?? null;
   const clienteRascunho = (clientesQ.data ?? []).find((cliente) => cliente.id === rascunho?.clienteId) ?? null;
@@ -820,18 +853,7 @@ export default function KanbanConfecScreen() {
           <Text style={[styles.titulo, { color: theme.headerText }]}>Kanban Confec</Text>
           <View style={styles.acoes}>
             <Pressable
-              onPress={() => {
-                try {
-                  setErro(null);
-                  abrirPdfQuadroConfec({
-                    colunas,
-                    porColuna,
-                    filtrosResumo: filtrosPdfResumo,
-                  });
-                } catch (e) {
-                  setErro(e instanceof Error ? e.message : 'Não foi possível gerar o PDF do quadro.');
-                }
-              }}
+              onPress={abrirModalPdfQuadro}
               style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
             >
               <Text style={[styles.btnTexto, { color: theme.headerText }]}>PDF do quadro</Text>
@@ -1511,6 +1533,55 @@ export default function KanbanConfecScreen() {
                   .catch((e) => setErro(e instanceof Error ? e.message : 'Erro na lista'));
               }}
             />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={pdfQuadroAberto} animationType="fade" transparent onRequestClose={() => setPdfQuadroAberto(false)}>
+        <View style={styles.overlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setPdfQuadroAberto(false)} />
+          <View style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border, width: '100%', maxWidth: 420 }]}>
+            <Text style={{ color: theme.headerText, fontWeight: '800', fontSize: 18 }}>PDF do quadro</Text>
+            <Text style={{ color: theme.textMuted, fontSize: 13 }}>
+              Desmarque as colunas que não devem entrar no PDF. Os tickets seguem os filtros atuais da tela.
+            </Text>
+            <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ gap: 6 }}>
+              {colunasPdfDisponiveis.map((coluna) => {
+                const qtd = porColuna.get(coluna.slug)?.length ?? 0;
+                const marcada = pdfColunasSlugs.includes(coluna.slug);
+                return (
+                  <FormCheckbox
+                    key={coluna.id}
+                    label={`${coluna.title} (${qtd})`}
+                    checked={marcada}
+                    onCheckedChange={(checked) => {
+                      setPdfColunasSlugs((atual) =>
+                        checked
+                          ? atual.includes(coluna.slug)
+                            ? atual
+                            : [...atual, coluna.slug]
+                          : atual.filter((slug) => slug !== coluna.slug),
+                      );
+                    }}
+                  />
+                );
+              })}
+            </ScrollView>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <Pressable
+                onPress={() => setPdfColunasSlugs(colunasPdfDisponiveis.map((coluna) => coluna.slug))}
+                style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
+              >
+                <Text style={[styles.btnTexto, { color: theme.headerText }]}>Marcar todas</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setPdfColunasSlugs([])}
+                style={({ pressed }) => [styles.btn, styles.btnSecundario, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.88 : 1 }]}
+              >
+                <Text style={[styles.btnTexto, { color: theme.headerText }]}>Desmarcar todas</Text>
+              </Pressable>
+            </View>
+            <PrimaryButton label="Gerar PDF" onPress={gerarPdfQuadroSelecionado} />
           </View>
         </View>
       </Modal>
