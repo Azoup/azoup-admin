@@ -1,45 +1,37 @@
--- Um registro de IA por cliente e dia, sem pendência, com no máximo 3 tópicos curtos.
+-- Garante no máximo 1 resumo de IA por cliente e dia.
+-- 1) Remove duplicados existentes (mantém o mais antigo).
+-- 2) Índice único para impedir nova corrida entre admins / geradores.
+
 with marcados as (
   select id,
     row_number() over (
-      partition by cliente_id, (created_at at time zone 'America/Sao_Paulo')::date
-      order by
-        case when length(coalesce(assuntos, '')) >= length(coalesce(pendencia, '')) then 0 else 1 end,
-        created_at
+      partition by
+        cliente_id,
+        coalesce(
+          data_registro,
+          (created_at at time zone 'America/Sao_Paulo')::date
+        )
+      order by created_at asc, id asc
     ) as n
   from public.admin_cliente_reunioes
   where gerado_ia is true
+    and coalesce(avulsa, false) = false
 )
 delete from public.admin_cliente_reunioes r
 using marcados m
 where r.id = m.id
   and m.n > 1;
 
-update public.admin_cliente_reunioes r
-set pendencia = '',
-    proxima_acao = null,
-    assuntos = coalesce((
-      select string_agg('• ' || enxuta, E'\n' order by ord)
-      from (
-        select ord, (
-          select string_agg(palavra, ' ' order by n)
-          from (
-            select palavra, n
-            from regexp_split_to_table(trim(both ' .' from frase), '\s+') with ordinality as t(palavra, n)
-            where n <= 12
-          ) palavras
-        ) as enxuta
-        from (
-          select ord, frase
-          from regexp_split_to_table(
-            regexp_replace(coalesce(r.assuntos, ''), E'[\\n•]+', '. ', 'g'),
-            '[.!?]+'
-          ) with ordinality as t(frase, ord)
-          where length(trim(frase)) > 8
-          order by ord
-          limit 3
-        ) frases
-      ) topicos
-      where coalesce(enxuta, '') <> ''
-    ), r.assuntos)
-where r.gerado_ia is true;
+update public.admin_cliente_reunioes
+set data_registro = (created_at at time zone 'America/Sao_Paulo')::date
+where gerado_ia is true
+  and data_registro is null;
+
+create unique index if not exists idx_admin_cliente_reunioes_ia_dia
+  on public.admin_cliente_reunioes (cliente_id, data_registro)
+  where gerado_ia is true
+    and coalesce(avulsa, false) = false
+    and data_registro is not null;
+
+comment on index public.idx_admin_cliente_reunioes_ia_dia is
+  'No máximo um registro gerado_ia por cliente e dia (não avulso).';

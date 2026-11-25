@@ -494,6 +494,36 @@ async function resumoDoEvento(
   return null;
 }
 
+/** Já existe resumo gerado pela IA para o cliente neste dia (calendário Brasil). */
+async function jaExisteResumoIa(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  clienteId: string,
+  dia: string,
+): Promise<boolean> {
+  const porData = await supabaseAdmin
+    .from('admin_cliente_reunioes')
+    .select('id')
+    .eq('cliente_id', clienteId)
+    .eq('gerado_ia', true)
+    .eq('data_registro', dia)
+    .limit(1);
+  if (!porData.error) return (porData.data?.length ?? 0) > 0;
+  if (!/data_registro|gerado_ia/i.test(porData.error.message)) throw new Error(porData.error.message);
+
+  const inicio = `${dia}T00:00:00-03:00`;
+  const fim = `${dia}T23:59:59.999-03:00`;
+  const porCreated = await supabaseAdmin
+    .from('admin_cliente_reunioes')
+    .select('id')
+    .eq('cliente_id', clienteId)
+    .eq('gerado_ia', true)
+    .gte('created_at', inicio)
+    .lte('created_at', fim)
+    .limit(1);
+  if (porCreated.error && !/gerado_ia/i.test(porCreated.error.message)) throw new Error(porCreated.error.message);
+  return (porCreated.data?.length ?? 0) > 0;
+}
+
 async function gravarResumoIa(
   supabaseAdmin: ReturnType<typeof createClient>,
   params: {
@@ -503,19 +533,12 @@ async function gravarResumoIa(
     adminEmail: string | null;
     resumo: { assuntos: string; proxima_acao: string; pendencias: string[] };
   },
-): Promise<void> {
+): Promise<{ gravou: boolean; jaExistia: boolean }> {
+  if (await jaExisteResumoIa(supabaseAdmin, params.clienteId, params.dia)) {
+    return { gravou: false, jaExistia: true };
+  }
   const assuntos = encurtarAssuntos(params.resumo.assuntos);
   if (!assuntos) throw new Error('O resumo da IA não trouxe os assuntos tratados.');
-  const inicio = `${params.dia}T00:00:00-03:00`;
-  const fim = `${params.dia}T23:59:59-03:00`;
-  const anteriores = await supabaseAdmin
-    .from('admin_cliente_reunioes')
-    .delete()
-    .eq('cliente_id', params.clienteId)
-    .eq('gerado_ia', true)
-    .gte('created_at', inicio)
-    .lte('created_at', fim);
-  if (anteriores.error && !/gerado_ia/i.test(anteriores.error.message)) throw new Error(anteriores.error.message);
   const payload = {
     cliente_id: params.clienteId,
     empresa_nome: params.empresaNome,
@@ -536,7 +559,12 @@ async function gravarResumoIa(
     const { data_registro: _omit, ...semDataRegistro } = payload;
     ({ error } = await supabaseAdmin.from('admin_cliente_reunioes').insert(semDataRegistro));
   }
+  // Corrida entre admins / índice único: o primeiro ganhou, o segundo só ignora.
+  if (error && /duplicate|unique|idx_admin_cliente_reunioes_ia_dia/i.test(error.message)) {
+    return { gravou: false, jaExistia: true };
+  }
   if (error) throw new Error(error.message);
+  return { gravou: true, jaExistia: false };
 }
 
 /** Mesmo corte das reuniões sem registro no painel: outubro/2026 em diante. */
@@ -679,6 +707,11 @@ async function gerarResumosPendentes(
   for (const grupo of grupos) {
     if (gerados.length >= 3 || cursor >= 8) break;
     cursor += 1;
+    // Revalida na hora: outro admin pode ter gravado o resumo enquanto este lote rodava.
+    if (await jaExisteResumoIa(supabaseAdmin, grupo.clienteId, grupo.dia)) {
+      cobertas.add(grupo.chave);
+      continue;
+    }
     let resumo: Awaited<ReturnType<typeof resumoDoEvento>> = null;
     try {
       resumo = await resumoDoEvento(accessToken, grupo.calendarId, grupo.eventId, grupo.inicio);
@@ -691,13 +724,15 @@ async function gerarResumosPendentes(
       ignorados.push(grupo.chave);
       continue;
     }
-    await gravarResumoIa(supabaseAdmin, {
+    const gravacao = await gravarResumoIa(supabaseAdmin, {
       clienteId: grupo.clienteId,
       empresaNome: empresas.get(grupo.clienteId) ?? nomes.get(grupo.clienteId) ?? null,
       dia: grupo.dia,
       adminEmail,
       resumo,
     });
+    cobertas.add(grupo.chave);
+    if (!gravacao.gravou) continue;
     gerados.push({ cliente: nomes.get(grupo.clienteId) ?? 'Cliente', titulo: grupo.titulo });
   }
 
@@ -1427,6 +1462,10 @@ serve(async (req) => {
       }
       const dia = diaBrasil(`${row.inicio ?? ''}`);
       if (!dia) throw new Error('Reunião sem data.');
+      const titulo = `${row.titulo ?? ''}`.trim() || 'Reunião';
+      if (await jaExisteResumoIa(supabaseAdmin, clienteId, dia)) {
+        return json({ ok: true, jaExistia: true, titulo });
+      }
       const resumo = await resumoDoEvento(
         accessToken,
         `${row.calendar_id ?? ''}`.trim() || calendarId,
@@ -1440,14 +1479,14 @@ serve(async (req) => {
         );
       }
       const adminEmail = `${p.adminEmail ?? admin.email ?? ''}`.trim() || null;
-      await gravarResumoIa(supabaseAdmin, {
+      const gravacao = await gravarResumoIa(supabaseAdmin, {
         clienteId,
         empresaNome: `${p.empresaNome ?? ''}`.trim() || null,
         dia,
         adminEmail,
         resumo,
       });
-      return json({ ok: true, titulo: `${row.titulo ?? ''}`.trim() || 'Reunião' });
+      return json({ ok: true, jaExistia: gravacao.jaExistia, titulo });
     }
 
     return json({ error: `Operação desconhecida: ${op}` }, 400);

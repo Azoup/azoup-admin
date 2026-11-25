@@ -10,7 +10,9 @@ export function GeradorResumosAutomatico() {
   const email = adminProfile?.email ?? session?.user?.email ?? null;
 
   useQuery({
-    queryKey: ['resumos_ia_automaticos', email],
+    // Chave única no app: evita N loops paralelos se o layout remonta com e-mails diferentes.
+    queryKey: ['resumos_ia_automaticos'],
+    enabled: Boolean(email),
     queryFn: async () => {
       const resultado = await gerarTodosResumosReunioes(email);
       if (resultado.gerados) {

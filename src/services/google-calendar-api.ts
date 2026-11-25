@@ -114,7 +114,7 @@ export async function gerarResumoDoEvento(params: {
   adminEmail?: string | null;
   empresaNome?: string | null;
 }) {
-  return invoke<{ ok: boolean; titulo: string }>('gerar_resumo_evento', {
+  return invoke<{ ok: boolean; titulo: string; jaExistia?: boolean }>('gerar_resumo_evento', {
     clienteId: params.clienteId,
     googleEventId: params.googleEventId,
     adminEmail: params.adminEmail ?? null,

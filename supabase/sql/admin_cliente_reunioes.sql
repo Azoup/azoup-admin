@@ -61,6 +61,13 @@ create unique index if not exists idx_admin_cliente_reunioes_confec_card
   on public.admin_cliente_reunioes (confec_card_id)
   where confec_card_id is not null;
 
+-- No máximo um resumo gerado_ia por cliente e dia (não avulso).
+create unique index if not exists idx_admin_cliente_reunioes_ia_dia
+  on public.admin_cliente_reunioes (cliente_id, data_registro)
+  where gerado_ia is true
+    and coalesce(avulsa, false) = false
+    and data_registro is not null;
+
 create index if not exists idx_admin_cliente_reunioes_cliente
   on public.admin_cliente_reunioes (cliente_id, data_retorno);
 

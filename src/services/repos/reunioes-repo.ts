@@ -271,6 +271,23 @@ export async function criarPendenciasReuniao(params: {
   // Meio-dia em SP: a data informada permanece o dia do registro (retroativo ou hoje).
   const createdAt = /^\d{4}-\d{2}-\d{2}$/.test(dataRegistro) ? instanteNaDataBrasil(dataRegistro, '12:00:00') : null;
   const diaRegistro = /^\d{4}-\d{2}-\d{2}$/.test(dataRegistro) ? dataRegistro : dataHojeBrasil();
+
+  if (params.geradoIa) {
+    const jaIa = await supabase
+      .from('admin_cliente_reunioes')
+      .select('id')
+      .eq('cliente_id', params.clienteId)
+      .eq('gerado_ia', true)
+      .eq('data_registro', diaRegistro)
+      .limit(1);
+    if (!jaIa.error && (jaIa.data?.length ?? 0) > 0) {
+      throw new Error('Já existe um resumo da IA para este cliente neste dia.');
+    }
+    if (jaIa.error && !/data_registro|gerado_ia/i.test(jaIa.error.message)) {
+      throw new Error(jaIa.error.message);
+    }
+  }
+
   const linhas = itens.length
     ? itens
     : [{ texto: '', dataRetorno: diaRegistro }];
